@@ -182,7 +182,9 @@ Deno.serve(async (request) => {
     if (action === 'auth.ping') return response({ ok: true, data: { alive: true, serverTime: new Date().toISOString() } })
 
     const needed: Record<string, string> = {
-      'subjects.list': 'MASTER_VIEW', 'students.list': 'STUDENT_VIEW', 'students.get': 'STUDENT_VIEW',
+      'settings.get': 'SETTINGS_VIEW', 'subjects.list': 'MASTER_VIEW', 'batches.list': 'MASTER_VIEW',
+      'rooms.list': 'MASTER_VIEW', 'teachers.list': 'TEACHER_VIEW', 'users.list': 'USER_MANAGE',
+      'students.list': 'STUDENT_VIEW', 'students.get': 'STUDENT_VIEW',
     }
     const permission = needed[action]
     const granted = permissionsFor(user)
@@ -193,6 +195,46 @@ Deno.serve(async (request) => {
       const { data, error } = await admin.from('subjects').select('*').order('name')
       if (error) throw error
       return response({ ok: true, data: (data || []).map((r) => ({ SubjectID: r.id, SubjectName: r.name, Status: r.status })) })
+    }
+
+    if (action === 'settings.get') {
+      const { data, error } = await admin.from('settings').select('*').order('setting_key')
+      if (error) throw error
+      return response({ ok: true, data: (data || []).map((r) => ({ key: r.setting_key, value: r.value,
+        description: r.description, updatedAt: r.updated_at, updatedBy: r.updated_by })) })
+    }
+
+    if (action === 'batches.list') {
+      const { data, error } = await admin.from('batches').select('*').order('name')
+      if (error) throw error
+      return response({ ok: true, data: (data || []).map((r) => ({ BatchID: r.id, BatchName: r.name,
+        Class: r.class, Section: r.section, AcademicYear: r.academic_year, Status: r.status })) })
+    }
+
+    if (action === 'rooms.list') {
+      const { data, error } = await admin.from('rooms').select('*').order('name')
+      if (error) throw error
+      return response({ ok: true, data: (data || []).map((r) => ({ RoomID: r.id, RoomName: r.name,
+        Capacity: r.capacity, Status: r.status })) })
+    }
+
+    if (action === 'teachers.list') {
+      const { data, error } = await admin.from('teachers').select('*').order('name')
+      if (error) throw error
+      return response({ ok: true, data: (data || []).map((r) => ({ TeacherID: r.id, Name: r.name,
+        Photo: r.photo_url, Mobile: r.mobile, Email: r.email, Address: r.address, Qualification: r.qualification,
+        JoiningDate: r.joining_date, Status: r.status, Username: r.username, IncomeMethod: r.income_method,
+        DefaultRatePerStudent: r.default_rate_per_student, IncomeVisibleToTeacher: r.income_visible_to_teacher,
+        CreatedAt: r.created_at, UpdatedAt: r.updated_at })) })
+    }
+
+    if (action === 'users.list') {
+      const { data, error } = await admin.from('app_users').select('id,username,user_type,role,linked_id,status,must_change_password,extra_permissions,last_login,last_logout,created_at').order('username')
+      if (error) throw error
+      return response({ ok: true, data: (data || []).map((r) => ({ UserID: r.id, Username: r.username,
+        UserType: r.user_type, Role: r.role, LinkedID: r.linked_id, Status: r.status,
+        MustChangePassword: r.must_change_password, ExtraPermissions: r.extra_permissions,
+        LastLogin: r.last_login, LastLogout: r.last_logout, CreatedDate: r.created_at })) })
     }
 
     if (action === 'students.list') {
