@@ -279,11 +279,21 @@ function cmzHero(el, logoUrl) {
   cmzLogoImg(el.querySelector('.cmz-logo'), logoUrl);
 }
 
+function cmzSetLogo(img, url) {
+  if (!img) return;
+  var fallback = './icons/creative-math-zone-logo.png';
+  img.onerror = function () {
+    if (img.dataset.cmzFallback) { img.style.display = 'none'; return; }
+    img.dataset.cmzFallback = '1';
+    img.src = fallback;
+  };
+  img.onload = function () { img.style.display = ''; };
+  img.src = url || fallback;
+}
 function cmzLogoImg(box, url) {
   var img = box.querySelector('img');
-  if (!url) { box.classList.add('noimg'); return; }
-  img.onerror = function () { box.classList.add('noimg'); };
-  img.src = url;
+  cmzSetLogo(img, url);
+  if (img) img.onload = function () { box.classList.remove('noimg'); img.style.display = ''; };
 }
 
 /* Short welcome screen after a fresh sign-in. Tap to skip. */
@@ -719,9 +729,12 @@ VIEWS.profile = async main => {
     const c = await api('public.config'); S.cfg = c; if (window.cmzHero) cmzHero($('#hero-slot'), c.logoUrl);
     ['#lg-centre','#nav-centre','#tb-centre'].forEach(s => $(s).textContent = c.centreName);
     if (c.logoUrl) {
-  const lgLogo = $('#lg-logo'); if (lgLogo) lgLogo.src = c.logoUrl;
-  const navLogo = $('#nav-logo'); if (navLogo) navLogo.src = c.logoUrl;
+  const lgLogo = $('#lg-logo'); if (lgLogo) cmzSetLogo(lgLogo, c.logoUrl);
+  const navLogo = $('#nav-logo'); if (navLogo) cmzSetLogo(navLogo, c.logoUrl);
   const badge = $('#nav-logo-badge'); if (badge) badge.style.display = 'flex';
+  } else {
+    cmzSetLogo($('#lg-logo'), ''); cmzSetLogo($('#nav-logo'), '');
+    const badge = $('#nav-logo-badge'); if (badge) badge.style.display = 'flex';
 }
     if (c.tagline) $('#lg-tagline').textContent = c.tagline;
     document.title = c.centreName + ' · Teacher';

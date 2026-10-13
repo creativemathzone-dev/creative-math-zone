@@ -307,11 +307,21 @@ function cmzHero(el, logoUrl) {
   cmzLogoImg(el.querySelector('.cmz-logo'), logoUrl);
 }
 
+function cmzSetLogo(img, url) {
+  if (!img) return;
+  var fallback = './icons/creative-math-zone-logo.png';
+  img.onerror = function () {
+    if (img.dataset.cmzFallback) { img.style.display = 'none'; return; }
+    img.dataset.cmzFallback = '1';
+    img.src = fallback;
+  };
+  img.onload = function () { img.style.display = ''; };
+  img.src = url || fallback;
+}
 function cmzLogoImg(box, url) {
   var img = box.querySelector('img');
-  if (!url) { box.classList.add('noimg'); return; }
-  img.onerror = function () { box.classList.add('noimg'); };
-  img.src = url;
+  cmzSetLogo(img, url);
+  if (img) img.onload = function () { box.classList.remove('noimg'); img.style.display = ''; };
 }
 
 /* Short welcome screen after a fresh sign-in. Tap to skip. */
@@ -1664,7 +1674,7 @@ VIEWS.receipt = async (main, receiptId) => {
     '<div id="receipt-paper" class="card" style="max-width:800px;margin:0 auto;position:relative">' +
       (isVoid ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-25deg);font:900 6rem/1 var(--display);color:rgba(179,48,42,.15);pointer-events:none;user-select:none">VOID</div>' : '') +
       '<div style="text-align:center;border-bottom:2px solid var(--navy);padding-bottom:.75rem;margin-bottom:1rem">' +
-        (S.cfg.logoUrl ? '<img src="' + esc(S.cfg.logoUrl) + '" alt="" style="height:64px;width:auto;object-fit:contain;margin-bottom:.4rem">' : '') +
+        '<img src="' + esc(S.cfg.logoUrl || './icons/creative-math-zone-logo.png') + '" onerror="this.onerror=null;this.src=\'./icons/creative-math-zone-logo.png\'" alt="" style="height:64px;width:auto;object-fit:contain;margin-bottom:.4rem">' +
         '<div style="font:700 1.6rem/1.1 var(--display);color:var(--navy);letter-spacing:-.02em">' + esc(c.name) + '</div>' +
         (c.tagline ? '<div class="muted" style="font-style:italic;margin-top:.15rem">' + esc(c.tagline) + '</div>' : '') +
         (c.address ? '<div class="muted" style="font-size:.85rem;margin-top:.35rem">' + esc(c.address) + '</div>' : '') +
@@ -2295,8 +2305,11 @@ $('#live-btn').addEventListener('click', () => busy($('#live-btn'), () => liveRe
   try { const c = await api('public.config'); S.cfg = c; if (window.cmzHero) cmzHero($('#hero-slot'), c.logoUrl);
     ['#lg-centre', '#nav-centre', '#tb-centre'].forEach(s => { $(s).textContent = c.centreName; });
     if (c.logoUrl) {
-      const lgLogo = $('#lg-logo'); if (lgLogo) { lgLogo.src = c.logoUrl; }
-      const navLogo = $('#nav-logo'); if (navLogo) navLogo.src = c.logoUrl;
+      const lgLogo = $('#lg-logo'); if (lgLogo) cmzSetLogo(lgLogo, c.logoUrl);
+      const navLogo = $('#nav-logo'); if (navLogo) cmzSetLogo(navLogo, c.logoUrl);
+      const badge = $('#nav-logo-badge'); if (badge) badge.style.display = 'flex';
+    } else {
+      cmzSetLogo($('#lg-logo'), ''); cmzSetLogo($('#nav-logo'), '');
       const badge = $('#nav-logo-badge'); if (badge) badge.style.display = 'flex';
     }
     if (c.tagline) $('#lg-tagline').textContent = c.tagline;
