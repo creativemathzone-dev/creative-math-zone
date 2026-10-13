@@ -565,6 +565,13 @@ Deno.serve(async (request) => {
       'payments.record': 'FINANCE_EDIT', 'receipts.list': 'FINANCE_VIEW',
       'receipts.get': 'FINANCE_VIEW', 'receipts.void': 'FINANCE_EDIT',
       'student.invoices': 'SELF_VIEW', 'student.receipt': 'SELF_VIEW', 'student.invoiceDoc': 'SELF_VIEW',
+      'teacher.dashboard': 'SELF_VIEW', 'teacher.timetable': 'SELF_VIEW', 'teacher.students': 'SELF_VIEW',
+      'teacher.startClass': 'CLASS_RUN', 'teacher.regenerateCode': 'CLASS_RUN', 'teacher.classStatus': 'CLASS_RUN',
+      'teacher.manualAttendance': 'ATTENDANCE_MARK', 'teacher.markAll': 'ATTENDANCE_MARK',
+      'teacher.closeClass': 'CLASS_RUN', 'teacher.sessions': 'SELF_VIEW', 'teacher.notices': 'NOTICE_VIEW',
+      'student.dashboard': 'SELF_VIEW', 'student.subjects': 'SELF_VIEW', 'student.timetable': 'SELF_VIEW',
+      'student.attendance': 'SELF_VIEW', 'student.updateProfile': 'SELF_VIEW', 'student.enterCode': 'ATTENDANCE_SELF',
+      'attendance.sessions': 'STUDENT_VIEW', 'attendance.detail': 'STUDENT_VIEW', 'attendance.correct': 'ATTENDANCE_CORRECT',
     }
     const permission = needed[action]
     const granted = permissionsFor(user)
@@ -1830,6 +1837,316 @@ Deno.serve(async (request) => {
         reason: requireText(payload.reason, 'Reason', 200), academic_year: row.academic_year || '' })
       await logAction(admin, user, 'END_STUDENT_SUBJECT', 'STUDENT_SUBJECT', id, { endDate })
       return response({ ok: true, data: { ended: true } })
+    }
+
+    if (action === 'student.subjects' || action === 'student.timetable' || action === 'student.attendance' || action === 'student.dashboard') {
+      if (!user.linked_id) throw new ApiFault('NOT_FOUND', 'Student account is not linked to a student record.')
+      const { data: student, error: studentError } = await admin.from('students').select('*').eq('id', user.linked_id).maybeSingle()
+      if (studentError) throw studentError
+      if (!student) throw new ApiFault('NOT_FOUND', 'Student record not found.')
+      const { data: subjects, error: subjectsError } = await admin.from('student_subjects').select('*').eq('student_id', student.id).order('start_date', { ascending: false })
+      if (subjectsError) throw subjectsError
+      const subjectRows = subjects || []
+      if (action === 'student.subjects') {
+        if (!subjectRows.length) return response({ ok: true, data: [] })
+        const [{ data: sub }, { data: teachers }, { data: batches }] = await Promise.all([
+          admin.from('subjects').select('id,name').in('id', subjectRows.map((r) => r.subject_id)),
+          admin.from('teachers').select('id,name').in('id', subjectRows.map((r) => r.teacher_id).filter(Boolean)),
+          admin.from('batches').select('id,name').in('id', subjectRows.map((r) => r.batch_id).filter(Boolean)),
+        ])
+        const sm = new Map((sub || []).map((x) => [x.id, x.name])), tm = new Map((teachers || []).map((x) => [x.id, x.name])), bm = new Map((batches || []).map((x) => [x.id, x.name]))
+        return response({ ok: true, data: subjectRows.map((r) => ({ StudentSubjectID: r.id, SubjectID: r.subject_id, SubjectName: sm.get(r.subject_id) || r.subject_id,
+          TeacherID: r.teacher_id, TeacherName: tm.get(r.teacher_id) || r.teacher_id, BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id,
+          StartDate: r.start_date, EndDate: r.end_date, Status: r.status })) })
+      }
+      const { data: timetable, error: ttError } = await admin.from('timetable').select('*').eq('batch_id', student.current_batch_id).ilike('status', 'active').order('day').order('start_time')
+      if (ttError) throw ttError
+      if (action === 'student.timetable') {
+        if (!(timetable || []).length) return response({ ok: true, data: [] })
+        const [sub, teachers, rooms] = await Promise.all([
+          admin.from('subjects').select('id,name').in('id', (timetable || []).map((r) => r.subject_id)),
+          admin.from('teachers').select('id,name').in('id', (timetable || []).map((r) => r.teacher_id)),
+          admin.from('rooms').select('id,name').in('id', (timetable || []).map((r) => r.room_id).filter(Boolean)),
+        ])
+        const sm = new Map((sub.data || []).map((x) => [x.id, x.name])), tm = new Map((teachers.data || []).map((x) => [x.id, x.name])), rm = new Map((rooms.data || []).map((x) => [x.id, x.name]))
+        return response({ ok: true, data: (timetable || []).map((r) => ({ TimetableID: r.id, Day: r.day, StartTime: r.start_time, EndTime: r.end_time,
+          SubjectName: sm.get(r.subject_id) || r.subject_id, TeacherName: tm.get(r.teacher_id) || r.teacher_id, RoomName: rm.get(r.room_id) || r.room_id })) })
+      }
+      const days = action === 'student.dashboard' ? 30 : Math.min(Math.max(Number(payload.days) || 60, 1), 400)
+      const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
+      const { data: marks, error: markError } = await admin.from('attendance').select('*').eq('student_id', student.id).gte('session_date', from).order('session_date', { ascending: false }).limit(1000)
+      if (markError) throw markError
+      const rows = marks || []
+      const present = rows.filter((r) => r.status === 'PRESENT').length, late = rows.filter((r) => r.status === 'LATE').length, absent = rows.filter((r) => r.status === 'ABSENT').length
+      if (action === 'student.attendance') {
+        const subIds = [...new Set(rows.map((r) => r.subject_id))], batchIds = [...new Set(rows.map((r) => r.batch_id))]
+        const [sub, batches] = await Promise.all([admin.from('subjects').select('id,name').in('id', subIds), admin.from('batches').select('id,name').in('id', batchIds)])
+        const sm = new Map((sub.data || []).map((x) => [x.id, x.name])), bm = new Map((batches.data || []).map((x) => [x.id, x.name]))
+        return response({ ok: true, data: { from, rows: rows.map((r) => ({ AttendanceID: r.id, Date: r.session_date, SubjectName: sm.get(r.subject_id) || r.subject_id,
+          BatchName: bm.get(r.batch_id) || r.batch_id, Status: r.status, Method: r.method, MarkedAt: r.marked_at })),
+          summary: { present, late, absent, total: rows.length, pct: rows.length ? Math.round((present + late * 0.5) / rows.length * 100) : 0 } } })
+      }
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()).toUpperCase()
+      const dayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(new Date()).toUpperCase()
+      const [{ data: sub }, { data: teachers }, { data: rooms }, { data: sessions }, { data: notices }] = await Promise.all([
+        admin.from('subjects').select('id,name').in('id', (timetable || []).map((r) => r.subject_id)),
+        admin.from('teachers').select('id,name').in('id', (timetable || []).map((r) => r.teacher_id)),
+        admin.from('rooms').select('id,name').in('id', (timetable || []).map((r) => r.room_id).filter(Boolean)),
+        admin.from('class_sessions').select('id,timetable_id,status').eq('session_date', today),
+        admin.from('notices').select('*').ilike('status', 'active').order('posted_at', { ascending: false }).limit(100),
+      ])
+      const sm = new Map((sub || []).map((x) => [x.id, x.name])), tm = new Map((teachers || []).map((x) => [x.id, x.name])), rm = new Map((rooms || []).map((x) => [x.id, x.name]))
+      const activeSubjects = subjectRows.filter((r) => r.status.toUpperCase() === 'ACTIVE').length
+      const todayClasses = (timetable || []).filter((r) => r.day.toUpperCase() === dayName).map((r) => {
+        const ses = (sessions || []).find((s) => s.timetable_id === r.id && s.status === 'OPEN')
+        return { TimetableID: r.id, StartTime: r.start_time, EndTime: r.end_time, SubjectName: sm.get(r.subject_id) || r.subject_id,
+          TeacherName: tm.get(r.teacher_id) || r.teacher_id, RoomName: rm.get(r.room_id) || r.room_id, ActiveSessionID: ses?.id || null }
+      })
+      const recentNotices = (notices || []).filter((n) => !n.expires_at || n.expires_at >= today).filter((n) =>
+        ['ALL', 'STUDENTS'].includes(String(n.audience).toUpperCase()) || (String(n.audience).toUpperCase() === 'BATCH' && n.batch_id === student.current_batch_id))
+        .slice(0, 3).map((n) => ({ NoticeID: n.id, Title: n.title, Body: n.body, Audience: n.audience, PostedAt: n.posted_at, ExpiresAt: n.expires_at }))
+      return response({ ok: true, data: { student: legacyStudent(student), stats: { activeSubjects, attendancePct: rows.length ? Math.round((present + late * 0.5) / rows.length * 100) : 0,
+        present, late, absent, totalSessions: rows.length }, todayClasses, recentNotices } })
+    }
+
+    if (action === 'teacher.dashboard' || action === 'teacher.timetable' || action === 'teacher.students' || action === 'teacher.sessions') {
+      if (!user.linked_id) throw new ApiFault('NOT_FOUND', 'Teacher account is not linked to a teacher record.')
+      const { data: teacher, error: tError } = await admin.from('teachers').select('*').eq('id', user.linked_id).maybeSingle()
+      if (tError) throw tError
+      if (!teacher) throw new ApiFault('NOT_FOUND', 'Teacher record not found.')
+      const { data: timetable, error: ttError } = await admin.from('timetable').select('*').eq('teacher_id', teacher.id).ilike('status', 'active').order('day').order('start_time')
+      if (ttError) throw ttError
+      const tt = timetable || []
+      if (action === 'teacher.timetable') {
+        const [sub, batches, rooms] = await Promise.all([admin.from('subjects').select('id,name').in('id', tt.map((r) => r.subject_id)),
+          admin.from('batches').select('id,name').in('id', tt.map((r) => r.batch_id)), admin.from('rooms').select('id,name').in('id', tt.map((r) => r.room_id).filter(Boolean))])
+        const sm = new Map((sub.data || []).map((x) => [x.id, x.name])), bm = new Map((batches.data || []).map((x) => [x.id, x.name])), rm = new Map((rooms.data || []).map((x) => [x.id, x.name]))
+        return response({ ok: true, data: tt.map((r) => ({ TimetableID: r.id, Day: r.day, StartTime: r.start_time, EndTime: r.end_time,
+          BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id, SubjectID: r.subject_id, SubjectName: sm.get(r.subject_id) || r.subject_id,
+          RoomID: r.room_id, RoomName: rm.get(r.room_id) || r.room_id })) })
+      }
+      if (action === 'teacher.students') {
+        const { data: assignments, error } = await admin.from('student_subjects').select('*').eq('teacher_id', teacher.id).ilike('status', 'active')
+        if (error) throw error
+        const [students, subjects, batches] = await Promise.all([admin.from('students').select('id,name,roll_no,status').in('id', [...new Set((assignments || []).map((r) => r.student_id))]),
+          admin.from('subjects').select('id,name'), admin.from('batches').select('id,name')])
+        const sm = new Map((subjects.data || []).map((x) => [x.id, x.name])), bm = new Map((batches.data || []).map((x) => [x.id, x.name])), stu = new Map((students.data || []).map((x) => [x.id, x]))
+        const groups = new Map<string, Record<string, unknown>>()
+        for (const r of assignments || []) {
+          const key = `${r.subject_id}|${r.batch_id}`
+          if (!groups.has(key)) groups.set(key, { subjectId: r.subject_id, subjectName: sm.get(r.subject_id) || r.subject_id, batchId: r.batch_id, batchName: bm.get(r.batch_id) || r.batch_id, students: [] })
+          const s = stu.get(r.student_id)
+          if (s && s.status.toUpperCase() === 'ACTIVE') (groups.get(key)!.students as unknown[]).push({ StudentID: s.id, Name: s.name, RollNo: s.roll_no || '' })
+        }
+        return response({ ok: true, data: [...groups.values()] })
+      }
+      if (action === 'teacher.sessions') {
+        const limit = Math.min(Math.max(Number(payload.limit) || 30, 1), 200)
+        const { data: sessions, error } = await admin.from('class_sessions').select('*').eq('teacher_id', teacher.id).order('started_at', { ascending: false }).limit(limit)
+        if (error) throw error
+        const ids = (sessions || []).map((s) => s.id)
+        const { data: marks, error: mError } = ids.length ? await admin.from('attendance').select('session_id,status').in('session_id', ids) : { data: [], error: null }
+        if (mError) throw mError
+        const [subjects, batches] = await Promise.all([admin.from('subjects').select('id,name'), admin.from('batches').select('id,name')])
+        const sm = new Map((subjects.data || []).map((x) => [x.id, x.name])), bm = new Map((batches.data || []).map((x) => [x.id, x.name]))
+        return response({ ok: true, data: (sessions || []).map((s) => { const m = (marks || []).filter((x) => x.session_id === s.id); return { SessionID: s.id,
+          Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time, BatchName: bm.get(s.batch_id) || s.batch_id, SubjectName: sm.get(s.subject_id) || s.subject_id,
+          Status: s.status, Present: m.filter((x) => x.status === 'PRESENT').length, Late: m.filter((x) => x.status === 'LATE').length,
+          Absent: m.filter((x) => x.status === 'ABSENT').length, Total: m.length } }) })
+      }
+      const [{ data: assignments }, { data: subjects }, { data: batches }, { data: rooms }, { data: sessions }] = await Promise.all([
+        admin.from('student_subjects').select('student_id,subject_id,batch_id,status').eq('teacher_id', teacher.id).ilike('status', 'active'),
+        admin.from('subjects').select('id,name'), admin.from('batches').select('id,name'), admin.from('rooms').select('id,name'),
+        admin.from('class_sessions').select('id,timetable_id,status').eq('session_date', new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())),
+      ])
+      const activeAssignments = assignments || []
+      const sm = new Map((subjects || []).map((x) => [x.id, x.name]))
+      const bm = new Map((batches || []).map((x) => [x.id, x.name]))
+      const rm = new Map((rooms || []).map((x) => [x.id, x.name]))
+      const dayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(new Date()).toUpperCase()
+      const todays = tt.filter((r) => r.day.toUpperCase() === dayName)
+      const sessionRows = (sessions || [])
+      return response({ ok: true, data: { teacher: { TeacherID: teacher.id, Name: teacher.name, Mobile: teacher.mobile, Email: teacher.email },
+        stats: { students: new Set(activeAssignments.map((r) => r.student_id)).size, subjects: new Set(activeAssignments.map((r) => r.subject_id)).size, todayClasses: todays.length },
+        todayClasses: todays.map((r) => { const ses = sessionRows.find((x) => x.timetable_id === r.id && x.status === 'OPEN'); return { TimetableID: r.id,
+          StartTime: r.start_time, EndTime: r.end_time, BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id,
+          SubjectID: r.subject_id, SubjectName: sm.get(r.subject_id) || r.subject_id, RoomID: r.room_id, RoomName: rm.get(r.room_id) || r.room_id, ActiveSessionID: ses?.id || null } }) } })
+    }
+
+    if (action === 'teacher.startClass' || action === 'teacher.regenerateCode' || action === 'student.enterCode') {
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())
+      const now = new Date()
+      if (action === 'teacher.startClass') {
+        const id = requireText(payload.timetableId, 'Timetable ID', 60, true)
+        const { data: slot, error } = await admin.from('timetable').select('*').eq('id', id).maybeSingle()
+        if (error) throw error
+        if (!slot) throw new ApiFault('NOT_FOUND', 'Timetable entry not found.')
+        if (slot.teacher_id !== user.linked_id) throw new ApiFault('FORBIDDEN', 'This is not your class.')
+        const { data: existing, error: findError } = await admin.from('class_sessions').select('*').eq('timetable_id', id).eq('session_date', today).eq('status', 'OPEN').maybeSingle()
+        if (findError && findError.code !== 'PGRST116') throw findError
+        if (existing) return response({ ok: true, data: { sessionId: existing.id, code: existing.attendance_code, reused: true } })
+        let code = String(Math.floor(1000 + Math.random() * 9000))
+        const { data: active } = await admin.from('class_sessions').select('attendance_code').eq('status', 'OPEN')
+        for (let tries = 0; tries < 20 && (active || []).some((s) => s.attendance_code === code); tries++) code = String(Math.floor(1000 + Math.random() * 9000))
+        const { data: settings } = await admin.from('settings').select('setting_key,value').eq('setting_key', 'ATTENDANCE_CODE_MINUTES').maybeSingle()
+        const minutes = Math.min(Math.max(Number(settings?.value) || 5, 1), 30)
+        const expires = new Date(now.getTime() + minutes * 60000).toISOString()
+        const sessionId = await newId(admin, 'class_sessions', `SESSION-${today.replaceAll('-', '')}-`, 3)
+        const { error: insertError } = await admin.from('class_sessions').insert({ id: sessionId, timetable_id: slot.id, session_date: today,
+          start_time: slot.start_time, end_time: slot.end_time, teacher_id: slot.teacher_id, batch_id: slot.batch_id, subject_id: slot.subject_id,
+          room_id: slot.room_id, attendance_code: code, code_created_at: now.toISOString(), code_expires_at: expires, status: 'OPEN',
+          started_at: now.toISOString(), academic_year: slot.academic_year })
+        if (insertError) {
+          if (insertError.code === '23505') return response(fail('CLASS_ALREADY_OPEN', 'A class session is already open for this timetable slot. Refresh the page.'))
+          throw insertError
+        }
+        await logAction(admin, user, 'START_CLASS', 'CLASS_SESSION', sessionId, { batch: slot.batch_id, subject: slot.subject_id })
+        return response({ ok: true, data: { sessionId, code, reused: false } })
+      }
+      if (action === 'teacher.regenerateCode') {
+        const sid = requireText(payload.sessionId, 'Session ID', 60, true)
+        const { data: s, error } = await admin.from('class_sessions').select('*').eq('id', sid).maybeSingle()
+        if (error) throw error
+        if (!s) throw new ApiFault('NOT_FOUND', 'Session not found.')
+        if (s.teacher_id !== user.linked_id) throw new ApiFault('FORBIDDEN', 'Not your class.')
+        if (s.status !== 'OPEN') throw new ApiFault('BAD_REQUEST', 'This class is closed.')
+        const code = String(Math.floor(1000 + Math.random() * 9000))
+        const { data: settings } = await admin.from('settings').select('value').eq('setting_key', 'ATTENDANCE_CODE_MINUTES').maybeSingle()
+        const expires = new Date(now.getTime() + Math.min(Math.max(Number(settings?.value) || 5, 1), 30) * 60000).toISOString()
+        const { error: updateError } = await admin.from('class_sessions').update({ attendance_code: code, code_created_at: now.toISOString(), code_expires_at: expires }).eq('id', sid).eq('status', 'OPEN')
+        if (updateError) throw updateError
+        return response({ ok: true, data: { code, expiresAt: expires } })
+      }
+      const code = requireText(payload.code, 'Attendance code', 4, true)
+      if (!/^\d{4}$/.test(code)) throw new ApiFault('BAD_CODE', 'Enter the 4-digit code shown by your teacher.')
+      if (!user.linked_id) throw new ApiFault('NOT_FOUND', 'Student account is not linked to a student record.')
+      const { data: matches, error: matchError } = await admin.from('class_sessions').select('*').eq('attendance_code', code).eq('status', 'OPEN').gte('code_expires_at', now.toISOString())
+      if (matchError) throw matchError
+      let chosen: any = null
+      for (const s of matches || []) {
+        const { data: roster, error: rosterError } = await admin.from('student_subjects').select('id').eq('student_id', user.linked_id).eq('subject_id', s.subject_id).eq('batch_id', s.batch_id).ilike('status', 'active').maybeSingle()
+        if (rosterError && rosterError.code !== 'PGRST116') throw rosterError
+        if (roster) { chosen = s; break }
+      }
+      if (!chosen) throw new ApiFault(matches?.length ? 'NOT_IN_CLASS' : 'BAD_CODE', matches?.length ? 'That class is not one of your subjects.' : 'That code is wrong or has expired. Ask your teacher for the current code.')
+      const { data: existing, error: existingError } = await admin.from('attendance').select('status,marked_at').eq('session_id', chosen.id).eq('student_id', user.linked_id).maybeSingle()
+      if (existingError) throw existingError
+      if (existing) return response({ ok: true, data: { ok: true, alreadyMarked: true, status: existing.status,
+        subjectName: (await admin.from('subjects').select('name').eq('id', chosen.subject_id).maybeSingle()).data?.name || chosen.subject_id, markedAt: existing.marked_at } })
+      const late = now.getTime() - new Date(chosen.code_created_at || now).getTime() > 120000
+      const attendanceId = await newId(admin, 'attendance', 'ATT-', 5)
+      const { error: markError } = await admin.from('attendance').insert({ id: attendanceId, session_id: chosen.id, student_id: user.linked_id,
+        subject_id: chosen.subject_id, batch_id: chosen.batch_id, session_date: chosen.session_date, status: late ? 'LATE' : 'PRESENT', marked_by: user.id,
+        method: 'CODE', academic_year: chosen.academic_year })
+      if (markError && markError.code !== '23505') throw markError
+      const subject = await admin.from('subjects').select('name').eq('id', chosen.subject_id).maybeSingle()
+      const { data: saved } = await admin.from('attendance').select('status,marked_at').eq('session_id', chosen.id).eq('student_id', user.linked_id).single()
+      if (!saved) throw new ApiFault('SERVER_ERROR', 'Attendance was saved but could not be read back. Refresh and check your attendance.')
+      return response({ ok: true, data: { ok: true, alreadyMarked: !!markError, status: saved.status, subjectName: subject.data?.name || chosen.subject_id, markedAt: saved.marked_at } })
+    }
+
+    if (action === 'attendance.sessions') {
+      const from = requireText(payload.from, 'From date', 10), to = requireText(payload.to, 'To date', 10)
+      let query = admin.from('class_sessions').select('*').order('session_date', { ascending: false }).order('start_time', { ascending: false }).limit(300)
+      if (from) query = query.gte('session_date', from)
+      if (to) query = query.lte('session_date', to)
+      if (payload.batchId) query = query.eq('batch_id', String(payload.batchId))
+      if (payload.teacherId) query = query.eq('teacher_id', String(payload.teacherId))
+      const { data: sessions, error } = await query
+      if (error) throw error
+      const ids = (sessions || []).map((x) => x.id)
+      const [marks, subjects, batches, teachers, rooms] = await Promise.all([
+        ids.length ? admin.from('attendance').select('session_id,status').in('session_id', ids) : Promise.resolve({ data: [], error: null }),
+        admin.from('subjects').select('id,name'), admin.from('batches').select('id,name'), admin.from('teachers').select('id,name'), admin.from('rooms').select('id,name'),
+      ])
+      if (marks.error) throw marks.error
+      const sm = new Map((subjects.data || []).map((x) => [x.id, x.name])), bm = new Map((batches.data || []).map((x) => [x.id, x.name]))
+      const tm = new Map((teachers.data || []).map((x) => [x.id, x.name])), rm = new Map((rooms.data || []).map((x) => [x.id, x.name]))
+      return response({ ok: true, data: (sessions || []).map((s) => { const m = (marks.data || []).filter((x) => x.session_id === s.id); return {
+        SessionID: s.id, Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time, BatchName: bm.get(s.batch_id) || s.batch_id,
+        SubjectName: sm.get(s.subject_id) || s.subject_id, TeacherName: tm.get(s.teacher_id) || s.teacher_id, RoomName: rm.get(s.room_id) || '', Status: s.status,
+        Present: m.filter((x) => x.status === 'PRESENT').length, Late: m.filter((x) => x.status === 'LATE').length, Absent: m.filter((x) => x.status === 'ABSENT').length,
+      } }) })
+    }
+
+    if (action === 'teacher.classStatus' || action === 'teacher.manualAttendance' || action === 'teacher.markAll' || action === 'teacher.closeClass' || action === 'attendance.detail' || action === 'attendance.correct') {
+      const sid = requireText(payload.sessionId, 'Session ID', 60, true)
+      const { data: s, error: sError } = await admin.from('class_sessions').select('*').eq('id', sid).maybeSingle()
+      if (sError) throw sError
+      if (!s) throw new ApiFault('NOT_FOUND', 'Class session not found.')
+      const teacherOwns = user.user_type === 'TEACHER' && s.teacher_id === user.linked_id
+      if (action.startsWith('teacher.') && !teacherOwns) throw new ApiFault('FORBIDDEN', 'This is not your class.')
+      if (action === 'attendance.detail' && !permissionsFor(user).includes('*') && !permissionsFor(user).includes('STUDENT_VIEW')) throw new ApiFault('FORBIDDEN', 'You do not have permission to view attendance.')
+      if (action === 'teacher.manualAttendance' || action === 'attendance.correct') {
+        const studentId = requireText(payload.studentId, 'Student ID', 60, true)
+        const status = requireText(payload.status, 'Status', 10, true).toUpperCase()
+        if (!['PRESENT', 'LATE', 'ABSENT'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Status must be PRESENT, LATE, or ABSENT.')
+        const reason = String(payload.reason || '').trim().slice(0, 200)
+        if (action === 'attendance.correct' && !reason) throw new ApiFault('BAD_REQUEST', 'Please give a reason for the correction.')
+        if (action === 'teacher.manualAttendance' && s.status !== 'OPEN') throw new ApiFault('BAD_REQUEST', 'This class is closed.')
+        if (action === 'teacher.manualAttendance') {
+          const { data: roster, error: rosterError } = await admin.from('student_subjects').select('id').eq('student_id', studentId)
+            .eq('subject_id', s.subject_id).eq('batch_id', s.batch_id).eq('teacher_id', s.teacher_id).ilike('status', 'active').maybeSingle()
+          if (rosterError) throw rosterError
+          if (!roster) throw new ApiFault('BAD_REQUEST', 'This student is not on the class roster.')
+        }
+        const { data: old, error: oldError } = await admin.from('attendance').select('*').eq('session_id', sid).eq('student_id', studentId).maybeSingle()
+        if (oldError) throw oldError
+        if (old?.status === status) return response({ ok: true, data: { ok: true, unchanged: true } })
+        const attendanceId = old?.id || await newId(admin, 'attendance', 'ATT-', 5)
+        const { error: saveError } = await admin.from('attendance').upsert({ id: attendanceId, session_id: sid, student_id: studentId, subject_id: s.subject_id,
+          batch_id: s.batch_id, session_date: s.session_date, status, marked_by: user.id, marked_at: new Date().toISOString(),
+          method: action === 'attendance.correct' ? 'ADMIN_CORRECTION' : 'TEACHER_MANUAL', academic_year: s.academic_year }, { onConflict: 'session_id,student_id' })
+        if (saveError) throw saveError
+        if (old || action === 'attendance.correct') await admin.from('attendance_logs').insert({ id: `AL-${crypto.randomUUID()}`, attendance_id: attendanceId,
+          session_id: sid, student_id: studentId, old_status: old?.status || '', new_status: status, changed_by: user.id, reason })
+        await logAction(admin, user, action === 'attendance.correct' ? 'CORRECT_ATTENDANCE' : 'MARK_ATTENDANCE', 'ATTENDANCE', attendanceId, { from: old?.status || '', to: status, reason })
+        return response({ ok: true, data: { ok: true, changed: !!old, created: !old } })
+      }
+      if (action === 'teacher.markAll' || action === 'teacher.closeClass') {
+        if (s.status !== 'OPEN') return response({ ok: true, data: { ok: true, alreadyClosed: true } })
+        const { data: rosterRows, error: rosterError } = await admin.from('student_subjects').select('student_id').eq('teacher_id', s.teacher_id).eq('batch_id', s.batch_id).eq('subject_id', s.subject_id).ilike('status', 'active')
+        if (rosterError) throw rosterError
+        const { data: activeStudents, error: activeError } = await admin.from('students').select('id').in('id', [...new Set((rosterRows || []).map((r) => r.student_id))]).ilike('status', 'active')
+        if (activeError) throw activeError
+        const { data: existing, error: existingError } = await admin.from('attendance').select('student_id').eq('session_id', sid)
+        if (existingError) throw existingError
+        const have = new Set((existing || []).map((r) => r.student_id))
+        const markAbsent = action === 'teacher.closeClass' && payload.markAbsent !== false
+        const status = action === 'teacher.markAll' ? (String(payload.status || 'PRESENT').toUpperCase()) : 'ABSENT'
+        if (!['PRESENT', 'LATE', 'ABSENT'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Invalid attendance status.')
+        const remaining = (activeStudents || []).filter((r) => !have.has(r.id))
+        const rows = (action === 'teacher.markAll' || markAbsent) ? remaining.map((r) => ({ id: `ATT-${crypto.randomUUID()}`, session_id: sid, student_id: r.id,
+          subject_id: s.subject_id, batch_id: s.batch_id, session_date: s.session_date, status, marked_by: user.id, method: 'TEACHER_MANUAL', academic_year: s.academic_year })) : []
+        for (let i = 0; i < rows.length; i += 200) {
+          const { error } = await admin.from('attendance').upsert(rows.slice(i, i + 200), { onConflict: 'session_id,student_id', ignoreDuplicates: true })
+          if (error) throw error
+        }
+        if (action === 'teacher.closeClass') {
+          const { error } = await admin.from('class_sessions').update({ status: 'CLOSED', closed_at: new Date().toISOString() }).eq('id', sid).eq('status', 'OPEN')
+          if (error) throw error
+        }
+        await logAction(admin, user, action === 'teacher.closeClass' ? 'CLOSE_CLASS' : 'MARK_ALL_ATTENDANCE', 'CLASS_SESSION', sid, { marked: rows.length, status })
+        return response({ ok: true, data: action === 'teacher.closeClass' ? { ok: true, markedAbsent: rows.length } : { ok: true, marked: rows.length, status } })
+      }
+      const { data: marks, error: marksError } = await admin.from('attendance').select('*').eq('session_id', sid)
+      if (marksError) throw marksError
+      const [{ data: rosterRows }, { data: students }, { data: subjects }, { data: batches }, { data: teachers }, { data: rooms }] = await Promise.all([
+        admin.from('student_subjects').select('student_id').eq('teacher_id', s.teacher_id).eq('batch_id', s.batch_id).eq('subject_id', s.subject_id).ilike('status', 'active'),
+        admin.from('students').select('id,name,roll_no'), admin.from('subjects').select('id,name').eq('id', s.subject_id),
+        admin.from('batches').select('id,name').eq('id', s.batch_id), admin.from('teachers').select('id,name').eq('id', s.teacher_id), admin.from('rooms').select('id,name').eq('id', s.room_id || ''),
+      ])
+      const rosterIds = new Set((rosterRows || []).map((r) => r.student_id)), marked = new Map((marks || []).map((r) => [r.student_id, r]))
+      const roster = (students || []).filter((r) => rosterIds.has(r.id) || marked.has(r.id)).sort((a, b) => String(a.roll_no || a.name).localeCompare(String(b.roll_no || b.name)))
+      const byStatus = { PRESENT: 0, LATE: 0, ABSENT: 0 }; for (const r of marks || []) if (r.status in byStatus) byStatus[r.status as keyof typeof byStatus]++
+      const studentData = roster.map((r) => { const a = marked.get(r.id); return { StudentID: r.id, Name: r.name, RollNo: r.roll_no || '', Status: a?.status || null, Method: a?.method || null, MarkedAt: a?.marked_at || null } })
+      if (action === 'teacher.classStatus') return response({ ok: true, data: { session: { SessionID: sid, Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time,
+        BatchName: batches?.[0]?.name || s.batch_id, SubjectName: subjects?.[0]?.name || s.subject_id, RoomName: rooms?.[0]?.name || '', Status: s.status,
+        AttendanceCode: s.attendance_code, CodeExpiresAt: s.code_expires_at, StartedAt: s.started_at, ClosedAt: s.closed_at }, students: studentData,
+        counts: { total: roster.length, present: byStatus.PRESENT, late: byStatus.LATE, absent: byStatus.ABSENT, unmarked: Math.max(0, roster.length - (byStatus.PRESENT + byStatus.LATE + byStatus.ABSENT)) } } })
+      if (action === 'attendance.detail') return response({ ok: true, data: { session: { SessionID: sid, Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time,
+        BatchName: batches?.[0]?.name || s.batch_id, SubjectName: subjects?.[0]?.name || s.subject_id, TeacherName: teachers?.[0]?.name || s.teacher_id, RoomName: rooms?.[0]?.name || '', Status: s.status }, students: studentData } })
+      throw new ApiFault('BAD_REQUEST', 'Unsupported attendance action.')
     }
 
     if (action === 'settings.update') {
