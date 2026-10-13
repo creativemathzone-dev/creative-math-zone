@@ -14,7 +14,7 @@ These steps are for a new, empty Supabase project. They do not copy or modify th
 
 5. Put only the project's **publishable key** in `web/config.js`. Never put a secret or service-role key in browser files.
 6. Add a Supabase personal access token as the GitHub Actions secret `SUPABASE_ACCESS_TOKEN`. In GitHub, open **Actions → Deploy Supabase API → Run workflow** to deploy the API function. This workflow does not apply database migrations.
-7. After the function is deployed, publish the `web/` folder on a static host.
+7. In GitHub repository **Settings → Pages**, set the source to **GitHub Actions**. When the API is deployed and `web/config.js` has the publishable key, open **Actions → Publish Creative Math Zone portal → Run workflow**.
 8. Leave `creativemathzone.in` pointed at the existing site until the new pages and migrated data have been checked.
 
 The function expects Supabase's `SUPABASE_PUBLISHABLE_KEYS` and `SUPABASE_SECRET_KEYS` maps, which Supabase provides in deployed Edge Function runtimes. A secret key bypasses RLS, so only the server function may use it. For local function serving, copy `.env.example` to `supabase/functions/.env` and replace the placeholders with local-only keys.
