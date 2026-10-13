@@ -298,6 +298,55 @@ function requestIp(request: Request) {
   return forwarded.split(',')[0].trim().slice(0, 100)
 }
 
+function invoiceLines(row: Record<string, unknown>) {
+  const value = row.line_items
+  if (Array.isArray(value)) return value as Array<Record<string, unknown>>
+  if (typeof value === 'string') { try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : [] } catch { return [] } }
+  return []
+}
+
+function normalizedInvoiceLines(row: Record<string, unknown>) {
+  const lines = invoiceLines(row)
+  const tracksPaid = lines.some((line) => line.paidAmount !== undefined && line.paidAmount !== null)
+  let remainingPaid = tracksPaid ? 0 : Number(row.paid_amount) || 0
+  return lines.map((line) => {
+    const finalAmount = Number(line.finalAmount) || 0
+    const paidAmount = tracksPaid ? Number(line.paidAmount) || 0 : Math.min(finalAmount, remainingPaid)
+    if (!tracksPaid) remainingPaid = Math.max(0, remainingPaid - paidAmount)
+    return { ...line, standardAmount: Number(line.standardAmount) || 0, discountAmount: Number(line.discountAmount) || 0,
+      finalAmount, paidAmount, balanceAmount: Math.max(0, finalAmount - paidAmount) }
+  })
+}
+
+function invoiceStatus(totalValue: unknown, paidValue: unknown, dueValue: unknown, storedValue: unknown) {
+  const stored = String(storedValue || '').toUpperCase()
+  if (stored === 'CANCELLED') return 'CANCELLED'
+  const total = Number(totalValue) || 0, paid = Number(paidValue) || 0
+  const balance = Math.max(0, total - paid)
+  if (total === 0 || balance <= 0) return 'PAID'
+  const due = dueValue ? String(dueValue).slice(0, 10) : ''
+  if (due && due < todayDate()) return 'OVERDUE'
+  return paid > 0 ? 'PARTIAL' : 'UNPAID'
+}
+
+function todayDate() {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
+  const part = (type: string) => parts.find((p) => p.type === type)?.value || ''
+  return `${part('year')}-${part('month')}-${part('day')}`
+}
+
+function monthLabel(month: string) {
+  const hit = /^(\d{4})-(\d{2})$/.exec(month)
+  if (!hit) return month
+  const date = new Date(Number(hit[1]), Number(hit[2]) - 1, 1)
+  return new Intl.DateTimeFormat('en', { month: 'short', year: 'numeric' }).format(date)
+}
+
+function allocationsFromPayment(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.map((x: any) => ({ subjectId: String(x?.subjectId || ''), subjectName: String(x?.subjectName || ''), amount: Number(x?.amount) || 0 }))
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response(fail('METHOD_NOT_ALLOWED', 'Use POST.'))
@@ -511,6 +560,11 @@ Deno.serve(async (request) => {
       'finance.feeStructure.list': 'FINANCE_VIEW', 'finance.feeStructure.add': 'FINANCE_EDIT',
       'finance.feeStructure.update': 'FINANCE_EDIT', 'finance.studentFee.list': 'FINANCE_VIEW',
       'finance.studentFee.set': 'FINANCE_EDIT', 'finance.studentFee.remove': 'FINANCE_EDIT',
+      'invoices.list': 'FINANCE_VIEW', 'invoices.get': 'FINANCE_VIEW',
+      'invoices.generate': 'FINANCE_EDIT', 'invoices.cancel': 'FINANCE_EDIT',
+      'payments.record': 'FINANCE_EDIT', 'receipts.list': 'FINANCE_VIEW',
+      'receipts.get': 'FINANCE_VIEW', 'receipts.void': 'FINANCE_EDIT',
+      'student.invoices': 'SELF_VIEW', 'student.receipt': 'SELF_VIEW', 'student.invoiceDoc': 'SELF_VIEW',
     }
     const permission = needed[action]
     const granted = permissionsFor(user)
@@ -719,7 +773,7 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'notices.list' || action === 'teacher.notices') {
-      const today = new Date().toISOString().slice(0, 10)
+      const today = todayDate()
       const { data: all, error } = await admin.from('notices').select('*').eq('status', 'Active').order('posted_at', { ascending: false }).limit(300)
       if (error) throw error
       let linkedBatches = new Set<string>()
@@ -1034,7 +1088,7 @@ Deno.serve(async (request) => {
     if (action === 'registrations.approve') {
       const registrationId = requireText(payload.id, 'Request ID', 40, true)
       const batchId = requireText(payload.batchId, 'Batch', 40, true)
-      const startDate = requireText(payload.startDate || new Date().toISOString().slice(0, 10), 'Start date', 10, true)
+      const startDate = requireText(payload.startDate || todayDate(), 'Start date', 10, true)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new ApiFault('BAD_REQUEST', 'Start date must use yyyy-mm-dd.')
       const picks = Array.isArray(payload.subjects) ? payload.subjects : []
       if (picks.length > 6) throw new ApiFault('BAD_REQUEST', 'Choose no more than 6 subjects.')
@@ -1229,7 +1283,7 @@ Deno.serve(async (request) => {
       }
       if (discountAmount > standardAmount) throw new ApiFault('BAD_REQUEST', 'Discount cannot exceed the standard fee.')
       const reason = requireText(payload.reason, 'Reason', 200)
-      const today = new Date().toISOString().slice(0, 10)
+      const today = todayDate()
       const { data: current, error: currentError } = await admin.from('student_fees').select('id').eq('student_id', studentId)
         .eq('subject_id', subjectId).eq('status', 'Active').is('effective_to', null)
       if (currentError) throw currentError
@@ -1246,13 +1300,349 @@ Deno.serve(async (request) => {
     if (action === 'finance.studentFee.remove') {
       const studentId = requireText(payload.studentId, 'Student ID', 40, true)
       const subjectId = requireText(payload.subjectId, 'Subject', 40, true)
-      const today = new Date().toISOString().slice(0, 10)
+      const today = todayDate()
       const { data, error } = await admin.from('student_fees').update({ status: 'Inactive', effective_to: today })
         .eq('student_id', studentId).eq('subject_id', subjectId).eq('status', 'Active').is('effective_to', null).select('id')
       if (error) throw error
       if (!data?.length) throw new ApiFault('NOT_FOUND', 'No active fee discount was found.')
       await logAction(admin, user, 'REMOVE_STUDENT_DISCOUNT', 'STUDENT_FEE', data[0].id, { studentId, subjectId })
       return response({ ok: true, data: { removed: true } })
+    }
+
+    if (action === 'invoices.generate') {
+      const month = requireText(payload.month, 'Month', 7, true)
+      const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month)
+      if (!match) throw new ApiFault('BAD_REQUEST', 'Pick a valid month (YYYY-MM).')
+      const studentFilter = requireText(payload.studentId, 'Student ID', 40)
+      const [{ data: students, error: studentError }, { data: assignments, error: assignmentError },
+        { data: feeRows, error: feeError }, { data: studentFeeRows, error: studentFeeError }, { data: settingRows }] = await Promise.all([
+        admin.from('students').select('id,name,status').order('id').limit(2000),
+        admin.from('student_subjects').select('*').eq('status', 'ACTIVE'),
+        admin.from('fee_structure').select('*').eq('item_type', 'SUBJECT').eq('status', 'Active'),
+        admin.from('student_fees').select('*').eq('status', 'Active').is('effective_to', null),
+        admin.from('settings').select('setting_key,value').in('setting_key', ['ACADEMIC_YEAR','INVOICE_DUE_DAY']),
+      ])
+      if (studentError || assignmentError || feeError || studentFeeError) throw studentError || assignmentError || feeError || studentFeeError
+      const settings = Object.fromEntries((settingRows || []).map((r) => [r.setting_key, r.value]))
+      const academicYear = settings.ACADEMIC_YEAR || '2026-27'
+      const dueDay = Math.min(28, Math.max(1, Number.parseInt(settings.INVOICE_DUE_DAY || '10', 10) || 10))
+      const dueDate = `${month}-${String(dueDay).padStart(2, '0')}`
+      const eligible = (students || []).filter((s) => (!studentFilter || s.id === studentFilter) && String(s.status).toUpperCase() === 'ACTIVE')
+      if (!eligible.length) throw new ApiFault('BAD_REQUEST', 'No eligible students found.')
+      const { data: existingRows, error: existingError } = await admin.from('invoices').select('student_id,status').eq('month', month).eq('academic_year', academicYear)
+      if (existingError) throw existingError
+      const already = new Set((existingRows || []).filter((r) => String(r.status).toUpperCase() !== 'CANCELLED').map((r) => r.student_id))
+      const subjectNames = new Map<string, string>()
+      const assignedSubjectIds = [...new Set((assignments || []).map((a) => a.subject_id))]
+      const { data: subjects } = await admin.from('subjects').select('id,name').in('id', assignedSubjectIds.length ? assignedSubjectIds : ['__none__'])
+      for (const s of subjects || []) subjectNames.set(s.id, s.name)
+      const standardByKey = new Map((feeRows || []).filter((f) => f.academic_year === academicYear).map((f) => [f.subject_id, Number(f.amount)]))
+      const overrideByKey = new Map((studentFeeRows || []).filter((r) => r.effective_from <= todayDate())
+        .map((r) => [`${r.student_id}|${r.subject_id}`, r]))
+      const assignmentByStudent = new Map<string, any[]>()
+      for (const a of assignments || []) assignmentByStudent.set(a.student_id, [...(assignmentByStudent.get(a.student_id) || []), a])
+      const result = { generated: 0, skippedExisting: 0, skippedEmpty: 0, total: 0, details: [] as Array<Record<string, unknown>> }
+      for (const student of eligible) {
+        if (already.has(student.id)) { result.skippedExisting++; continue }
+        const active = assignmentByStudent.get(student.id) || []
+        const lines = active.map((a) => {
+          const feeOverride = overrideByKey.get(`${student.id}|${a.subject_id}`)
+          const standard = feeOverride ? Number(feeOverride.standard_amount) : a.fee_override !== null ? Number(a.fee_override) : standardByKey.get(a.subject_id) || 0
+          const discount = feeOverride ? Number(feeOverride.discount_amount) : 0
+          return { subjectId: a.subject_id, subjectName: subjectNames.get(a.subject_id) || a.subject_id,
+            standardAmount: standard, discountAmount: discount, finalAmount: Math.max(0, standard - discount), paidAmount: 0 }
+        }).filter((line) => line.finalAmount > 0)
+        if (!lines.length) { result.skippedEmpty++; continue }
+        const total = Math.round(lines.reduce((sum, line) => sum + line.finalAmount, 0) * 100) / 100
+        const id = await newId(admin, 'invoices', `INV-${month.replace('-', '')}-`, 4)
+        const { error } = await admin.from('invoices').insert({ id, student_id: student.id, month, academic_year: academicYear,
+          line_items: lines, total_amount: total, paid_amount: 0, balance_amount: total, status: 'UNPAID', due_date: dueDate })
+        if (error?.code === '23505') { result.skippedExisting++; continue }
+        if (error) throw error
+        already.add(student.id)
+        result.generated++; result.total = Math.round((result.total + total) * 100) / 100
+        result.details.push({ studentId: student.id, name: student.name, invoiceId: id, amount: total })
+      }
+      await logAction(admin, user, 'GENERATE_INVOICES', 'INVOICES', month,
+        { generated: result.generated, skipped: result.skippedExisting + result.skippedEmpty })
+      return response({ ok: true, data: result })
+    }
+
+    if (action === 'invoices.list') {
+      const month = requireText(payload.month, 'Month', 7)
+      const statusFilter = String(payload.status || '').toUpperCase()
+      const search = String(payload.search || '').trim().toLowerCase().slice(0, 100)
+      const limit = Math.min(Math.max(Number.parseInt(payload.limit, 10) || 500, 1), 2000)
+      let query = admin.from('invoices').select('*').order('month', { ascending: false }).order('id', { ascending: false }).limit(5000)
+      if (month) query = query.eq('month', month)
+      const { data, error } = await query
+      if (error) throw error
+      const studentIds = [...new Set((data || []).map((r) => r.student_id))]
+      const { data: students, error: studentsError } = await admin.from('students').select('id,name,current_class').in('id', studentIds.length ? studentIds : ['__none__'])
+      if (studentsError) throw studentsError
+      const studentMap = new Map((students || []).map((s) => [s.id, s]))
+      let rows = (data || []).map((r) => {
+        const student = studentMap.get(r.student_id)
+        return { InvoiceID: r.id, StudentID: r.student_id, StudentName: student?.name || r.student_id,
+          CurrentClass: student?.current_class || '', Month: r.month, MonthLabel: monthLabel(r.month),
+          TotalAmount: Number(r.total_amount) || 0, PaidAmount: Number(r.paid_amount) || 0,
+          BalanceAmount: Math.max(0, Number(r.total_amount) - Number(r.paid_amount)), DueDate: r.due_date,
+          Status: invoiceStatus(r.total_amount, r.paid_amount, r.due_date, r.status), StoredStatus: r.status }
+      })
+      if (statusFilter) rows = rows.filter((r) => r.Status === statusFilter)
+      if (search) rows = rows.filter((r) => r.StudentName.toLowerCase().includes(search) || r.StudentID.toLowerCase().includes(search) || r.InvoiceID.toLowerCase().includes(search))
+      const totals = { count: 0, billed: 0, paid: 0, balance: 0, overdue: 0 }
+      for (const row of rows) if (row.Status !== 'CANCELLED') {
+        totals.count++; totals.billed += row.TotalAmount; totals.paid += row.PaidAmount; totals.balance += row.BalanceAmount
+        if (row.Status === 'OVERDUE') totals.overdue += row.BalanceAmount
+      }
+      return response({ ok: true, data: { rows: rows.slice(0, limit), totals } })
+    }
+
+    if (action === 'invoices.get') {
+      const id = requireText(payload.invoiceId, 'Invoice ID', 60, true)
+      const [{ data: invoice, error }, { data: payments, error: paymentsError }] = await Promise.all([
+        admin.from('invoices').select('*').eq('id', id).maybeSingle(),
+        admin.from('payments').select('*').eq('invoice_id', id).order('payment_date', { ascending: false }),
+      ])
+      if (error || paymentsError) throw error || paymentsError
+      if (!invoice) throw new ApiFault('NOT_FOUND', 'Invoice not found.')
+      const [{ data: student }, { data: subjects }] = await Promise.all([
+        admin.from('students').select('name,current_class').eq('id', invoice.student_id).maybeSingle(),
+        admin.from('subjects').select('id,name'),
+      ])
+      const subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
+      const lines = normalizedInvoiceLines(invoice).map((line) => ({ ...line,
+        subjectName: line.subjectName || subjectNames.get(String(line.subjectId)) || String(line.subjectId || '') }))
+      const total = Number(invoice.total_amount) || 0, paid = Number(invoice.paid_amount) || 0
+      return response({ ok: true, data: { invoice: { InvoiceID: invoice.id, StudentID: invoice.student_id,
+        StudentName: student?.name || invoice.student_id, CurrentClass: student?.current_class || '', Month: invoice.month,
+        MonthLabel: monthLabel(invoice.month), TotalAmount: total, PaidAmount: paid, BalanceAmount: Math.max(0, total - paid),
+        DueDate: invoice.due_date, Status: invoiceStatus(total, paid, invoice.due_date, invoice.status),
+        CreatedAt: invoice.created_at, UpdatedAt: invoice.updated_at }, lines,
+        payments: (payments || []).map((p) => ({ PaymentID: p.id, Amount: Number(p.amount), PaymentDate: p.payment_date,
+          PaymentMode: p.payment_mode, TransactionReference: p.transaction_reference, Status: p.status,
+          ReceiptID: p.receipt_id, Notes: p.notes, Allocations: allocationsFromPayment(p.allocations) })) } })
+    }
+
+    if (action === 'invoices.cancel') {
+      const id = requireText(payload.invoiceId, 'Invoice ID', 60, true)
+      const reason = requireText(payload.reason, 'Reason', 200)
+      const { data, error } = await admin.rpc('cancel_invoice_transaction', { p_invoice_id: id })
+      if (error) {
+        if (error.message.includes('not found')) throw new ApiFault('NOT_FOUND', 'Invoice not found.')
+        if (error.message.includes('already has payments')) throw new ApiFault('BAD_REQUEST', 'Cannot cancel an invoice that already has payments.')
+        throw error
+      }
+      if (data?.unchanged) return response({ ok: true, data: { ok: true, unchanged: true } })
+      await logAction(admin, user, 'CANCEL_INVOICE', 'INVOICE', id, { reason })
+      return response({ ok: true, data: { ok: true } })
+    }
+
+    if (action === 'payments.record') {
+      const invoiceId = requireText(payload.invoiceId, 'Invoice ID', 60, true)
+      const mode = requireText(payload.mode, 'Payment mode', 30, true).toUpperCase()
+      if (!['CASH','UPI','BANK_TRANSFER','CHEQUE'].includes(mode)) throw new ApiFault('BAD_REQUEST', 'Choose a valid payment mode.')
+      const paymentDate = requireText(payload.paymentDate || todayDate(), 'Payment date', 10, true)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) throw new ApiFault('BAD_REQUEST', 'Payment date must use yyyy-mm-dd.')
+      const { data: invoice, error: invoiceError } = await admin.from('invoices').select('*').eq('id', invoiceId).maybeSingle()
+      if (invoiceError) throw invoiceError
+      if (!invoice) throw new ApiFault('NOT_FOUND', 'Invoice not found.')
+      if (String(invoice.status).toUpperCase() === 'CANCELLED') throw new ApiFault('BAD_REQUEST', 'This invoice is cancelled.')
+      const total = Number(invoice.total_amount) || 0, paid = Number(invoice.paid_amount) || 0
+      const balance = Math.max(0, total - paid)
+      if (balance <= 0) throw new ApiFault('BAD_REQUEST', 'This invoice is already fully paid.')
+      const lines = normalizedInvoiceLines(invoice)
+      const requested = Array.isArray(payload.allocations) && payload.allocations.length ? payload.allocations : null
+      const allocations: Array<{ subjectId: string; subjectName: string; amount: number }> = []
+      if (requested) {
+        const seen = new Set<string>()
+        for (const raw of requested) {
+          const subjectId = requireText(raw?.subjectId, 'Subject ID', 40, true)
+          const amount = Math.round(Number(raw?.amount) * 100) / 100
+          if (!Number.isFinite(amount) || amount <= 0) continue
+          if (seen.has(subjectId)) throw new ApiFault('BAD_REQUEST', 'A subject appears twice.')
+          seen.add(subjectId)
+          const line = lines.find((x) => String(x.subjectId) === subjectId)
+          if (!line) throw new ApiFault('BAD_REQUEST', 'That subject is not on this invoice.')
+          if (amount > Number(line.balanceAmount) + 0.005) throw new ApiFault('BAD_REQUEST', `${line.subjectName}: amount is more than its balance.`)
+          allocations.push({ subjectId, subjectName: String(line.subjectName || subjectId), amount })
+        }
+        if (!allocations.length) throw new ApiFault('BAD_REQUEST', 'Enter an amount for at least one subject.')
+      } else {
+        const wanted = Math.round(Number(payload.amount) * 100) / 100
+        if (!Number.isFinite(wanted) || wanted < 1 || wanted > 10000000) throw new ApiFault('BAD_REQUEST', 'Enter a valid payment amount.')
+        if (wanted > balance + 0.005) throw new ApiFault('BAD_REQUEST', 'Amount exceeds the invoice balance.')
+        let remaining = wanted
+        for (const line of lines) {
+          if (remaining <= 0 || Number(line.balanceAmount) <= 0) continue
+          const amount = Math.round(Math.min(remaining, Number(line.balanceAmount)) * 100) / 100
+          allocations.push({ subjectId: String(line.subjectId), subjectName: String(line.subjectName || line.subjectId), amount })
+          remaining = Math.round((remaining - amount) * 100) / 100
+        }
+        if (remaining > 0.005) throw new ApiFault('BAD_REQUEST', 'Amount exceeds the invoice balance.')
+      }
+      const amount = Math.round(allocations.reduce((sum, a) => sum + a.amount, 0) * 100) / 100
+      if (amount < 1 || amount > balance + 0.005) throw new ApiFault('BAD_REQUEST', 'Payment total is outside the invoice balance.')
+      const paymentId = await newId(admin, 'payments', 'PAY-', 5)
+      const receiptId = await newId(admin, 'receipts', `CMZ-${paymentDate.replaceAll('-', '')}-`, 3)
+      const { data, error } = await admin.rpc('record_payment_transaction', { p_payment_id: paymentId, p_receipt_id: receiptId,
+        p_invoice_id: invoiceId, p_payment_date: paymentDate, p_payment_mode: mode,
+        p_transaction_reference: requireText(payload.reference, 'Reference', 100), p_notes: requireText(payload.notes, 'Notes', 500),
+        p_academic_year: invoice.academic_year || '2026-27', p_received_by: user.id, p_allocations: allocations, p_receipt_format: 'A5' })
+      if (error) {
+        if (error.message.includes('not found')) throw new ApiFault('NOT_FOUND', 'Invoice not found.')
+        if (error.message.includes('cancelled')) throw new ApiFault('BAD_REQUEST', 'This invoice is cancelled.')
+        if (error.message.includes('balance') || error.message.includes('paid')) throw new ApiFault('BAD_REQUEST', 'The invoice balance changed. Refresh the invoice and try again.')
+        throw error
+      }
+      await logAction(admin, user, 'ADD_PAYMENT', 'PAYMENT', paymentId, { invoiceId, amount, mode, receiptId, allocations })
+      await logAction(admin, user, 'CREATE_RECEIPT', 'RECEIPT', receiptId, { paymentId, amount })
+      return response({ ok: true, data })
+    }
+
+    if (action === 'receipts.list') {
+      const search = String(payload.search || '').trim().toLowerCase().slice(0, 100)
+      const from = requireText(payload.from, 'From date', 10), to = requireText(payload.to, 'To date', 10)
+      const limit = Math.min(Math.max(Number.parseInt(payload.limit, 10) || 200, 1), 1000)
+      let query = admin.from('receipts').select('id,student_id,receipt_date,amount,status,created_by')
+        .order('receipt_date', { ascending: false }).order('id', { ascending: false }).limit(5000)
+      if (from) query = query.gte('receipt_date', from)
+      if (to) query = query.lte('receipt_date', to)
+      const { data, error } = await query
+      if (error) throw error
+      const ids = [...new Set((data || []).map((r) => r.student_id))]
+      const { data: students, error: studentsError } = await admin.from('students').select('id,name').in('id', ids.length ? ids : ['__none__'])
+      if (studentsError) throw studentsError
+      const names = new Map((students || []).map((s) => [s.id, s.name]))
+      const rows = (data || []).filter((r) => !search || r.id.toLowerCase().includes(search) || r.student_id.toLowerCase().includes(search) ||
+        String(names.get(r.student_id) || '').toLowerCase().includes(search)).slice(0, limit)
+      return response({ ok: true, data: rows.map((r) => ({ ReceiptID: r.id, StudentID: r.student_id,
+        StudentName: names.get(r.student_id) || r.student_id, ReceiptDate: r.receipt_date, Amount: Number(r.amount),
+        Status: r.status, CreatedBy: r.created_by || '' })) })
+    }
+
+    if (action === 'receipts.get') {
+      const id = requireText(payload.receiptId, 'Receipt ID', 60, true)
+      const { data: receipt, error } = await admin.from('receipts').select('*').eq('id', id).maybeSingle()
+      if (error) throw error
+      if (!receipt) throw new ApiFault('NOT_FOUND', 'Receipt not found.')
+      const [{ data: payment }, { data: student }, { data: settings }] = await Promise.all([
+        admin.from('payments').select('*').eq('id', receipt.payment_id).maybeSingle(),
+        admin.from('students').select('*').eq('id', receipt.student_id).maybeSingle(),
+        admin.from('settings').select('setting_key,value').in('setting_key', ['CENTRE_NAME','TAGLINE','ADDRESS','MOBILE','EMAIL','WEBSITE','ACADEMIC_YEAR']),
+      ])
+      const settingMap = Object.fromEntries((settings || []).map((r) => [r.setting_key, r.value]))
+      let invoiceData = null
+      if (payment?.invoice_id) {
+        const { data: inv } = await admin.from('invoices').select('*').eq('id', payment.invoice_id).maybeSingle()
+        if (inv) invoiceData = { InvoiceID: inv.id, Month: inv.month, MonthLabel: monthLabel(inv.month),
+          LineItems: normalizedInvoiceLines(inv), TotalAmount: Number(inv.total_amount), PaidAmount: Number(inv.paid_amount), BalanceAmount: Number(inv.balance_amount) }
+      }
+      return response({ ok: true, data: { receipt: { ReceiptID: receipt.id, ReceiptDate: receipt.receipt_date,
+        Amount: Number(receipt.amount), Status: receipt.status, Format: receipt.format, CreatedBy: receipt.created_by,
+        CreatedAt: receipt.created_at, VoidedBy: receipt.voided_by, VoidDate: receipt.void_date, VoidReason: receipt.void_reason },
+        payment: payment ? { PaymentID: payment.id, Mode: payment.payment_mode, Reference: payment.transaction_reference,
+          Notes: payment.notes, PaymentDate: payment.payment_date, Allocations: allocationsFromPayment(payment.allocations) } : null,
+        invoice: invoiceData, student: student ? { StudentID: student.id, Name: student.name, CurrentClass: student.current_class,
+          CurrentBatch: student.current_batch_id, ParentName: student.parent_name, Mobile: student.mobile || student.parent_mobile } : null,
+        centre: { name: settingMap.CENTRE_NAME || 'Creative Math Zone', tagline: settingMap.TAGLINE || '', address: settingMap.ADDRESS || '',
+          mobile: settingMap.MOBILE || '', email: settingMap.EMAIL || '', website: settingMap.WEBSITE || '',
+          academicYear: settingMap.ACADEMIC_YEAR || '2026-27' } } })
+    }
+
+    if (action === 'receipts.void') {
+      const id = requireText(payload.receiptId, 'Receipt ID', 60, true)
+      const reason = requireText(payload.reason, 'Reason', 200, true)
+      const { data, error } = await admin.rpc('void_receipt_transaction', { p_receipt_id: id, p_voided_by: user.id, p_reason: reason })
+      if (error) {
+        if (error.message.includes('not found')) throw new ApiFault('NOT_FOUND', 'Receipt not found.')
+        if (error.message.includes('reason')) throw new ApiFault('BAD_REQUEST', 'Please give a reason for voiding.')
+        throw error
+      }
+      if (!data?.unchanged) {
+        await logAction(admin, user, 'VOID_PAYMENT', 'PAYMENT', String(data?.paymentId || id), { reason })
+        await logAction(admin, user, 'VOID_RECEIPT', 'RECEIPT', id, { reason })
+      }
+      return response({ ok: true, data: { ok: true, unchanged: !!data?.unchanged } })
+    }
+
+    if (action === 'student.invoices') {
+      if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only available in the student portal.')
+      const [{ data: invoices, error }, { data: payments, error: paymentsError }] = await Promise.all([
+        admin.from('invoices').select('*').eq('student_id', user.linked_id).order('month', { ascending: false }).limit(500),
+        admin.from('payments').select('*').eq('student_id', user.linked_id).neq('status', 'VOID').order('payment_date', { ascending: false }).limit(1000),
+      ])
+      if (error || paymentsError) throw error || paymentsError
+      const paymentsByInvoice = new Map<string, any[]>()
+      for (const p of payments || []) if (p.invoice_id) paymentsByInvoice.set(p.invoice_id, [...(paymentsByInvoice.get(p.invoice_id) || []), p])
+      const rows = (invoices || []).filter((inv) => String(inv.status).toUpperCase() !== 'CANCELLED').map((inv) => {
+        const total = Number(inv.total_amount) || 0, paid = Number(inv.paid_amount) || 0
+        return { InvoiceID: inv.id, Month: inv.month, MonthLabel: monthLabel(inv.month), TotalAmount: total,
+          PaidAmount: paid, BalanceAmount: Math.max(0, total - paid), DueDate: inv.due_date,
+          Status: invoiceStatus(total, paid, inv.due_date, inv.status), Lines: normalizedInvoiceLines(inv),
+          Payments: (paymentsByInvoice.get(inv.id) || []).map((p) => ({ PaymentDate: p.payment_date, Amount: Number(p.amount) || 0,
+            PaymentMode: p.payment_mode, ReceiptID: p.receipt_id, Allocations: allocationsFromPayment(p.allocations) })) }
+      })
+      const totals = { billed: 0, paid: 0, balance: 0, overdue: 0 }
+      for (const row of rows) {
+        totals.billed += row.TotalAmount; totals.paid += row.PaidAmount; totals.balance += row.BalanceAmount
+        if (row.Status === 'OVERDUE') totals.overdue += row.BalanceAmount
+      }
+      return response({ ok: true, data: { rows, totals } })
+    }
+
+    if (action === 'student.receipt') {
+      if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only available in the student portal.')
+      const id = requireText(payload.receiptId, 'Receipt ID', 60, true)
+      const { data: receipt, error } = await admin.from('receipts').select('*').eq('id', id).eq('student_id', user.linked_id).maybeSingle()
+      if (error) throw error
+      if (!receipt || String(receipt.status).toUpperCase() === 'VOID') throw new ApiFault('NOT_FOUND', 'Receipt not found.')
+      const [{ data: payment }, { data: student }, { data: settings }] = await Promise.all([
+        admin.from('payments').select('*').eq('id', receipt.payment_id).maybeSingle(),
+        admin.from('students').select('*').eq('id', receipt.student_id).maybeSingle(),
+        admin.from('settings').select('setting_key,value').in('setting_key', ['CENTRE_NAME','TAGLINE','ADDRESS','MOBILE','EMAIL','WEBSITE','ACADEMIC_YEAR']),
+      ])
+      const values = Object.fromEntries((settings || []).map((r) => [r.setting_key, r.value]))
+      let invoice = null
+      if (payment?.invoice_id) {
+        const { data: inv } = await admin.from('invoices').select('*').eq('id', payment.invoice_id).maybeSingle()
+        if (inv && String(inv.status).toUpperCase() !== 'CANCELLED') invoice = { InvoiceID: inv.id, Month: inv.month,
+          MonthLabel: monthLabel(inv.month), LineItems: normalizedInvoiceLines(inv), TotalAmount: Number(inv.total_amount),
+          PaidAmount: Number(inv.paid_amount), BalanceAmount: Number(inv.balance_amount) }
+      }
+      return response({ ok: true, data: { receipt: { ReceiptID: receipt.id, ReceiptDate: receipt.receipt_date,
+        Amount: Number(receipt.amount), Status: receipt.status, Format: receipt.format, CreatedBy: '', CreatedAt: receipt.created_at,
+        VoidedBy: '', VoidDate: '', VoidReason: '' }, payment: payment ? { PaymentID: payment.id,
+          Mode: payment.payment_mode, Reference: payment.transaction_reference, Notes: payment.notes,
+          PaymentDate: payment.payment_date, Allocations: allocationsFromPayment(payment.allocations) } : null,
+        invoice, student: student ? { StudentID: student.id, Name: student.name, CurrentClass: student.current_class,
+          CurrentBatch: student.current_batch_id, ParentName: student.parent_name, Mobile: student.mobile || student.parent_mobile } : null,
+        centre: { name: values.CENTRE_NAME || 'Creative Math Zone', tagline: values.TAGLINE || '', address: values.ADDRESS || '',
+          mobile: values.MOBILE || '', email: values.EMAIL || '', website: values.WEBSITE || '', academicYear: values.ACADEMIC_YEAR || '2026-27' } } })
+    }
+
+    if (action === 'student.invoiceDoc') {
+      if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only available in the student portal.')
+      const id = requireText(payload.invoiceId, 'Invoice ID', 60, true)
+      const [{ data: invoice, error }, { data: payments, error: paymentsError }, { data: student }, { data: settings }] = await Promise.all([
+        admin.from('invoices').select('*').eq('id', id).eq('student_id', user.linked_id).maybeSingle(),
+        admin.from('payments').select('*').eq('invoice_id', id).eq('student_id', user.linked_id).neq('status', 'VOID').order('payment_date'),
+        admin.from('students').select('id,name,current_class,parent_name').eq('id', user.linked_id).maybeSingle(),
+        admin.from('settings').select('setting_key,value').in('setting_key', ['CENTRE_NAME','TAGLINE','ADDRESS','MOBILE','EMAIL','WEBSITE','ACADEMIC_YEAR']),
+      ])
+      if (error || paymentsError) throw error || paymentsError
+      if (!invoice || String(invoice.status).toUpperCase() === 'CANCELLED') throw new ApiFault('NOT_FOUND', 'Invoice not found.')
+      const total = Number(invoice.total_amount) || 0, paid = Number(invoice.paid_amount) || 0
+      const values = Object.fromEntries((settings || []).map((r) => [r.setting_key, r.value]))
+      return response({ ok: true, data: { invoice: { InvoiceID: invoice.id, Month: invoice.month, MonthLabel: monthLabel(invoice.month),
+        DueDate: invoice.due_date, Status: invoiceStatus(total, paid, invoice.due_date, invoice.status), TotalAmount: total,
+        PaidAmount: paid, BalanceAmount: Math.max(0, total - paid) }, lines: normalizedInvoiceLines(invoice),
+        payments: (payments || []).map((p) => ({ PaymentDate: p.payment_date, Amount: Number(p.amount) || 0,
+          PaymentMode: p.payment_mode, ReceiptID: p.receipt_id, Allocations: allocationsFromPayment(p.allocations) })),
+        student: student ? { StudentID: student.id, Name: student.name, CurrentClass: student.current_class, ParentName: student.parent_name } : null,
+        centre: { name: values.CENTRE_NAME || 'Creative Math Zone', tagline: values.TAGLINE || '', address: values.ADDRESS || '',
+          mobile: values.MOBILE || '', email: values.EMAIL || '', website: values.WEBSITE || '', academicYear: values.ACADEMIC_YEAR || '2026-27' } } })
     }
 
     if (action === 'students.get') {
@@ -1376,7 +1766,7 @@ Deno.serve(async (request) => {
       const subjectId = requireText(payload.subjectId, 'Subject', 40, true)
       const teacherId = requireText(payload.teacherId, 'Teacher', 40, true)
       const batchId = requireText(payload.batchId, 'Batch', 40, true)
-      const startDate = requireText(payload.startDate || new Date().toISOString().slice(0, 10), 'Start date', 10, true)
+      const startDate = requireText(payload.startDate || todayDate(), 'Start date', 10, true)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new ApiFault('BAD_REQUEST', 'Start date must use yyyy-mm-dd.')
       const amount = (raw: unknown, label: string) => {
         if (raw === undefined || raw === null || raw === '') return null
@@ -1426,7 +1816,7 @@ Deno.serve(async (request) => {
 
     if (action === 'studentSubjects.end') {
       const id = requireText(payload.studentSubjectId, 'Student subject ID', 40, true)
-      const endDate = requireText(payload.endDate || new Date().toISOString().slice(0, 10), 'End date', 10, true)
+      const endDate = requireText(payload.endDate || todayDate(), 'End date', 10, true)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) throw new ApiFault('BAD_REQUEST', 'End date must use yyyy-mm-dd.')
       const { data: row, error: findError } = await admin.from('student_subjects').select('*').eq('id', id).maybeSingle()
       if (findError) throw findError

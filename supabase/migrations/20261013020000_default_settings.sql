@@ -17,6 +17,7 @@ values
   ('LATE_FEE_ENABLED', 'FALSE', 'Whether late fees are enabled'),
   ('REGISTRATION_ENABLED', 'TRUE', 'Whether online registration is enabled'),
   ('REGISTRATION_MAX_PER_HOUR', '15', 'Maximum online registration requests per hour'),
+  ('INVOICE_DUE_DAY', '10', 'Day of the month when monthly invoices are due'),
   ('LOCATION_CHECK_ENABLED', 'TRUE', 'Whether location checks are enabled for attendance'),
   ('SUBJECT_BLOCKED_PAIRS', '', 'Subject ID pairs that cannot be taken together')
 on conflict (setting_key) do nothing;
