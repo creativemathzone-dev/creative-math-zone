@@ -10,7 +10,7 @@ Authorization must be enforced in trusted server code for every action. Hiding c
 
 The new schema is empty by design. The Apps Script spreadsheet has not been provided, so this work has not read or copied student records. Before import, export each sheet as CSV, retain the original IDs, map headers to the new column names, and validate foreign keys and money totals in a staging project.
 
-The old app stores its own password hashes and session tokens. Those are not Supabase Auth credentials. Plan an account activation/password reset for users during cutover rather than copying old hashes into `app_users`.
+The old app stores its own password hashes and session tokens. Those are not Supabase Auth credentials. Plan an account activation/password reset for existing users during cutover rather than copying old hashes into `app_users`. New public registrations use Supabase Auth directly; pending registration rows contain no password or password hash.
 
 ## Original data areas
 

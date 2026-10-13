@@ -237,6 +237,67 @@ function validateTeacherInput(input: Record<string, unknown>, partial: boolean) 
   return row
 }
 
+function validateRegistrationInput(input: Record<string, unknown>, partial = false) {
+  const allowed: Record<string, { column: string; max?: number; required?: boolean; kind?: 'date' | 'gender' | 'mobile' | 'email' | 'number' }> = {
+    Name: { column: 'name', max: 100, required: !partial }, CurrentClass: { column: 'current_class', max: 10, required: !partial },
+    DOB: { column: 'dob', kind: 'date' }, Gender: { column: 'gender', kind: 'gender' }, Mobile: { column: 'mobile', kind: 'mobile' },
+    Email: { column: 'email', kind: 'email' }, Address: { column: 'address', max: 300 }, School: { column: 'school', max: 100 },
+    Board: { column: 'board', max: 30 }, PreviousPercentage: { column: 'previous_percentage', kind: 'number' },
+    ParentName: { column: 'parent_name', max: 100, required: !partial }, Relationship: { column: 'relationship', max: 30 },
+    ParentMobile: { column: 'parent_mobile', kind: 'mobile', required: !partial },
+    ParentWhatsApp: { column: 'parent_whatsapp', kind: 'mobile' }, ParentEmail: { column: 'parent_email', kind: 'email' },
+  }
+  const row: Record<string, unknown> = {}
+  for (const [key, raw] of Object.entries(input)) {
+    const spec = allowed[key]
+    if (!spec) throw new ApiFault('BAD_REQUEST', `Unknown field: ${key}`)
+    let value = requireText(raw, key, spec.max || 300, !!spec.required)
+    if (!value) { row[spec.column] = spec.kind === 'date' || spec.kind === 'number' ? null : ''; continue }
+    if (spec.kind === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new ApiFault('BAD_REQUEST', 'DOB must use yyyy-mm-dd.')
+    if (spec.kind === 'gender') {
+      value = value.toUpperCase()
+      if (!['MALE','FEMALE','OTHER'].includes(value)) throw new ApiFault('BAD_REQUEST', 'Gender must be Male, Female or Other.')
+    }
+    if (spec.kind === 'mobile') {
+      let digits = value.replace(/\D/g, '')
+      if (digits.length === 12 && digits.startsWith('91')) digits = digits.slice(2)
+      if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1)
+      if (!/^[6-9]\d{9}$/.test(digits)) throw new ApiFault('BAD_REQUEST', `${key} must be a valid 10-digit mobile number.`)
+      value = digits
+    }
+    if (spec.kind === 'email') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) || value.length > 120) throw new ApiFault('BAD_REQUEST', `${key} is not a valid email.`)
+      value = value.toLowerCase()
+    }
+    if (spec.kind === 'number') {
+      const n = Number(value)
+      if (!Number.isFinite(n) || n < 0 || n > 100) throw new ApiFault('BAD_REQUEST', 'PreviousPercentage must be from 0 to 100.')
+      row[spec.column] = n; continue
+    }
+    if (key === 'CurrentClass') value = value.toUpperCase()
+    row[spec.column] = value.replace(/^[=+\-@]+/, '')
+  }
+  for (const [key, spec] of Object.entries(allowed)) if (!partial && spec.required && !(spec.column in row)) throw new ApiFault('BAD_REQUEST', `${key} is required.`)
+  return row
+}
+
+async function sha256Hex(value: string) {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function consumeRegistrationLimit(admin: ReturnType<typeof clients>['admin'], rateKey: string, seconds: number, max: number) {
+  const { data, error } = await admin.rpc('consume_registration_limit', { p_rate_key: await sha256Hex(rateKey),
+    p_window_seconds: seconds, p_max_hits: max })
+  if (error) throw error
+  return data === true
+}
+
+function requestIp(request: Request) {
+  const forwarded = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
+  return forwarded.split(',')[0].trim().slice(0, 100)
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response(fail('METHOD_NOT_ALLOWED', 'Use POST.'))
@@ -257,6 +318,92 @@ Deno.serve(async (request) => {
         sessionTimeoutMinutes: Number(settings.SESSION_TIMEOUT_MINUTES || 30),
         registrationEnabled: String(settings.REGISTRATION_ENABLED || 'TRUE').toUpperCase() === 'TRUE', version: '1.0.0',
       } })
+    }
+
+    if (action === 'public.registerOptions') {
+      const [{ data: settings, error: settingsError }, { data: subjects, error: subjectsError }, { data: batches, error: batchesError }] = await Promise.all([
+        admin.from('settings').select('setting_key,value').in('setting_key', ['REGISTRATION_ENABLED', 'SUBJECT_BLOCKED_PAIRS']),
+        admin.from('subjects').select('id,name').eq('status', 'Active').order('name'),
+        admin.from('batches').select('class').eq('status', 'Active').order('class'),
+      ])
+      if (settingsError || subjectsError || batchesError) throw settingsError || subjectsError || batchesError
+      const values = Object.fromEntries((settings || []).map((r) => [r.setting_key, r.value]))
+      const classes = [...new Set((batches || []).map((r) => String(r.class).toUpperCase()).filter(Boolean))]
+      const blockedPairs = String(values.SUBJECT_BLOCKED_PAIRS || '').split(';').map((pair) => pair.split('|').map((id) => id.trim()))
+        .filter((pair) => pair.length === 2 && pair[0] && pair[1])
+      return response({ ok: true, data: { enabled: String(values.REGISTRATION_ENABLED || 'TRUE').toUpperCase() === 'TRUE',
+        classes, subjects: (subjects || []).map((s) => ({ id: s.id, name: s.name })), blockedPairs } })
+    }
+
+    if (action === 'public.register') {
+      if (String(payload.website || '').trim()) return response({ ok: true, data: { requestId: 'REG-00000' } })
+      const { data: settingRows, error: settingError } = await admin.from('settings').select('setting_key,value')
+        .in('setting_key', ['REGISTRATION_ENABLED', 'REGISTRATION_MAX_PER_HOUR', 'SUBJECT_BLOCKED_PAIRS'])
+      if (settingError) throw settingError
+      const settings = Object.fromEntries((settingRows || []).map((r) => [r.setting_key, r.value]))
+      if (String(settings.REGISTRATION_ENABLED || 'TRUE').toUpperCase() !== 'TRUE') throw new ApiFault('CLOSED', 'Online registration is closed. Please contact the centre.')
+      const rawStudent = payload.student && typeof payload.student === 'object' && !Array.isArray(payload.student) ? payload.student : null
+      if (!rawStudent) throw new ApiFault('BAD_REQUEST', 'Provide the student and parent details.')
+      const row = validateRegistrationInput(rawStudent)
+      const password = String(payload.password || '')
+      if (password.length < 8 || password.length > 100) throw new ApiFault('BAD_PASSWORD', 'Choose a password with at least 8 characters.')
+      const subjectIds = Array.isArray(payload.subjects) ? [...new Set(payload.subjects.map((x: unknown) => String(x)))] : []
+      if (subjectIds.length > 6) throw new ApiFault('BAD_REQUEST', 'Choose no more than 6 subjects.')
+      const [{ data: batches }, { data: subjects }] = await Promise.all([
+        admin.from('batches').select('id,class').eq('status', 'Active'),
+        admin.from('subjects').select('id,status').in('id', subjectIds.length ? subjectIds : ['__none__']),
+      ])
+      if (!(batches || []).some((b) => String(b.class).toUpperCase() === row.current_class)) throw new ApiFault('BAD_REQUEST', 'Please choose a class that has an active batch.')
+      if ((subjects || []).length !== subjectIds.length || (subjects || []).some((s) => s.status !== 'Active')) throw new ApiFault('BAD_REQUEST', 'One of the chosen subjects is not available.')
+      const blockedPairs = String(settings.SUBJECT_BLOCKED_PAIRS || '').split(';').map((x) => x.split('|').map((y) => y.trim()))
+      if (blockedPairs.some((pair) => pair.length === 2 && subjectIds.includes(pair[0]) && subjectIds.includes(pair[1]))) throw new ApiFault('RULE_VIOLATION', 'This combination of subjects is not allowed.')
+      const maxPerHour = Math.min(Math.max(Number.parseInt(settings.REGISTRATION_MAX_PER_HOUR || '15', 10) || 15, 1), 200)
+      const ip = requestIp(request)
+      if (!await consumeRegistrationLimit(admin, `submit-ip:${ip}`, 3600, maxPerHour)) throw new ApiFault('RATE_LIMIT', 'Many requests are coming in right now. Please try again in a little while.')
+      if (!await consumeRegistrationLimit(admin, `submit-parent:${row.parent_mobile}`, 21600, 5)) throw new ApiFault('RATE_LIMIT', 'Too many requests from this mobile number. Please contact the centre.')
+      const { count: pendingCount, error: pendingError } = await admin.from('registrations').select('id', { count: 'exact', head: true }).eq('status', 'PENDING')
+      if (pendingError) throw pendingError
+      if ((pendingCount || 0) >= 300) throw new ApiFault('RATE_LIMIT', 'Registration is paused for now. Please contact the centre.')
+      const possibleMobiles = [...new Set([row.mobile, row.parent_mobile, row.parent_whatsapp].filter(Boolean))]
+      const normalizedName = String(row.name).toLowerCase()
+      for (const mobile of possibleMobiles) {
+        const [{ data: existingStudents }, { data: existingRequests }] = await Promise.all([
+          admin.from('students').select('id,name,mobile,parent_mobile,parent_whatsapp').or(`mobile.eq.${mobile},parent_mobile.eq.${mobile},parent_whatsapp.eq.${mobile}`),
+          admin.from('registrations').select('id,name,mobile,parent_mobile,parent_whatsapp').eq('status', 'PENDING').or(`mobile.eq.${mobile},parent_mobile.eq.${mobile},parent_whatsapp.eq.${mobile}`),
+        ])
+        if ([...(existingStudents || []), ...(existingRequests || [])].some((candidate) => String(candidate.name).toLowerCase() === normalizedName)) {
+          throw new ApiFault('DUPLICATE', 'This looks like a duplicate of an existing record. Please contact the centre.')
+        }
+      }
+      const id = await newId(admin, 'registrations', 'REG-', 5)
+      const { data: authRecord, error: authCreateError } = await admin.auth.admin.createUser({
+        email: authEmailForUsername(id), password, email_confirm: true,
+      })
+      if (authCreateError || !authRecord.user) throw new ApiFault('ACCOUNT_CREATE_FAILED', 'Could not securely save the sign-in password. Please try again.')
+      const { error: insertError } = await admin.from('registrations').insert({ ...row, id, status: 'PENDING',
+        requested_subjects: subjectIds, registration_auth_user_id: authRecord.user.id })
+      if (insertError) {
+        await admin.auth.admin.deleteUser(authRecord.user.id)
+        if (insertError.code === '23505') throw new ApiFault('DUPLICATE', 'This request was already received.')
+        throw insertError
+      }
+      await admin.from('admin_logs').insert({ id: `LOG-${crypto.randomUUID()}`, username: 'public', role: '',
+        action: 'REGISTRATION_SUBMITTED', entity_type: 'REGISTRATION', entity_id: id,
+        details: JSON.stringify({ name: row.name, currentClass: row.current_class }), result: 'OK' })
+      return response({ ok: true, data: { requestId: id } })
+    }
+
+    if (action === 'public.registerStatus') {
+      const id = String(payload.requestId || '').trim().toUpperCase()
+      const mobile = String(payload.mobile || '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '').replace(/^0(?=\d{10}$)/, '')
+      if (!/^REG-\d{5}$/.test(id) || !/^[6-9]\d{9}$/.test(mobile)) throw new ApiFault('NOT_FOUND', 'No request found for those details. Check the request ID and mobile number.')
+      if (!await consumeRegistrationLimit(admin, `status-ip:${requestIp(request)}`, 3600, 10)) throw new ApiFault('RATE_LIMIT', 'Too many attempts. Please try again later.')
+      const { data: reg, error } = await admin.from('registrations').select('id,name,status,submitted_at,mobile,parent_mobile,student_id,reject_reason').eq('id', id).maybeSingle()
+      if (error) throw error
+      if (!reg || ![reg.mobile, reg.parent_mobile].includes(mobile)) throw new ApiFault('NOT_FOUND', 'No request found for those details. Check the request ID and mobile number.')
+      return response({ ok: true, data: { RegistrationID: reg.id, Name: reg.name, Status: reg.status,
+        SubmittedAt: reg.submitted_at, StudentID: reg.status === 'APPROVED' ? reg.student_id || '' : '',
+        RejectReason: reg.status === 'REJECTED' ? reg.reject_reason : '' } })
     }
 
     if (action === 'auth.login') {
@@ -359,6 +506,8 @@ Deno.serve(async (request) => {
       'timetable.setStatus': 'MASTER_EDIT', 'notices.adminList': 'NOTICE_VIEW',
       'notices.add': 'NOTICE_EDIT', 'notices.update': 'NOTICE_EDIT', 'notices.setStatus': 'NOTICE_EDIT',
       'notices.list': 'NOTICE_VIEW',
+      'registrations.list': 'STUDENT_VIEW', 'registrations.pendingCount': 'STUDENT_VIEW',
+      'registrations.update': 'STUDENT_EDIT', 'registrations.approve': 'STUDENT_EDIT', 'registrations.reject': 'STUDENT_EDIT',
     }
     const permission = needed[action]
     const granted = permissionsFor(user)
@@ -814,6 +963,151 @@ Deno.serve(async (request) => {
       const { data, count, error } = await query
       if (error) throw error
       return response({ ok: true, data: { total: count || 0, students: (data || []).map(legacyStudent) } })
+    }
+
+    if (action === 'registrations.list') {
+      const status = String(payload.status || '').toUpperCase()
+      const [{ data: all, error }, { data: subjects, error: subjectsError }] = await Promise.all([
+        admin.from('registrations').select('id,submitted_at,status,name,current_class,dob,gender,mobile,email,address,school,board,previous_percentage,parent_name,relationship,parent_mobile,parent_whatsapp,parent_email,requested_subjects,reviewed_by,reviewed_at,reject_reason,student_id').order('submitted_at', { ascending: false }).limit(500),
+        admin.from('subjects').select('id,name'),
+      ])
+      if (error || subjectsError) throw error || subjectsError
+      const subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
+      const counts = { PENDING: 0, APPROVED: 0, REJECTED: 0 }
+      for (const reg of all || []) if (reg.status in counts) counts[reg.status as keyof typeof counts]++
+      const rows = (all || []).filter((r) => !status || r.status === status).map((r) => {
+        const requested = Array.isArray(r.requested_subjects) ? r.requested_subjects.map(String) : []
+        return { RegistrationID: r.id, SubmittedAt: r.submitted_at, Status: r.status, Name: r.name,
+          CurrentClass: r.current_class, DOB: r.dob, Gender: r.gender, Mobile: r.mobile, Email: r.email,
+          Address: r.address, School: r.school, Board: r.board, PreviousPercentage: r.previous_percentage,
+          ParentName: r.parent_name, Relationship: r.relationship, ParentMobile: r.parent_mobile,
+          ParentWhatsApp: r.parent_whatsapp, ParentEmail: r.parent_email, RequestedSubjects: requested.join(','),
+          SubjectNames: requested.map((id) => subjectNames.get(id) || id).join(', '), ReviewedBy: r.reviewed_by,
+          ReviewedAt: r.reviewed_at, RejectReason: r.reject_reason, StudentID: r.student_id || '' }
+      })
+      return response({ ok: true, data: { rows, counts } })
+    }
+
+    if (action === 'registrations.pendingCount') {
+      const { count, error } = await admin.from('registrations').select('id', { count: 'exact', head: true }).eq('status', 'PENDING')
+      if (error) throw error
+      return response({ ok: true, data: { count: count || 0 } })
+    }
+
+    if (action === 'registrations.update') {
+      const id = requireText(payload.id, 'Request ID', 40, true)
+      const input = payload.changes && typeof payload.changes === 'object' && !Array.isArray(payload.changes) ? payload.changes : null
+      if (!input || !Object.keys(input).length) throw new ApiFault('BAD_REQUEST', 'Nothing to update.')
+      const changes = validateRegistrationInput(input, true)
+      if (changes.current_class) {
+        const { data: batches } = await admin.from('batches').select('class').eq('status', 'Active')
+        if (!(batches || []).some((b) => String(b.class).toUpperCase() === changes.current_class)) throw new ApiFault('BAD_REQUEST', 'Class must have an active batch.')
+      }
+      const { data: old, error: readError } = await admin.from('registrations').select('*').eq('id', id).maybeSingle()
+      if (readError) throw readError
+      if (!old) throw new ApiFault('NOT_FOUND', 'Request not found.')
+      if (old.status !== 'PENDING') throw new ApiFault('BAD_REQUEST', 'Only pending requests can be edited.')
+      const { error } = await admin.from('registrations').update(changes).eq('id', id)
+      if (error) throw error
+      await logAction(admin, user, 'EDIT_REGISTRATION', 'REGISTRATION', id, changes)
+      return response({ ok: true, data: { changed: Object.keys(changes) } })
+    }
+
+    if (action === 'registrations.reject') {
+      const id = requireText(payload.id, 'Request ID', 40, true)
+      const reason = requireText(payload.reason, 'Reason', 200, true)
+      const { data: old, error: readError } = await admin.from('registrations').select('status,registration_auth_user_id').eq('id', id).maybeSingle()
+      if (readError) throw readError
+      if (!old) throw new ApiFault('NOT_FOUND', 'Request not found.')
+      if (old.status !== 'PENDING') throw new ApiFault('BAD_REQUEST', `This request is already ${String(old.status).toLowerCase()}.`)
+      const { error } = await admin.from('registrations').update({ status: 'REJECTED', reject_reason: reason,
+        reviewed_by: user.id, reviewed_at: new Date().toISOString(), registration_auth_user_id: null }).eq('id', id)
+      if (error) throw error
+      if (old.registration_auth_user_id) await admin.auth.admin.deleteUser(old.registration_auth_user_id)
+      await logAction(admin, user, 'REJECT_REGISTRATION', 'REGISTRATION', id, { reason })
+      return response({ ok: true, data: { ok: true } })
+    }
+
+    if (action === 'registrations.approve') {
+      const registrationId = requireText(payload.id, 'Request ID', 40, true)
+      const batchId = requireText(payload.batchId, 'Batch', 40, true)
+      const startDate = requireText(payload.startDate || new Date().toISOString().slice(0, 10), 'Start date', 10, true)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new ApiFault('BAD_REQUEST', 'Start date must use yyyy-mm-dd.')
+      const picks = Array.isArray(payload.subjects) ? payload.subjects : []
+      if (picks.length > 6) throw new ApiFault('BAD_REQUEST', 'Choose no more than 6 subjects.')
+      const seen = new Set<string>()
+      for (const pick of picks) {
+        if (!pick || !pick.subjectId || !pick.teacherId) throw new ApiFault('BAD_REQUEST', 'Choose a teacher for every selected subject.')
+        if (seen.has(String(pick.subjectId))) throw new ApiFault('BAD_REQUEST', 'A subject was selected twice.')
+        seen.add(String(pick.subjectId))
+      }
+      const { data: reg, error: regError } = await admin.from('registrations').select('*').eq('id', registrationId).maybeSingle()
+      if (regError) throw regError
+      if (!reg) throw new ApiFault('NOT_FOUND', 'Request not found.')
+      if (reg.status !== 'PENDING') throw new ApiFault('BAD_REQUEST', `This request is already ${String(reg.status).toLowerCase()}.`)
+      if (!reg.registration_auth_user_id) throw new ApiFault('BAD_REQUEST', 'This request has no saved sign-in account. Ask the applicant to register again.')
+      const [{ data: batch }, { data: allSubjects }, { data: allTeachers }, { data: settingRows }] = await Promise.all([
+        admin.from('batches').select('id,name,class,status').eq('id', batchId).maybeSingle(),
+        admin.from('subjects').select('id,name,status'), admin.from('teachers').select('id,name,status'),
+        admin.from('settings').select('setting_key,value').in('setting_key', ['ACADEMIC_YEAR','STUDENT_ID_PREFIX','SUBJECT_BLOCKED_PAIRS']),
+      ])
+      if (!batch || batch.status !== 'Active' || String(batch.class).toUpperCase() !== String(reg.current_class).toUpperCase()) throw new ApiFault('BAD_REQUEST', 'Choose an active batch for the applicant’s class.')
+      const subjectsById = new Map((allSubjects || []).map((s) => [s.id, s]))
+      const teachersById = new Map((allTeachers || []).map((t) => [t.id, t]))
+      for (const pick of picks) {
+        if (subjectsById.get(String(pick.subjectId))?.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'A selected subject is not available.')
+        if (teachersById.get(String(pick.teacherId))?.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'A selected teacher is not available.')
+      }
+      const chosenSubjectIds = picks.map((p) => String(p.subjectId))
+      const settingMap = Object.fromEntries((settingRows || []).map((r) => [r.setting_key, r.value]))
+      const blockedPairs = String(settingMap.SUBJECT_BLOCKED_PAIRS || '').split(';').map((x) => x.split('|').map((y) => y.trim()))
+      if (blockedPairs.some((pair) => pair.length === 2 && chosenSubjectIds.includes(pair[0]) && chosenSubjectIds.includes(pair[1]))) throw new ApiFault('RULE_VIOLATION', 'This combination of subjects is not allowed.')
+      const studentInput: Record<string, unknown> = { Name: reg.name, CurrentClass: reg.current_class, CurrentBatch: batchId }
+      const regFieldMap: Record<string, string> = { dob: 'DOB', gender: 'Gender', mobile: 'Mobile', email: 'Email', address: 'Address',
+        school: 'School', board: 'Board', parent_name: 'ParentName', relationship: 'Relationship', parent_mobile: 'ParentMobile',
+        parent_whatsapp: 'ParentWhatsApp', parent_email: 'ParentEmail', previous_percentage: 'PreviousPercentage' }
+      for (const [dbField, apiField] of Object.entries(regFieldMap)) if (reg[dbField] !== null && reg[dbField] !== '') studentInput[apiField] = reg[dbField]
+      const studentFields = validateStudentInput(studentInput, false)
+      const year = new Date().getFullYear()
+      const prefix = `${settingMap.STUDENT_ID_PREFIX || 'CMZ'}-${year}-`
+      const studentId = await newId(admin, 'students', prefix)
+      const { data: authIdentity, error: authError } = await admin.auth.admin.getUserById(reg.registration_auth_user_id)
+      if (authError || !authIdentity.user) throw new ApiFault('BAD_REQUEST', 'The applicant’s saved sign-in account is no longer available.')
+      const now = new Date().toISOString()
+      const newStudent = { ...studentFields, id: studentId, registration_year: String(year), registration_date: now.slice(0, 10),
+        roll_no: studentId.slice(prefix.length), status: 'ACTIVE', academic_year: settingMap.ACADEMIC_YEAR || `${year}-${String(year + 1).slice(-2)}`,
+        created_at: now, updated_at: now }
+      const { error: studentInsertError } = await admin.from('students').insert(newStudent)
+      if (studentInsertError) throw studentInsertError
+      const { error: appUserError } = await admin.from('app_users').insert({ auth_user_id: reg.registration_auth_user_id,
+        username: studentId, user_type: 'STUDENT', role: 'STUDENT', linked_id: studentId, status: 'Active', must_change_password: false })
+      if (appUserError) { await admin.from('students').delete().eq('id', studentId); if (appUserError.code === '23505') throw new ApiFault('DUPLICATE', 'Could not link this applicant’s login.'); throw appUserError }
+      try {
+        for (const pick of picks) {
+          const subject = subjectsById.get(String(pick.subjectId))!, teacherRow = teachersById.get(String(pick.teacherId))!
+          const subjectLinkId = await newId(admin, 'student_subjects', 'SS-', 4)
+          const { error } = await admin.from('student_subjects').insert({ id: subjectLinkId, student_id: studentId,
+            subject_id: String(pick.subjectId), teacher_id: String(pick.teacherId), batch_id: batchId,
+            start_date: startDate, status: 'ACTIVE', academic_year: newStudent.academic_year })
+          if (error) throw error
+          await admin.from('change_history').insert({ id: `CHG-${crypto.randomUUID()}`, student_id: studentId, field: 'Subject',
+            old_value: '', new_value: `${subject.name} / ${teacherRow.name} / ${batch.name}`, changed_by: user.id,
+            reason: `Online registration ${registrationId}`, academic_year: newStudent.academic_year })
+        }
+      } catch (error) {
+        await admin.from('app_users').delete().eq('auth_user_id', reg.registration_auth_user_id)
+        await admin.from('students').delete().eq('id', studentId)
+        throw error
+      }
+      const { error: finishError } = await admin.from('registrations').update({ status: 'APPROVED', reviewed_by: user.id,
+        reviewed_at: now, student_id: studentId, registration_auth_user_id: null }).eq('id', registrationId)
+      if (finishError) {
+        await admin.from('app_users').delete().eq('auth_user_id', reg.registration_auth_user_id)
+        await admin.from('students').delete().eq('id', studentId)
+        throw finishError
+      }
+      await logAction(admin, user, 'APPROVE_REGISTRATION', 'REGISTRATION', registrationId, { studentId, batchId, subjects: chosenSubjectIds })
+      return response({ ok: true, data: { studentId, username: studentId, tempPassword: '', warnings: [], portalUrl: '' } })
     }
 
     if (action === 'students.get') {

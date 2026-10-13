@@ -220,7 +220,7 @@ dialog::backdrop{background:rgba(16,28,48,.55)}
       <p class="muted" style="margin:0 0 1.25rem">You are using a temporary password. Set your own before continuing.</p>
       <div id="pw-msg"></div>
       <label class="f"><span>Temporary password</span><input name="oldPassword" type="password" autocomplete="current-password" required></label>
-      <label class="f"><span>New password</span><input name="newPassword" type="password" autocomplete="new-password" required><small>At least 6 characters.</small></label>
+      <label class="f"><span>New password</span><input name="newPassword" type="password" autocomplete="new-password" required minlength="8"><small>At least 8 characters.</small></label>
       <label class="f"><span>Type it again</span><input name="again" type="password" autocomplete="new-password" required></label>
       <button class="btn primary" style="width:100%" id="pw-btn">Save and continue</button>
       <p style="text-align:center"><button type="button" class="link" id="pw-out">Sign out</button></p>
@@ -747,8 +747,8 @@ function renderRegForm() {
     '<div class="card"><h2>Choose your password</h2>' +
       '<p class="muted" style="font-size:.88rem;margin:0 0 .8rem">You will sign in with this password once the centre approves you. Nobody at the centre can see it.</p>' +
       '<div class="grid2">' +
-      '<label class="f"><span>Password <em style="color:var(--bad);font-style:normal">*</em></span><div class="pw"><input name="password" type="password" required minlength="6" maxlength="100" autocomplete="new-password"><button type="button" class="btn small" data-show="password">Show</button></div><small>At least 6 characters.</small></label>' +
-      '<label class="f"><span>Type it again <em style="color:var(--bad);font-style:normal">*</em></span><input name="again" type="password" required minlength="6" maxlength="100" autocomplete="new-password"></label>' +
+      '<label class="f"><span>Password <em style="color:var(--bad);font-style:normal">*</em></span><div class="pw"><input name="password" type="password" required minlength="8" maxlength="100" autocomplete="new-password"><button type="button" class="btn small" data-show="password">Show</button></div><small>At least 8 characters.</small></label>' +
+      '<label class="f"><span>Type it again <em style="color:var(--bad);font-style:normal">*</em></span><input name="again" type="password" required minlength="8" maxlength="100" autocomplete="new-password"></label>' +
       '</div></div>' +
     '<div class="hp" aria-hidden="true"><label>Website <input name="website" tabindex="-1" autocomplete="off"></label></div>' +
     '<div id="reg-msg" style="margin-top:1rem"></div>' +
