@@ -85,8 +85,8 @@ function mapMaster(table: string, row: Record<string, unknown>) {
   return { RoomID: row.id, RoomName: row.name, Capacity: row.capacity, Status: row.status }
 }
 
-async function newId(admin: ReturnType<typeof clients>['admin'], counter: string, prefix: string) {
-  const { data, error } = await admin.rpc('next_id', { p_counter_name: counter, p_prefix: prefix, p_width: 3 })
+async function newId(admin: ReturnType<typeof clients>['admin'], counter: string, prefix: string, width = 3) {
+  const { data, error } = await admin.rpc('next_id', { p_counter_name: counter, p_prefix: prefix, p_width: width })
   if (error) throw error
   return String(data)
 }
@@ -113,6 +113,128 @@ function legacyStudent(row: Record<string, unknown>) {
     ParentEmail: row.parent_email, PreviousPercentage: row.previous_percentage, Status: row.status,
     AcademicYear: row.academic_year, CreatedAt: row.created_at, UpdatedAt: row.updated_at,
   }
+}
+
+function validateStudentInput(input: Record<string, unknown>, partial: boolean) {
+  const fields: Record<string, { column: string; max?: number; required?: boolean; kind?: 'date' | 'number' | 'mobile' | 'email' | 'status' | 'gender' }> = {
+    RollNo: { column: 'roll_no', max: 20 }, Name: { column: 'name', max: 100, required: !partial },
+    PhotoURL: { column: 'photo_url', max: 500 }, DOB: { column: 'dob', kind: 'date' },
+    Gender: { column: 'gender', kind: 'gender' }, Mobile: { column: 'mobile', kind: 'mobile' },
+    Email: { column: 'email', kind: 'email' }, Address: { column: 'address', max: 300 },
+    School: { column: 'school', max: 100 }, Board: { column: 'board', max: 30 },
+    CurrentClass: { column: 'current_class', max: 10, required: !partial },
+    CurrentBatch: { column: 'current_batch_id', max: 40 }, ParentName: { column: 'parent_name', max: 100 },
+    Relationship: { column: 'relationship', max: 30 }, ParentMobile: { column: 'parent_mobile', kind: 'mobile' },
+    ParentWhatsApp: { column: 'parent_whatsapp', kind: 'mobile' }, ParentEmail: { column: 'parent_email', kind: 'email' },
+    PreviousPercentage: { column: 'previous_percentage', kind: 'number' },
+    Status: { column: 'status', kind: 'status' },
+  }
+  const row: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(input)) {
+    const spec = fields[key]
+    if (!spec) throw new ApiFault('BAD_REQUEST', `Unknown field: ${key}`)
+    let v = requireText(value, key, spec.max || 300, !!spec.required)
+    if (v === '') { row[spec.column] = spec.kind === 'date' || spec.kind === 'number' || spec.column === 'current_batch_id' ? null : ''; continue }
+    if (spec.kind === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new ApiFault('BAD_REQUEST', `${key} must use yyyy-mm-dd.`)
+    if (spec.kind === 'number') {
+      const n = Number(v)
+      if (!Number.isFinite(n) || n < 0 || n > 100) throw new ApiFault('BAD_REQUEST', `${key} must be from 0 to 100.`)
+      row[spec.column] = n; continue
+    }
+    if (spec.kind === 'mobile') {
+      let digits = v.replace(/\D/g, '')
+      if (digits.length === 12 && digits.startsWith('91')) digits = digits.slice(2)
+      if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1)
+      if (!/^[6-9]\d{9}$/.test(digits)) throw new ApiFault('BAD_REQUEST', `${key} must be a valid 10-digit mobile number.`)
+      v = digits
+    }
+    if (spec.kind === 'email') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || v.length > 120) throw new ApiFault('BAD_REQUEST', `${key} is not a valid email.`)
+      v = v.toLowerCase()
+    }
+    if (spec.kind === 'gender') {
+      const gender = v.toUpperCase()
+      if (!['MALE', 'FEMALE', 'OTHER'].includes(gender)) throw new ApiFault('BAD_REQUEST', 'Gender must be Male, Female or Other.')
+      v = gender
+    }
+    if (spec.kind === 'status') {
+      const status = v.toUpperCase()
+      if (!['ACTIVE', 'INACTIVE', 'COMPLETED', 'LEFT', 'SUSPENDED'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Invalid student status.')
+      v = status
+    }
+    if (key === 'CurrentClass') v = v.toUpperCase()
+    row[spec.column] = v.replace(/^[=+\-@]+/, '')
+  }
+  if (!partial) {
+    for (const [key, spec] of Object.entries(fields)) if (spec.required && !(spec.column in row)) throw new ApiFault('BAD_REQUEST', `${key} is required.`)
+  }
+  return row
+}
+
+function passwordTemp(length = 12) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%'
+  const bytes = crypto.getRandomValues(new Uint8Array(length))
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('')
+}
+
+function authEmailForUsername(username: string) {
+  return `${username.toLowerCase()}@login.creativemathzone.in`
+}
+
+function legacyTeacher(row: Record<string, unknown>) {
+  return { TeacherID: row.id, Name: row.name, Photo: row.photo_url, Mobile: row.mobile, Email: row.email,
+    Address: row.address, Qualification: row.qualification, JoiningDate: row.joining_date, Status: row.status,
+    Username: row.username, IncomeMethod: row.income_method, DefaultRatePerStudent: row.default_rate_per_student,
+    IncomeVisibleToTeacher: row.income_visible_to_teacher ? 'TRUE' : 'FALSE', CreatedAt: row.created_at, UpdatedAt: row.updated_at }
+}
+
+function validateTeacherInput(input: Record<string, unknown>, partial: boolean) {
+  const fields: Record<string, { column: string; max?: number; kind?: 'date' | 'mobile' | 'email' | 'status' | 'money' | 'bool' | 'income' }> = {
+    Name: { column: 'name', max: 100 }, Photo: { column: 'photo_url', max: 500 }, Mobile: { column: 'mobile', kind: 'mobile' },
+    Email: { column: 'email', kind: 'email' }, Address: { column: 'address', max: 300 },
+    Qualification: { column: 'qualification', max: 150 }, JoiningDate: { column: 'joining_date', kind: 'date' },
+    Status: { column: 'status', kind: 'status' }, IncomeMethod: { column: 'income_method', kind: 'income' },
+    DefaultRatePerStudent: { column: 'default_rate_per_student', kind: 'money' },
+    IncomeVisibleToTeacher: { column: 'income_visible_to_teacher', kind: 'bool' },
+  }
+  const row: Record<string, unknown> = {}
+  for (const [key, raw] of Object.entries(input)) {
+    const spec = fields[key]
+    if (!spec) throw new ApiFault('BAD_REQUEST', `Unknown field: ${key}`)
+    let value = requireText(raw, key, spec.max || 300, key === 'Name' && !partial)
+    if (!value) { row[spec.column] = spec.kind === 'date' ? null : ''; continue }
+    if (spec.kind === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new ApiFault('BAD_REQUEST', 'JoiningDate must use yyyy-mm-dd.')
+    if (spec.kind === 'mobile') {
+      let digits = value.replace(/\D/g, '')
+      if (digits.length === 12 && digits.startsWith('91')) digits = digits.slice(2)
+      if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1)
+      if (!/^[6-9]\d{9}$/.test(digits)) throw new ApiFault('BAD_REQUEST', 'Mobile must be a valid 10-digit number.')
+      value = digits
+    }
+    if (spec.kind === 'email') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) || value.length > 120) throw new ApiFault('BAD_REQUEST', `${key} is not a valid email.`)
+      value = value.toLowerCase()
+    }
+    if (spec.kind === 'status') {
+      const normalized = value.toLowerCase()
+      if (!['active', 'inactive'].includes(normalized)) throw new ApiFault('BAD_REQUEST', 'Status must be Active or Inactive.')
+      value = normalized === 'active' ? 'Active' : 'Inactive'
+    }
+    if (spec.kind === 'income' && value !== 'PER_STUDENT_MONTH') throw new ApiFault('BAD_REQUEST', 'IncomeMethod is invalid.')
+    if (spec.kind === 'money') {
+      const n = Number(value)
+      if (!Number.isFinite(n) || n < 0 || n > 100000) throw new ApiFault('BAD_REQUEST', 'DefaultRatePerStudent must be from 0 to 100000.')
+      row[spec.column] = n; continue
+    }
+    if (spec.kind === 'bool') {
+      const normalized = value.toUpperCase()
+      if (!['TRUE', 'FALSE'].includes(normalized)) throw new ApiFault('BAD_REQUEST', 'IncomeVisibleToTeacher must be TRUE or FALSE.')
+      row[spec.column] = normalized === 'TRUE'; continue
+    }
+    row[spec.column] = value.replace(/^[=+\-@]+/, '')
+  }
+  if (!partial && !row.name) throw new ApiFault('BAD_REQUEST', 'Name is required.')
+  return row
 }
 
 Deno.serve(async (request) => {
@@ -224,6 +346,13 @@ Deno.serve(async (request) => {
       'batches.add': 'MASTER_EDIT', 'batches.update': 'MASTER_EDIT',
       'rooms.add': 'MASTER_EDIT', 'rooms.update': 'MASTER_EDIT',
       'students.list': 'STUDENT_VIEW', 'students.get': 'STUDENT_VIEW',
+      'students.add': 'STUDENT_EDIT', 'students.update': 'STUDENT_EDIT',
+      'students.resetPassword': 'STUDENT_EDIT',
+      'studentSubjects.assign': 'STUDENT_EDIT', 'studentSubjects.end': 'STUDENT_EDIT',
+      'changes.list': 'STUDENT_VIEW',
+      'teachers.add': 'TEACHER_EDIT', 'teachers.update': 'TEACHER_EDIT',
+      'teachers.resetPassword': 'TEACHER_EDIT',
+      'settings.update': 'SETTINGS_EDIT',
     }
     const permission = needed[action]
     const granted = permissionsFor(user)
@@ -260,11 +389,59 @@ Deno.serve(async (request) => {
     if (action === 'teachers.list') {
       const { data, error } = await admin.from('teachers').select('*').order('name')
       if (error) throw error
-      return response({ ok: true, data: (data || []).map((r) => ({ TeacherID: r.id, Name: r.name,
-        Photo: r.photo_url, Mobile: r.mobile, Email: r.email, Address: r.address, Qualification: r.qualification,
-        JoiningDate: r.joining_date, Status: r.status, Username: r.username, IncomeMethod: r.income_method,
-        DefaultRatePerStudent: r.default_rate_per_student, IncomeVisibleToTeacher: r.income_visible_to_teacher,
-        CreatedAt: r.created_at, UpdatedAt: r.updated_at })) })
+      return response({ ok: true, data: (data || []).map(legacyTeacher) })
+    }
+
+    if (action === 'teachers.add') {
+      const input = payload.teacher && typeof payload.teacher === 'object' && !Array.isArray(payload.teacher) ? payload.teacher : null
+      if (!input) throw new ApiFault('BAD_REQUEST', 'Provide the teacher details.')
+      const username = requireText(input.Username, 'Username', 30, true)
+      if (!/^[A-Za-z0-9._-]{3,30}$/.test(username)) throw new ApiFault('BAD_REQUEST', 'Username must be 3–30 letters, numbers, dots, dashes or underscores.')
+      const { data: duplicateUser } = await admin.from('app_users').select('id').ilike('username', username).maybeSingle()
+      if (duplicateUser) throw new ApiFault('DUPLICATE', 'That username is already taken.')
+      const fields = { ...input }; delete fields.Username
+      const row = validateTeacherInput(fields, false)
+      const granted = permissionsFor(user)
+      if (('income_method' in row || 'default_rate_per_student' in row) && !granted.includes('*') && !granted.includes('TEACHER_INCOME_MANAGE')) throw new ApiFault('FORBIDDEN', 'You cannot change teacher pay settings.')
+      if ('income_visible_to_teacher' in row && !granted.includes('*') && !granted.includes('TEACHER_INCOME_GRANT')) throw new ApiFault('FORBIDDEN', 'You cannot change teacher income visibility.')
+      const id = await newId(admin, 'teachers', 'T-')
+      const tempPassword = payload.password ? String(payload.password) : passwordTemp()
+      if (tempPassword.length < 8 || tempPassword.length > 200) throw new ApiFault('BAD_PASSWORD', 'Password must be at least 8 characters.')
+      const { data: created, error: authCreateError } = await admin.auth.admin.createUser({ email: authEmailForUsername(username), password: tempPassword, email_confirm: true })
+      if (authCreateError || !created.user) throw new ApiFault('ACCOUNT_CREATE_FAILED', 'Could not create the teacher login account.')
+      const now = new Date().toISOString()
+      const teacherRow = { id, username, status: 'Active', photo_url: '', mobile: '', email: '', address: '', qualification: '',
+        joining_date: now.slice(0, 10), income_method: 'PER_STUDENT_MONTH', default_rate_per_student: 0,
+        income_visible_to_teacher: false, ...row, created_at: now, updated_at: now }
+      const { error: teacherError } = await admin.from('teachers').insert(teacherRow)
+      if (teacherError) { await admin.auth.admin.deleteUser(created.user.id); if (teacherError.code === '23505') throw new ApiFault('DUPLICATE', 'A teacher with these details already exists.'); throw teacherError }
+      const { error: linkError } = await admin.from('app_users').insert({ auth_user_id: created.user.id, username,
+        user_type: 'TEACHER', role: 'TEACHER', linked_id: id, status: 'Active', must_change_password: !payload.password })
+      if (linkError) {
+        await admin.from('teachers').delete().eq('id', id); await admin.auth.admin.deleteUser(created.user.id)
+        if (linkError.code === '23505') throw new ApiFault('DUPLICATE', 'That username is already taken.')
+        throw linkError
+      }
+      await logAction(admin, user, 'ADD_TEACHER', 'TEACHER', id, { name: teacherRow.name, username })
+      return response({ ok: true, data: { teacherId: id, username, tempPassword: !payload.password ? tempPassword : undefined } })
+    }
+
+    if (action === 'teachers.update') {
+      const id = requireText(payload.teacherId, 'Teacher ID', 40, true)
+      const changes = payload.changes && typeof payload.changes === 'object' && !Array.isArray(payload.changes) ? validateTeacherInput(payload.changes, true) : {}
+      if (!Object.keys(changes).length) throw new ApiFault('BAD_REQUEST', 'Nothing to update.')
+      const granted = permissionsFor(user)
+      if (('income_method' in changes || 'default_rate_per_student' in changes) && !granted.includes('*') && !granted.includes('TEACHER_INCOME_MANAGE')) throw new ApiFault('FORBIDDEN', 'You cannot change teacher pay settings.')
+      if ('income_visible_to_teacher' in changes && !granted.includes('*') && !granted.includes('TEACHER_INCOME_GRANT')) throw new ApiFault('FORBIDDEN', 'You cannot change teacher income visibility.')
+      const { data: oldTeacher, error: readError } = await admin.from('teachers').select('*').eq('id', id).maybeSingle()
+      if (readError) throw readError
+      if (!oldTeacher) throw new ApiFault('NOT_FOUND', 'Teacher not found.')
+      changes.updated_at = new Date().toISOString()
+      const { error } = await admin.from('teachers').update(changes).eq('id', id)
+      if (error) throw error
+      if ('status' in changes) await admin.from('app_users').update({ status: changes.status }).eq('user_type', 'TEACHER').eq('linked_id', id)
+      await logAction(admin, user, 'EDIT_TEACHER', 'TEACHER', id, changes)
+      return response({ ok: true, data: { changed: Object.keys(changes).filter((x) => x !== 'updated_at') } })
     }
 
     if (action === 'users.list') {
@@ -373,6 +550,195 @@ Deno.serve(async (request) => {
           TeacherRateOverride: r.teacher_rate_override, AcademicYear: r.academic_year, CreatedAt: r.created_at })),
         user: linkedUser ? { UserID: linkedUser.id, Username: linkedUser.username, UserType: linkedUser.user_type,
           Role: linkedUser.role, Status: linkedUser.status, LinkedID: linkedUser.linked_id } : null } })
+    }
+
+    if (action === 'students.add') {
+      const input = payload.student && typeof payload.student === 'object' && !Array.isArray(payload.student) ? payload.student : null
+      if (!input) throw new ApiFault('BAD_REQUEST', 'Provide the student details.')
+      const row = validateStudentInput(input, false)
+      if (row.current_batch_id) {
+        const { data: batch } = await admin.from('batches').select('id,class,status').eq('id', row.current_batch_id).maybeSingle()
+        if (!batch || batch.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Choose an active batch.')
+        if (String(batch.class).toUpperCase() !== String(row.current_class).toUpperCase()) throw new ApiFault('BAD_REQUEST', 'The selected batch is for a different class.')
+      }
+      const { data: existing } = await admin.from('students').select('id').ilike('name', String(row.name)).eq('mobile', row.mobile || '').limit(1)
+      if (existing?.length) throw new ApiFault('DUPLICATE', `A student with this name and mobile already exists (${existing[0].id}).`)
+      const year = new Date().getFullYear()
+      const { data: studentSettings } = await admin.from('settings').select('setting_key,value').in('setting_key', ['STUDENT_ID_PREFIX', 'ACADEMIC_YEAR'])
+      const studentSettingMap = Object.fromEntries((studentSettings || []).map((r) => [r.setting_key, r.value]))
+      const prefix = `${studentSettingMap.STUDENT_ID_PREFIX || 'CMZ'}-${year}-`
+      const id = await newId(admin, 'students', prefix)
+      const tempPassword = payload.password ? String(payload.password) : passwordTemp()
+      if (tempPassword.length < 8 || tempPassword.length > 200) throw new ApiFault('BAD_PASSWORD', 'Password must be at least 8 characters.')
+      const email = authEmailForUsername(id)
+      const { data: created, error: authCreateError } = await admin.auth.admin.createUser({ email, password: tempPassword, email_confirm: true })
+      if (authCreateError || !created.user) throw new ApiFault('ACCOUNT_CREATE_FAILED', 'Could not create the student login account.')
+      const now = new Date().toISOString()
+      const studentRow = { ...row, id, registration_year: String(year), registration_date: now.slice(0, 10),
+        roll_no: row.roll_no || id.slice(prefix.length), status: 'ACTIVE', academic_year: studentSettingMap.ACADEMIC_YEAR || `${year}-${String(year + 1).slice(-2)}`,
+        created_at: now, updated_at: now }
+      const { error: studentError } = await admin.from('students').insert(studentRow)
+      if (studentError) { await admin.auth.admin.deleteUser(created.user.id); if (studentError.code === '23505') throw new ApiFault('DUPLICATE', 'A student with these details already exists.'); throw studentError }
+      const { data: appUser, error: linkError } = await admin.from('app_users').insert({ auth_user_id: created.user.id,
+        username: id, user_type: 'STUDENT', role: 'STUDENT', linked_id: id, status: 'Active', must_change_password: !payload.password })
+        .select('id').single()
+      if (linkError) {
+        await admin.from('students').delete().eq('id', id)
+        await admin.auth.admin.deleteUser(created.user.id)
+        if (linkError.code === '23505') throw new ApiFault('DUPLICATE', 'The student login already exists.')
+        throw linkError
+      }
+      await logAction(admin, user, 'ADD_STUDENT', 'STUDENT', id, { name: studentRow.name, class: studentRow.current_class, batch: studentRow.current_batch_id })
+      return response({ ok: true, data: { studentId: id, username: id, tempPassword: !payload.password ? tempPassword : undefined, userId: appUser.id } })
+    }
+
+    if (action === 'students.update') {
+      const id = requireText(payload.studentId, 'Student ID', 40, true)
+      const changes = payload.changes && typeof payload.changes === 'object' && !Array.isArray(payload.changes) ? validateStudentInput(payload.changes, true) : {}
+      if (!Object.keys(changes).length) throw new ApiFault('BAD_REQUEST', 'Nothing to update.')
+      const { data: existing, error: readError } = await admin.from('students').select('*').eq('id', id).maybeSingle()
+      if (readError) throw readError
+      if (!existing) throw new ApiFault('NOT_FOUND', 'Student not found.')
+      const merged = { ...existing, ...changes }
+      if (('current_class' in changes || 'current_batch_id' in changes) && merged.current_batch_id) {
+        const { data: batch } = await admin.from('batches').select('id,class,status').eq('id', merged.current_batch_id).maybeSingle()
+        if (!batch || batch.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Choose an active batch.')
+        if (String(batch.class).toUpperCase() !== String(merged.current_class).toUpperCase()) throw new ApiFault('BAD_REQUEST', 'The selected batch is for a different class.')
+      }
+      changes.updated_at = new Date().toISOString()
+      const { data: updated, error } = await admin.from('students').update(changes).eq('id', id).select('*').single()
+      if (error?.code === '23505') throw new ApiFault('DUPLICATE', 'A student with these details already exists.')
+      if (error) throw error
+      if ('status' in changes) {
+        const accountStatus = ['ACTIVE', 'COMPLETED'].includes(String(changes.status)) ? 'Active' : 'Inactive'
+        await admin.from('app_users').update({ status: accountStatus }).eq('user_type', 'STUDENT').eq('linked_id', id)
+      }
+      for (const field of ['current_class', 'current_batch_id', 'status']) {
+        if (field in changes && String(existing[field] ?? '') !== String(changes[field] ?? '')) {
+          await admin.from('change_history').insert({ id: `CHG-${crypto.randomUUID()}`, student_id: id, field,
+            old_value: String(existing[field] ?? ''), new_value: String(changes[field] ?? ''), changed_by: user.id,
+            reason: requireText(payload.reason, 'Reason', 200), academic_year: updated.academic_year || '' })
+        }
+      }
+      await logAction(admin, user, 'EDIT_STUDENT', 'STUDENT', id, changes)
+      return response({ ok: true, data: { changed: Object.keys(changes).filter((x) => x !== 'updated_at') } })
+    }
+
+    if (action === 'students.resetPassword' || action === 'teachers.resetPassword') {
+      const isStudent = action.startsWith('students.')
+      const linkedId = requireText(isStudent ? payload.studentId : payload.teacherId, isStudent ? 'Student ID' : 'Teacher ID', 40, true)
+      const { data: linkedUser, error: userLookupError } = await admin.from('app_users').select('id,auth_user_id,username')
+        .eq('user_type', isStudent ? 'STUDENT' : 'TEACHER').eq('linked_id', linkedId).maybeSingle()
+      if (userLookupError) throw userLookupError
+      if (!linkedUser?.auth_user_id) throw new ApiFault('NOT_FOUND', 'No login account found for this record.')
+      const tempPassword = payload.password ? String(payload.password) : passwordTemp()
+      if (tempPassword.length < 8 || tempPassword.length > 200) throw new ApiFault('BAD_PASSWORD', 'Password must be at least 8 characters.')
+      const { error } = await admin.auth.admin.updateUserById(linkedUser.auth_user_id, { password: tempPassword })
+      if (error) throw new ApiFault('PASSWORD_UPDATE_FAILED', 'Could not reset this password.')
+      await admin.from('app_users').update({ must_change_password: true, password_changed_at: new Date().toISOString() }).eq('id', linkedUser.id)
+      await logAction(admin, user, 'RESET_PASSWORD', isStudent ? 'STUDENT' : 'TEACHER', linkedId, { username: linkedUser.username })
+      return response({ ok: true, data: { username: linkedUser.username, tempPassword } })
+    }
+
+    if (action === 'changes.list') {
+      const id = requireText(payload.studentId, 'Student ID', 40, true)
+      const { data, error } = await admin.from('change_history').select('*').eq('student_id', id).order('changed_at', { ascending: false }).limit(200)
+      if (error) throw error
+      return response({ ok: true, data: (data || []).map((r) => ({ ChangeID: r.id, StudentID: r.student_id, Field: r.field,
+        OldValue: r.old_value, NewValue: r.new_value, ChangedBy: r.changed_by, ChangedAt: r.changed_at,
+        Reason: r.reason, AcademicYear: r.academic_year })) })
+    }
+
+    if (action === 'studentSubjects.assign') {
+      const studentId = requireText(payload.studentId, 'Student ID', 40, true)
+      const subjectId = requireText(payload.subjectId, 'Subject', 40, true)
+      const teacherId = requireText(payload.teacherId, 'Teacher', 40, true)
+      const batchId = requireText(payload.batchId, 'Batch', 40, true)
+      const startDate = requireText(payload.startDate || new Date().toISOString().slice(0, 10), 'Start date', 10, true)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new ApiFault('BAD_REQUEST', 'Start date must use yyyy-mm-dd.')
+      const amount = (raw: unknown, label: string) => {
+        if (raw === undefined || raw === null || raw === '') return null
+        const value = Number(raw)
+        if (!Number.isFinite(value) || value < 0 || value > 100000) throw new ApiFault('BAD_REQUEST', `${label} must be from 0 to 100000.`)
+        return value
+      }
+      const [{ data: student }, { data: subject }, { data: teacherRow }, { data: batch }] = await Promise.all([
+        admin.from('students').select('id,status').eq('id', studentId).maybeSingle(),
+        admin.from('subjects').select('id,name,status').eq('id', subjectId).maybeSingle(),
+        admin.from('teachers').select('id,name,status').eq('id', teacherId).maybeSingle(),
+        admin.from('batches').select('id,name,status').eq('id', batchId).maybeSingle(),
+      ])
+      if (!student) throw new ApiFault('NOT_FOUND', 'Student not found.')
+      if (student.status !== 'ACTIVE') throw new ApiFault('BAD_REQUEST', 'Student is not active.')
+      if (!subject || subject.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Subject is not available.')
+      if (!teacherRow || teacherRow.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Teacher is not available.')
+      if (!batch || batch.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Batch is not available.')
+      const { data: current, error: currentError } = await admin.from('student_subjects').select('subject_id').eq('student_id', studentId).eq('status', 'ACTIVE')
+      if (currentError) throw currentError
+      if ((current || []).some((r) => r.subject_id === subjectId)) throw new ApiFault('DUPLICATE', 'Student already takes this subject.')
+      const { data: settings } = await admin.from('settings').select('setting_key,value').in('setting_key', ['ACADEMIC_YEAR', 'SUBJECT_BLOCKED_PAIRS'])
+      const settingMap = Object.fromEntries((settings || []).map((r) => [r.setting_key, r.value]))
+      const selected = [...(current || []).map((r) => r.subject_id), subjectId]
+      for (const pair of String(settingMap.SUBJECT_BLOCKED_PAIRS || '').split(';').map((x) => x.trim()).filter(Boolean)) {
+        const [a, b] = pair.split('|').map((x) => x.trim())
+        if (selected.includes(a) && selected.includes(b)) throw new ApiFault('RULE_VIOLATION', 'This combination of subjects is not allowed.')
+      }
+      const id = await newId(admin, 'student_subjects', 'SS-', 4)
+      const { data: created, error } = await admin.from('student_subjects').insert({ id, student_id: studentId, subject_id: subjectId,
+        teacher_id: teacherId, batch_id: batchId, start_date: startDate, status: 'ACTIVE',
+        fee_override: amount(payload.feeOverride, 'Fee override'), teacher_rate_override: amount(payload.teacherRateOverride, 'Teacher rate override'),
+        academic_year: settingMap.ACADEMIC_YEAR || `${new Date().getFullYear()}-${String(new Date().getFullYear() + 1).slice(-2)}` })
+        .select('*').single()
+      if (error?.code === '23505') throw new ApiFault('DUPLICATE', 'This subject is already assigned for the academic year.')
+      if (error) throw error
+      const reason = requireText(payload.reason, 'Reason', 200)
+      await admin.from('change_history').insert({ id: `CHG-${crypto.randomUUID()}`, student_id: studentId, field: 'Subject',
+        old_value: '', new_value: `${subject.name} / ${teacherRow.name} / ${batch.name}`, changed_by: user.id,
+        reason, academic_year: created.academic_year })
+      await logAction(admin, user, 'ASSIGN_STUDENT_SUBJECT', 'STUDENT_SUBJECT', id, { studentId, subjectId, teacherId, batchId })
+      return response({ ok: true, data: { StudentSubjectID: created.id, StudentID: created.student_id, SubjectID: created.subject_id,
+        TeacherID: created.teacher_id, BatchID: created.batch_id, StartDate: created.start_date, EndDate: created.end_date,
+        Status: created.status, FeeOverride: created.fee_override, TeacherRateOverride: created.teacher_rate_override,
+        AcademicYear: created.academic_year, CreatedAt: created.created_at } })
+    }
+
+    if (action === 'studentSubjects.end') {
+      const id = requireText(payload.studentSubjectId, 'Student subject ID', 40, true)
+      const endDate = requireText(payload.endDate || new Date().toISOString().slice(0, 10), 'End date', 10, true)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) throw new ApiFault('BAD_REQUEST', 'End date must use yyyy-mm-dd.')
+      const { data: row, error: findError } = await admin.from('student_subjects').select('*').eq('id', id).maybeSingle()
+      if (findError) throw findError
+      if (!row) throw new ApiFault('NOT_FOUND', 'Record not found.')
+      if (row.status !== 'ACTIVE') throw new ApiFault('BAD_REQUEST', 'This subject is already ended.')
+      if (row.start_date && endDate < row.start_date) throw new ApiFault('BAD_REQUEST', 'End date cannot be before the start date.')
+      const { error } = await admin.from('student_subjects').update({ end_date: endDate, status: 'ENDED' }).eq('id', id)
+      if (error) throw error
+      await admin.from('change_history').insert({ id: `CHG-${crypto.randomUUID()}`, student_id: row.student_id, field: 'Subject',
+        old_value: `${row.subject_id} / ${row.teacher_id || ''} / ${row.batch_id || ''}`, new_value: 'ENDED', changed_by: user.id,
+        reason: requireText(payload.reason, 'Reason', 200), academic_year: row.academic_year || '' })
+      await logAction(admin, user, 'END_STUDENT_SUBJECT', 'STUDENT_SUBJECT', id, { endDate })
+      return response({ ok: true, data: { ended: true } })
+    }
+
+    if (action === 'settings.update') {
+      const changes = payload.changes
+      if (!changes || typeof changes !== 'object' || Array.isArray(changes) || !Object.keys(changes).length) throw new ApiFault('BAD_REQUEST', 'Nothing to update.')
+      const { data: known, error: knownError } = await admin.from('settings').select('setting_key,value')
+      if (knownError) throw knownError
+      const existing = new Map((known || []).map((r) => [r.setting_key, r.value]))
+      const updated: string[] = []
+      for (const [key, raw] of Object.entries(changes)) {
+        if (!existing.has(key)) throw new ApiFault('BAD_REQUEST', `Unknown setting: ${key}`)
+        const value = requireText(raw, key, 300, key !== 'SUBJECT_BLOCKED_PAIRS')
+        if (key === 'REGISTRATION_ENABLED' && !['TRUE', 'FALSE'].includes(value.toUpperCase())) throw new ApiFault('BAD_REQUEST', 'REGISTRATION_ENABLED must be TRUE or FALSE.')
+        if (value !== existing.get(key)) {
+          const { error } = await admin.from('settings').update({ value, updated_at: new Date().toISOString(), updated_by: user.id }).eq('setting_key', key)
+          if (error) throw error
+          updated.push(key)
+        }
+      }
+      if (updated.length) await logAction(admin, user, 'CHANGE_SETTING', 'SETTING', updated.join(','), changes)
+      return response({ ok: true, data: { changed: updated } })
     }
 
     return response(fail('UNKNOWN_ACTION', 'This action has not been migrated yet.'))
