@@ -572,6 +572,8 @@ Deno.serve(async (request) => {
       'student.dashboard': 'SELF_VIEW', 'student.subjects': 'SELF_VIEW', 'student.timetable': 'SELF_VIEW',
       'student.attendance': 'SELF_VIEW', 'student.updateProfile': 'SELF_VIEW', 'student.enterCode': 'ATTENDANCE_SELF',
       'attendance.sessions': 'STUDENT_VIEW', 'attendance.detail': 'STUDENT_VIEW', 'attendance.correct': 'ATTENDANCE_CORRECT',
+      'teacher.income': 'TEACHER_INCOME_VIEW',
+      'reports.collection': 'REPORT_VIEW', 'reports.dues': 'REPORT_VIEW', 'reports.attendance': 'REPORT_VIEW', 'reports.teacherPay': 'REPORT_VIEW',
     }
     const permission = needed[action]
     const granted = permissionsFor(user)
@@ -2147,6 +2149,129 @@ Deno.serve(async (request) => {
       if (action === 'attendance.detail') return response({ ok: true, data: { session: { SessionID: sid, Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time,
         BatchName: batches?.[0]?.name || s.batch_id, SubjectName: subjects?.[0]?.name || s.subject_id, TeacherName: teachers?.[0]?.name || s.teacher_id, RoomName: rooms?.[0]?.name || '', Status: s.status }, students: studentData } })
       throw new ApiFault('BAD_REQUEST', 'Unsupported attendance action.')
+    }
+
+    if (action === 'reports.collection' || action === 'reports.dues' || action === 'reports.attendance' || action === 'reports.teacherPay') {
+      const from = requireText(payload.from, 'From date', 10), to = requireText(payload.to, 'To date', 10)
+      if ((from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (to && !/^\d{4}-\d{2}-\d{2}$/.test(to))) throw new ApiFault('BAD_REQUEST', 'Report dates must use yyyy-mm-dd.')
+      if (action === 'reports.collection') {
+        if (!permissionsFor(user).includes('*') && !permissionsFor(user).includes('FINANCE_VIEW')) throw new ApiFault('FORBIDDEN', 'Finance view permission is required.')
+        let query = admin.from('payments').select('payment_date,amount,payment_mode,status').neq('status', 'VOID').order('payment_date')
+        if (from) query = query.gte('payment_date', from)
+        if (to) query = query.lte('payment_date', to)
+        const { data, error } = await query.limit(10000)
+        if (error) throw error
+        const byMonth = new Map<string, number>(), byMode = new Map<string, number>()
+        let total = 0
+        for (const p of data || []) { const amount = Number(p.amount) || 0, month = p.payment_date.slice(0, 7), mode = p.payment_mode || 'Other'
+          byMonth.set(month, (byMonth.get(month) || 0) + amount); byMode.set(mode, (byMode.get(mode) || 0) + amount); total += amount }
+        return response({ ok: true, data: { total, count: (data || []).length, months: [...byMonth].sort(([a], [b]) => a.localeCompare(b)).map(([Month, Amount]) => ({ Month, MonthLabel: monthLabel(Month), Amount })),
+          modes: [...byMode].sort(([a], [b]) => a.localeCompare(b)).map(([Mode, Amount]) => ({ Mode, Amount })) } })
+      }
+      if (action === 'reports.dues') {
+        if (!permissionsFor(user).includes('*') && !permissionsFor(user).includes('FINANCE_VIEW')) throw new ApiFault('FORBIDDEN', 'Finance view permission is required.')
+        let query = admin.from('invoices').select('*').neq('status', 'CANCELLED').order('due_date')
+        const month = requireText(payload.month, 'Month', 7); if (month) query = query.eq('month', month)
+        const { data: invoices, error } = await query.limit(10000); if (error) throw error
+        const eligible = (invoices || []).map((i) => ({ invoice: i, status: invoiceStatus(i.total_amount, i.paid_amount, i.due_date, i.status), balance: Math.max(0, Number(i.total_amount) - Number(i.paid_amount)) }))
+          .filter((x) => x.status !== 'CANCELLED' && x.balance > 0)
+        const ids = [...new Set(eligible.map((x) => x.invoice.student_id))]
+        const { data: students, error: stError } = ids.length ? await admin.from('students').select('id,name,current_class,mobile,parent_mobile').in('id', ids) : { data: [], error: null }
+        if (stError) throw stError
+        const names = new Map((students || []).map((s) => [s.id, s])), groups = new Map<string, { balance: number; overdue: number; invoices: number; oldestDue: string; subjects: Set<string> }>()
+        for (const x of eligible) {
+          const inv = x.invoice, g = groups.get(inv.student_id) || { balance: 0, overdue: 0, invoices: 0, oldestDue: '', subjects: new Set<string>() }
+          g.balance += x.balance; g.invoices++; if (x.status === 'OVERDUE') g.overdue += x.balance
+          if (inv.due_date && (!g.oldestDue || inv.due_date < g.oldestDue)) g.oldestDue = inv.due_date
+          for (const line of normalizedInvoiceLines(inv)) if (line.balanceAmount > 0 && line.subjectName) g.subjects.add(String(line.subjectName))
+          groups.set(inv.student_id, g)
+        }
+        const rows = [...groups].map(([id, g]) => { const s = names.get(id); return { StudentID: id, StudentName: s?.name || id, CurrentClass: s?.current_class || '',
+          Phone: s?.parent_mobile || s?.mobile || '', Invoices: g.invoices, Balance: g.balance, Overdue: g.overdue, OldestDue: g.oldestDue, Subjects: [...g.subjects].join(', ') } })
+          .sort((a, b) => b.Overdue - a.Overdue || b.Balance - a.Balance)
+        return response({ ok: true, data: { rows, totals: { students: rows.length, balance: rows.reduce((v, x) => v + x.Balance, 0), overdue: rows.reduce((v, x) => v + x.Overdue, 0) } } })
+      }
+      if (action === 'reports.attendance') {
+        if (!permissionsFor(user).includes('*') && !permissionsFor(user).includes('STUDENT_VIEW')) throw new ApiFault('FORBIDDEN', 'Student view permission is required.')
+        const threshold = Math.min(Math.max(Number(payload.threshold) || 75, 1), 100)
+        let query = admin.from('attendance').select('student_id,batch_id,status,session_date')
+        if (from) query = query.gte('session_date', from); if (to) query = query.lte('session_date', to)
+        const { data: marks, error } = await query.limit(20000); if (error) throw error
+        const b = new Map<string, any>(), st = new Map<string, any>()
+        for (const a of marks || []) {
+          const score = a.status === 'PRESENT' ? 1 : a.status === 'LATE' ? 0.5 : 0
+          const bg = b.get(a.batch_id) || { total: 0, score: 0, present: 0, late: 0, absent: 0 }; bg.total++; bg.score += score
+          if (a.status === 'PRESENT') bg.present++; else if (a.status === 'LATE') bg.late++; else bg.absent++; b.set(a.batch_id, bg)
+          const sg = st.get(a.student_id) || { total: 0, score: 0, absent: 0 }; sg.total++; sg.score += score; if (a.status === 'ABSENT') sg.absent++; st.set(a.student_id, sg)
+        }
+        const [{ data: batches, error: bError }, { data: students, error: stError }] = await Promise.all([admin.from('batches').select('id,name'), admin.from('students').select('id,name,current_class,status')])
+        if (bError) throw bError; if (stError) throw stError
+        const bn = new Map((batches || []).map((x) => [x.id, x.name])), sn = new Map((students || []).map((x) => [x.id, x]))
+        const pct = (score: number, total: number) => total ? Math.round(score / total * 100) : 0
+        const batchRows = [...b].map(([id, x]) => ({ BatchID: id, BatchName: bn.get(id) || id, Sessions: x.total, Present: x.present, Late: x.late, Absent: x.absent, Pct: pct(x.score, x.total) })).sort((x, y) => x.Pct - y.Pct)
+        const lowStudents = [...st].map(([id, x]) => { const s = sn.get(id); return { StudentID: id, StudentName: s?.name || id, CurrentClass: s?.current_class || '', Status: s?.status || '', Sessions: x.total, Absent: x.absent, Pct: pct(x.score, x.total) } })
+          .filter((x) => x.Pct < threshold && String(x.Status).toUpperCase() === 'ACTIVE').sort((x, y) => x.Pct - y.Pct).slice(0, 100)
+        return response({ ok: true, data: { threshold, batches: batchRows, lowStudents } })
+      }
+      if (!permissionsFor(user).includes('*') && !permissionsFor(user).includes('TEACHER_INCOME_MANAGE')) throw new ApiFault('FORBIDDEN', 'Teacher pay permission is required.')
+      const month = requireText(payload.month, 'Month', 7, true)
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new ApiFault('BAD_REQUEST', 'Pick a valid month (YYYY-MM).')
+      const [{ data: income, error: iError }, { data: payments, error: pError }, { data: teachers, error: tError }] = await Promise.all([
+        admin.from('teacher_income').select('*').eq('month', month), admin.from('teacher_payments').select('income_id,amount').not('income_id', 'is', null), admin.from('teachers').select('id,name'),
+      ])
+      if (iError) throw iError; if (pError) throw pError; if (tError) throw tError
+      const paid = new Map<string, number>(); for (const p of payments || []) if (p.income_id) paid.set(p.income_id, (paid.get(p.income_id) || 0) + Number(p.amount))
+      const grouped = new Map<string, { payable: number; paid: number; students: number; subjects: number }>()
+      for (const i of income || []) { const g = grouped.get(i.teacher_id) || { payable: 0, paid: 0, students: 0, subjects: 0 }; g.payable += Number(i.final_payable) || 0
+        g.paid += paid.get(i.id) || 0; g.students += Number(i.student_count) || 0; g.subjects++; grouped.set(i.teacher_id, g) }
+      const names = new Map((teachers || []).map((x) => [x.id, x.name])), rows = [...grouped].map(([id, g]) => ({ TeacherID: id, TeacherName: names.get(id) || id, Subjects: g.subjects,
+        Students: g.students, Payable: g.payable, Paid: g.paid, Balance: Math.max(0, g.payable - g.paid) })).sort((a, b) => a.TeacherName.localeCompare(b.TeacherName))
+      return response({ ok: true, data: { rows, totals: { payable: rows.reduce((v, x) => v + x.Payable, 0), paid: rows.reduce((v, x) => v + x.Paid, 0), balance: rows.reduce((v, x) => v + x.Balance, 0) } } })
+    }
+
+    if (action === 'student.updateProfile') {
+      if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only for a linked student account.')
+      const changes = payload.changes
+      if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw new ApiFault('BAD_REQUEST', 'Provide profile changes.')
+      const fields: Record<string, string> = { Mobile: 'mobile', Email: 'email', Address: 'address', ParentName: 'parent_name',
+        ParentMobile: 'parent_mobile', ParentWhatsApp: 'parent_whatsapp', ParentEmail: 'parent_email' }
+      const row: Record<string, unknown> = {}
+      for (const [key, raw] of Object.entries(changes)) {
+        const column = fields[key]
+        if (!column) throw new ApiFault('BAD_REQUEST', `You cannot edit ${key}.`)
+        const value = requireText(raw, key, key === 'Address' ? 300 : 100)
+        if (['Mobile', 'ParentMobile', 'ParentWhatsApp'].includes(key) && value && !/^[+\d()\-\s]{7,20}$/.test(value)) throw new ApiFault('BAD_REQUEST', `${key} is not a valid phone number.`)
+        if (['Email', 'ParentEmail'].includes(key) && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) throw new ApiFault('BAD_REQUEST', `${key} is not a valid email address.`)
+        row[column] = value
+      }
+      if (!Object.keys(row).length) throw new ApiFault('BAD_REQUEST', 'Nothing to update.')
+      row.updated_at = new Date().toISOString()
+      const { data, error } = await admin.from('students').update(row).eq('id', user.linked_id).select('id').maybeSingle()
+      if (error) throw error
+      if (!data) throw new ApiFault('NOT_FOUND', 'Student record not found.')
+      await logAction(admin, user, 'STUDENT_SELF_EDIT', 'STUDENT', user.linked_id, { changed: Object.keys(changes) })
+      return response({ ok: true, data: { changed: Object.keys(row).filter((k) => k !== 'updated_at').map((k) => Object.keys(fields).find((key) => fields[key] === k)) } })
+    }
+
+    if (action === 'teacher.income') {
+      if (user.user_type !== 'TEACHER' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only for a linked teacher account.')
+      if (!permissionsFor(user).includes('*') && !permissionsFor(user).includes('TEACHER_INCOME_VIEW')) throw new ApiFault('FORBIDDEN', 'Income view is not enabled for you.')
+      const [{ data: teacher, error: teacherError }, { data: income, error: incomeError }, { data: payments, error: paymentsError }, { data: subjects, error: subjectsError }] = await Promise.all([
+        admin.from('teachers').select('id,name,income_method,default_rate_per_student').eq('id', user.linked_id).maybeSingle(),
+        admin.from('teacher_income').select('*').eq('teacher_id', user.linked_id).order('month', { ascending: false }).limit(300),
+        admin.from('teacher_payments').select('*').eq('teacher_id', user.linked_id).order('payment_date', { ascending: false }).limit(300),
+        admin.from('subjects').select('id,name'),
+      ])
+      if (teacherError) throw teacherError
+      if (incomeError) throw incomeError
+      if (paymentsError) throw paymentsError
+      if (subjectsError) throw subjectsError
+      if (!teacher) throw new ApiFault('NOT_FOUND', 'Teacher record not found.')
+      const names = new Map((subjects || []).map((x) => [x.id, x.name]))
+      return response({ ok: true, data: { teacher: { Name: teacher.name, Rate: teacher.default_rate_per_student, Method: teacher.income_method },
+        income: (income || []).map((r) => ({ IncomeID: r.id, Month: r.month, SubjectName: names.get(r.subject_id) || r.subject_id,
+          StudentCount: r.student_count, Rate: r.rate_per_student, Gross: r.gross_income, Adjustment: r.adjustment, FinalPayable: r.final_payable, Status: r.status })),
+        payments: (payments || []).map((p) => ({ PaymentID: p.id, Date: p.payment_date, Amount: p.amount, Mode: p.payment_mode, Notes: p.notes })) } })
     }
 
     if (action === 'settings.update') {
