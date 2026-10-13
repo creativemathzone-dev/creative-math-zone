@@ -3,7 +3,7 @@
 These steps are for a new, empty Supabase project. They do not copy or modify the live Apps Script spreadsheet.
 
 1. Create a Supabase project and keep its database password and secret keys out of source control.
-2. Apply migrations in filename order. All seven migrations in `supabase/migrations/` have been applied to the project.
+2. Seven migrations in `supabase/migrations/` have been applied. Before deploying the API, apply `20261013070000_login_rate_limits.sql` in the SQL Editor. This adds the login attempt throttling used by the API.
 3. In Supabase Auth, create the first admin's account using the email address they will use for recovery.
 4. Link that Auth user to an application account in the SQL editor, substituting the new Auth user UUID and chosen username:
 
@@ -13,7 +13,7 @@ These steps are for a new, empty Supabase project. They do not copy or modify th
    ```
 
 5. Put only the project's **publishable key** in `web/config.js`. Never put a secret or service-role key in browser files.
-6. Create a **scoped** Supabase personal access token limited to this project, with **Edge Functions: Read-write** permission. In GitHub, open **Settings → Secrets and variables → Actions → New repository secret**, name it `SUPABASE_ACCESS_TOKEN`, and paste the token as its value. Do not put the token in a source file or send it in chat. Then open **Actions → Deploy Supabase API → Run workflow** to deploy the API function. This workflow does not apply database migrations.
+6. A **scoped** Supabase personal access token limited to this project, with **Edge Functions: Read-write** permission, is stored as the GitHub Actions secret `SUPABASE_ACCESS_TOKEN`. Keep the token out of source files and chat. Then open **Actions → Deploy Supabase API → Run workflow** to deploy the API function. This workflow does not apply database migrations.
 7. In GitHub repository **Settings → Pages**, set the source to **GitHub Actions**. When the API is deployed and `web/config.js` has the publishable key, open **Actions → Publish Creative Math Zone portal → Run workflow**.
 8. Leave `creativemathzone.in` pointed at the existing site until the new pages and migrated data have been checked.
 

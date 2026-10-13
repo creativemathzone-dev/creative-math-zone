@@ -293,6 +293,18 @@ async function consumeRegistrationLimit(admin: ReturnType<typeof clients>['admin
   return data === true
 }
 
+async function consumeLoginLimit(admin: ReturnType<typeof clients>['admin'], rateKey: string, seconds: number, max: number) {
+  const { data, error } = await admin.rpc('consume_login_rate_limit', { p_rate_key: await sha256Hex(rateKey),
+    p_window_seconds: seconds, p_max_hits: max })
+  if (error) throw error
+  return data === true
+}
+
+async function clearLoginLimit(admin: ReturnType<typeof clients>['admin'], rateKey: string) {
+  const { error } = await admin.rpc('clear_login_rate_limit', { p_rate_key: await sha256Hex(rateKey) })
+  if (error) throw error
+}
+
 function requestIp(request: Request) {
   const forwarded = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
   return forwarded.split(',')[0].trim().slice(0, 100)
@@ -460,6 +472,16 @@ Deno.serve(async (request) => {
       const password = String(payload.password || '')
       const portal = String(payload.portal || '').toUpperCase()
       if (!username || !password || username.length > 60 || password.length > 200) return response(fail('BAD_LOGIN', 'Username or password is incorrect.'))
+      const { data: loginSettings, error: loginSettingsError } = await admin.from('settings').select('setting_key,value')
+        .in('setting_key', ['LOGIN_MAX_ATTEMPTS', 'LOGIN_LOCK_MINUTES'])
+      if (loginSettingsError) throw loginSettingsError
+      const loginSettingsByKey = Object.fromEntries((loginSettings || []).map((row) => [row.setting_key, row.value]))
+      const maxAttempts = Math.min(20, Math.max(3, Number.parseInt(loginSettingsByKey.LOGIN_MAX_ATTEMPTS || '5', 10) || 5))
+      const lockMinutes = Math.min(240, Math.max(1, Number.parseInt(loginSettingsByKey.LOGIN_LOCK_MINUTES || '15', 10) || 15))
+      const loginRateKey = `login:${username.toLowerCase()}`
+      if (!await consumeLoginLimit(admin, loginRateKey, lockMinutes * 60, maxAttempts)) {
+        return response(fail('LOCKED', 'Too many login attempts. Please try again later.'))
+      }
       const { data: user } = await admin.from('app_users').select('*').ilike('username', username).maybeSingle()
       if (!user || !user.auth_user_id) return response(fail('BAD_LOGIN', 'Username or password is incorrect.'))
       const { data: authUser } = await admin.auth.admin.getUserById(user.auth_user_id)
@@ -467,6 +489,7 @@ Deno.serve(async (request) => {
       if (!email) return response(fail('BAD_LOGIN', 'Username or password is incorrect.'))
       const { data: session, error } = await auth.auth.signInWithPassword({ email, password })
       if (error || !session.session) return response(fail('BAD_LOGIN', 'Username or password is incorrect.'))
+      await clearLoginLimit(admin, loginRateKey)
       if (user.status.toUpperCase() !== 'ACTIVE') {
         await auth.auth.signOut({ scope: 'local' })
         return response(fail('DISABLED', 'This account is disabled. Please contact the centre.'))
