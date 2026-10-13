@@ -306,8 +306,8 @@ async function clearLoginLimit(admin: ReturnType<typeof clients>['admin'], rateK
 }
 
 function requestIp(request: Request) {
-  const forwarded = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
-  return forwarded.split(',')[0].trim().slice(0, 100)
+  const address = request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || 'unknown'
+  return address.trim().slice(0, 100)
 }
 
 function invoiceLines(row: Record<string, unknown>) {
