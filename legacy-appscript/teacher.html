@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Creative Math Zone · Teacher</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#f6f8fb; --card:#ffffff; --ink:#18263d; --ink-2:#4a5a73; --ink-3:#7b8aa0;
+  --line:#dde5ef; --grid:#dbe7f3; --navy:#16243b; --navy-2:#223654;
+  --pencil:#f3b11c; --ok:#1f7a55; --ok-bg:#e3f4ec; --bad:#b3302a; --bad-bg:#fbe9e7; --warn-bg:#fff3d6;
+  --r:10px; --shadow:0 1px 2px rgba(22,36,59,.06),0 4px 14px rgba(22,36,59,.06);
+  --display:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif; --body:'Figtree','Segoe UI',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 var(--body)}
+h1,h2,h3{font-family:var(--display);margin:0;line-height:1.15;letter-spacing:-.01em}
+button,input,select,textarea{font:inherit;color:inherit}
+.hidden{display:none!important}
+:focus-visible{outline:3px solid var(--pencil);outline-offset:2px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;min-height:42px;padding:.55rem 1rem;border-radius:8px;border:1px solid var(--line);background:#fff;font-weight:600;cursor:pointer}
+.btn:hover{border-color:var(--ink-3)}
+.btn.primary{background:var(--navy);border-color:var(--navy);color:#fff}
+.btn.primary:hover{background:var(--navy-2)}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn.small{min-height:32px;padding:.25rem .6rem;font-size:.85rem}
+.btn[disabled]{opacity:.55;cursor:wait}
+.link{background:none;border:0;padding:0;color:var(--navy);font-weight:600;text-decoration:underline;cursor:pointer}
+
+#login{min-height:100vh;display:grid;grid-template-columns:1.1fr 1fr}
+.sheet{position:relative;background:#fbfdff;background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:32px 32px;border-right:1px solid var(--line);display:flex;flex-direction:column;justify-content:flex-end;padding:3rem;overflow:hidden}
+.sheet svg{position:absolute;inset:0;width:100%;height:100%}
+.sheet .axis{stroke:var(--navy);stroke-width:2}
+.sheet .curve{fill:none;stroke:var(--pencil);stroke-width:5;stroke-linecap:round;stroke-dasharray:1400;stroke-dashoffset:1400;animation:draw 2.2s .3s ease-out forwards}
+.sheet .dot{fill:var(--navy)}
+@keyframes draw{to{stroke-dashoffset:0}}
+.sheet .tag{position:relative;max-width:22ch;font-family:var(--display);font-weight:700;font-size:clamp(1.8rem,3.2vw,2.8rem);color:var(--navy);background:rgba(251,253,255,.88);padding:.4rem .6rem .5rem 0}
+.sheet .tag small{display:block;font:500 1rem var(--body);color:var(--ink-2);margin-top:.5rem}
+.signin{display:flex;align-items:center;justify-content:center;padding:2rem 1.25rem}
+.signin form{width:100%;max-width:380px}
+.signin h1{font-size:2rem;margin-bottom:.35rem}
+.signin p{color:var(--ink-2);margin:0 0 1.5rem}
+
+.alert{border-radius:8px;padding:.7rem .9rem;margin:0 0 1rem;font-size:.95rem}
+.alert.bad{background:var(--bad-bg);color:var(--bad)}
+.alert.warn{background:var(--warn-bg);color:#6b4c00}
+.alert.ok{background:var(--ok-bg);color:var(--ok)}
+.alert.info{background:#e0ecff;color:#1e40af}
+
+.f{display:block;margin-bottom:1rem}
+.f>span{display:block;font-size:.88rem;font-weight:600;color:var(--ink-2);margin-bottom:.3rem}
+.f input,.f select,.f textarea{width:100%;min-height:44px;padding:.55rem .75rem;border:1px solid #c5d1e0;border-radius:8px;background:#fff}
+.f input:focus,.f select:focus,.f textarea:focus{border-color:var(--navy);outline:3px solid rgba(243,177,28,.45);outline-offset:0}
+.f small{display:block;color:var(--ink-3);font-size:.82rem;margin-top:.25rem}
+.pw{position:relative}
+.pw button{position:absolute;right:6px;top:6px;min-height:32px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 1rem}
+.grid2 .full{grid-column:1/-1}
+
+#app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+nav.side{background:var(--navy);color:#dbe5f5;padding:1rem .75rem .75rem;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+nav.side .brand{flex-shrink:0;padding:.25rem .75rem 1.25rem;font-family:var(--display);font-weight:700;font-size:1.15rem;color:#fff;line-height:1.15;letter-spacing:-.015em}
+nav.side .brand .logo-badge{display:none;width:58px;height:58px;border-radius:50%;background:#fff;align-items:center;justify-content:center;margin:0 0 .7rem;box-shadow:0 2px 10px rgba(0,0,0,.25),inset 0 0 0 3px rgba(22,36,59,.08)}
+nav.side .brand .logo-badge img{width:46px;height:46px;object-fit:contain;border-radius:50%;display:block}
+nav.side #nav-items{flex:1;overflow-y:auto;overflow-x:hidden;margin-bottom:.5rem;scrollbar-width:thin}
+nav.side #nav-items::-webkit-scrollbar{width:6px}
+nav.side #nav-items::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+nav.side .who{flex-shrink:0}
+
+nav.side .brand small{display:block;font:500 .78rem var(--body);color:#9fb2d0;margin-top:.3rem}
+nav.side button.item{display:flex;width:100%;align-items:center;gap:.6rem;text-align:left;background:none;border:0;border-left:4px solid transparent;color:inherit;padding:.65rem .75rem;border-radius:0 8px 8px 0;cursor:pointer;font-weight:500}
+nav.side button.item:hover{background:rgba(255,255,255,.07)}
+nav.side button.item[aria-current=page]{background:rgba(255,255,255,.1);border-left-color:var(--pencil);color:#fff;font-weight:600}
+nav.side .who{margin-top:auto;padding:.75rem;border-top:1px solid rgba(255,255,255,.14);font-size:.9rem}
+nav.side .who b{display:block;color:#fff}
+nav.side .who .btn{margin-top:.6rem;width:100%;background:transparent;color:#fff;border-color:rgba(255,255,255,.3)}
+.topbar{display:none}
+main{padding:2rem clamp(1rem,3vw,2.5rem) 4rem;max-width:1200px;width:100%}
+.head{margin-bottom:1.5rem}
+.head h1{font-size:1.9rem}
+.head p{margin:.25rem 0 0;color:var(--ink-2)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:1.25rem}
+.card+.card{margin-top:1rem}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem}
+.stat b{display:block;font:700 2rem/1 var(--display);color:var(--navy)}
+.stat span{color:var(--ink-2);font-size:.9rem}
+.pill{display:inline-block;padding:.1rem .6rem;border-radius:99px;font-size:.82rem;font-weight:600;background:#e8eef6;color:var(--ink-2)}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.warn{background:var(--warn-bg);color:#6b4c00}
+.muted{color:var(--ink-3)}
+.empty{padding:2.5rem 1rem;text-align:center;color:var(--ink-2)}
+.empty b{display:block;font:700 1.15rem var(--display);color:var(--ink);margin-bottom:.3rem}
+table{width:100%;border-collapse:collapse;background:#fff}
+th,td{text-align:left;padding:.7rem .85rem;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.85rem;color:var(--ink-2);font-weight:600;background:#f1f5fa}
+.tablewrap{border:1px solid var(--line);border-radius:var(--r);overflow:auto;box-shadow:var(--shadow);background:#fff}
+.class-row{display:flex;gap:1rem;align-items:center;padding:.9rem 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.class-row:last-child{border-bottom:0}
+.class-row .t{font-family:ui-monospace,Consolas,monospace;font-weight:600;color:var(--navy);min-width:130px}
+.class-row .d{flex:1;min-width:180px}
+.class-row .d b{display:block;font-size:1.05rem}
+.class-row .d span{color:var(--ink-3);font-size:.88rem}
+
+/* live class panel */
+.code-panel{background:linear-gradient(135deg,#16243b,#223654);color:#fff;border-radius:14px;padding:1.5rem;text-align:center;margin-bottom:1rem}
+.code-panel .label{font-size:.85rem;letter-spacing:.15em;text-transform:uppercase;color:#9fb2d0;margin-bottom:.5rem}
+.code-panel .code{font:700 3.5rem/1 ui-monospace,Consolas,monospace;letter-spacing:.35em;color:#f3b11c;text-shadow:0 2px 12px rgba(243,177,28,.4);margin:.4rem 0}
+.code-panel .timer{font-size:1rem;color:#dbe5f5;margin-top:.4rem}
+.code-panel .timer.warn{color:#ffb454}
+.code-panel .timer.bad{color:#ff8080;font-weight:700}
+.live-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.75rem;margin:1rem 0}
+.live-stat{background:#fff;border:1px solid var(--line);border-radius:10px;padding:.75rem 1rem;text-align:center}
+.live-stat b{display:block;font:700 1.8rem/1 var(--display);color:var(--navy)}
+.live-stat span{font-size:.82rem;color:var(--ink-2)}
+.live-stat.present b{color:var(--ok)}
+.live-stat.late b{color:#b97f00}
+.live-stat.absent b{color:var(--bad)}
+.att-list{margin:1rem 0}
+.att-item{display:flex;align-items:center;gap:.75rem;padding:.55rem .75rem;border-bottom:1px solid var(--line)}
+.att-item:last-child{border-bottom:0}
+.att-item .name{flex:1;font-weight:500}
+.att-item .sid{font-family:ui-monospace,Consolas,monospace;font-size:.82rem;color:var(--ink-3);margin-right:.5rem}
+.att-item .method{font-size:.78rem;color:var(--ink-3)}
+.att-item .acts{display:flex;gap:.35rem}
+
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99;display:flex;flex-direction:column;gap:.5rem;align-items:center;pointer-events:none;width:min(560px,92vw)}
+#toast div{pointer-events:auto;padding:.7rem 1rem;border-radius:9px;background:var(--navy);color:#fff;box-shadow:var(--shadow);font-weight:500}
+#toast div.bad{background:var(--bad)}
+
+dialog{border:0;border-radius:14px;padding:0;width:min(540px,94vw);max-height:92vh;box-shadow:0 20px 60px rgba(10,20,40,.35)}
+dialog::backdrop{background:rgba(16,28,48,.55)}
+.dlg-h{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.25rem;border-bottom:1px solid var(--line)}
+.dlg-h h2{font-size:1.2rem}
+.dlg-b{padding:1.25rem;overflow:auto;max-height:calc(92vh - 130px)}
+.dlg-f{display:flex;justify-content:flex-end;gap:.6rem;padding:.9rem 1.25rem;border-top:1px solid var(--line);background:#f8fafc}
+
+@media (max-width:900px){
+  #login{grid-template-columns:1fr}
+  .sheet{min-height:180px;padding:1.5rem;border-right:0;border-bottom:1px solid var(--line)}
+  .sheet .tag{font-size:1.5rem}
+  .sheet .tag small{display:none}
+  #app{grid-template-columns:1fr}
+  nav.side{position:fixed;inset:0 25% 0 0;z-index:40;height:100vh;transform:translateX(-102%);transition:transform .2s}
+  nav.side.open{transform:none}
+  .topbar{display:flex;align-items:center;gap:.75rem;background:var(--navy);color:#fff;padding:.6rem 1rem;position:sticky;top:0;z-index:30}
+  .topbar b{font-family:var(--display)}
+  .topbar button{background:none;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:8px;min-height:38px;padding:0 .8rem;font-weight:600}
+  .grid2{grid-template-columns:1fr}
+  .head h1{font-size:1.5rem}
+  table.stack thead{display:none}
+  table.stack,table.stack tbody,table.stack tr,table.stack td{display:block;width:100%}
+  table.stack tr{border-bottom:8px solid var(--paper);padding:.4rem 0}
+  table.stack td{border:0;padding:.25rem .85rem}
+  table.stack td[data-l]::before{content:attr(data-l) ": ";color:var(--ink-3);font-size:.85rem}
+  .code-panel .code{font-size:2.8rem;letter-spacing:.25em}
+  .att-item .acts{flex-direction:column;gap:.2rem}
+}
+@media (prefers-reduced-motion:reduce){.sheet .curve{animation:none;stroke-dashoffset:0}nav.side{transition:none}}
+</style>
+<?!= include_('shared') ?>
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <div class="sheet" aria-hidden="true">
+    <div class="cmz-hero-slot" id="hero-slot"></div>
+    <div class="tag"><span id="lg-tagline">Eat Math, Drink Math, Dream Math</span><small id="lg-centre">Creative Math Zone</small></div>
+  </div>
+  <div class="signin">
+    <form id="login-form" autocomplete="on" novalidate>
+      <img id="lg-logo" alt="" style="width:96px;height:96px;object-fit:contain;margin:0 auto .75rem;display:block">
+      <h1>Teacher sign in</h1>
+      <p>Use the username and password given to you by the centre.</p>
+      <div id="lg-msg"></div>
+      <label class="f"><span>Username</span><input name="username" autocomplete="username" required autocapitalize="none" spellcheck="false"></label>
+      <label class="f"><span>Password</span>
+        <div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" class="btn small" data-show="password">Show</button></div>
+      </label>
+      <button class="btn primary" style="width:100%" id="lg-btn">Sign in</button>
+    </form>
+  </div>
+</section>
+
+<section id="forcepw" class="hidden">
+  <div class="signin" style="min-height:100vh">
+    <form id="pw-form" style="max-width:400px;width:100%">
+      <h1 style="font-size:1.8rem;margin-bottom:.4rem">Choose your new password</h1>
+      <p class="muted" style="margin:0 0 1.25rem">You are using a temporary password. Set your own before continuing.</p>
+      <div id="pw-msg"></div>
+      <label class="f"><span>Temporary password</span><input name="oldPassword" type="password" autocomplete="current-password" required></label>
+      <label class="f"><span>New password</span><input name="newPassword" type="password" autocomplete="new-password" required><small>At least 6 characters.</small></label>
+      <label class="f"><span>Type it again</span><input name="again" type="password" autocomplete="new-password" required></label>
+      <button class="btn primary" style="width:100%" id="pw-btn">Save and continue</button>
+      <p style="text-align:center"><button type="button" class="link" id="pw-out">Sign out</button></p>
+    </form>
+  </div>
+</section>
+
+<div id="app" class="hidden">
+  <div class="topbar"><button id="menu-btn" aria-label="Open menu">Menu</button><b id="tb-centre">Creative Math Zone</b></div>
+  <nav class="side" id="side" aria-label="Main">
+        <div class="brand"><div class="logo-badge" id="nav-logo-badge"><img id="nav-logo" alt=""></div><span id="nav-centre">Creative Math Zone</span><small>Teacher</small></div>
+    <div id="nav-items"></div>
+    <div class="who"><b id="who-name"></b><span id="who-role" class="muted"></span><button class="btn small" id="logout">Sign out</button></div>
+  </nav>
+  <main id="main" tabindex="-1"></main>
+</div>
+
+<dialog id="dlg"></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const S = { token:null, user:null, cfg:{}, view:'dashboard', L:{}, perms:[] };
+const $ = (s,r) => (r||document).querySelector(s);
+const $$ = (s,r) => Array.from((r||document).querySelectorAll(s));
+const esc = v => String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const can = p => S.perms.indexOf('*') >= 0 || S.perms.indexOf(p) >= 0;
+
+function api(action, payload) {
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(r => r && r.ok ? resolve(r.data) : reject(r || { code:'EMPTY', error:'No response.' }))
+      .withFailureHandler(() => reject({ code:'NETWORK', error:'Could not reach the server.' }))
+      .api({ action, token:S.token, payload:payload||{} });
+  });
+}
+const SESSION_CODES = ['SESSION_EXPIRED','SESSION_REVOKED','AUTH_REQUIRED'];
+function fail(e) {
+  if (e && SESSION_CODES.indexOf(e.code) >= 0) { signedOut(e.error); return; }
+  if (e && e.code === 'PASSWORD_CHANGE_REQUIRED') { show('forcepw'); return; }
+  toast((e && e.error) || 'Something went wrong.', true);
+}
+async function busy(btn, fn) { if (btn) btn.disabled=true; try { return await fn(); } catch(e){ fail(e);} finally { if (btn) btn.disabled=false; } }
+function toast(msg, bad) { const d = document.createElement('div'); if (bad) d.className='bad'; d.textContent=msg; $('#toast').appendChild(d); setTimeout(()=>d.remove(), bad?6500:3500); }
+function show(which) { ['login','forcepw','app'].forEach(id => $('#'+id).classList.toggle('hidden', id!==which)); if (which==='login') $('#login-form').elements.username.focus(); }
+function fmtDate(s){ return /^\d{4}-\d{2}-\d{2}/.test(s||'') ? s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4) : (s||''); }
+function fmtTime(s){ return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s||'') ? fmtDate(s)+' '+s.slice(11,16) : fmtDate(s); }
+function fmtHM(hhmm){ if (!/^\d{2}:\d{2}/.test(hhmm||'')) return hhmm||''; const h=+hhmm.slice(0,2), m=hhmm.slice(3,5); return ((h%12)||12)+':'+m+' '+(h<12?'AM':'PM'); }
+function pill(s){ const k=String(s).toUpperCase(); const c=['PRESENT','ACTIVE','OK'].indexOf(k)>=0?'ok':(['ABSENT','INACTIVE','FAIL'].indexOf(k)>=0?'bad':'warn'); return '<span class="pill '+c+'">'+esc(s||'—')+'</span>'; }
+
+document.addEventListener('click', ev => {
+  const sh = ev.target.closest('[data-show]');
+  if (sh) { const i = sh.parentElement.querySelector('input'); i.type = i.type==='password'?'text':'password'; sh.textContent = i.type==='password'?'Show':'Hide'; }
+});
+
+/* ---- auth ---- */
+function signedOut(msg) { S.token=null; S.user=null; S.perms=[]; try { sessionStorage.removeItem('cmz_tt'); } catch(e){} show('login'); $('#lg-msg').innerHTML = msg ? '<div class="alert warn">'+esc(msg)+'</div>' : ''; }
+function afterAuth(user, token) {
+  S.token=token; S.user=user; S.perms=user.permissions||[];
+  try { sessionStorage.setItem('cmz_tt', token); } catch(e){}
+  if (user.mustChangePassword) { show('forcepw'); $('#pw-form').reset(); $('#pw-msg').innerHTML=''; return; }
+  startApp();
+}
+function startApp() {
+  $('#who-name').textContent = S.user.displayName;
+  $('#who-role').textContent = 'Teacher';
+  buildNav(); show('app'); go('dashboard');
+}
+$('#login-form').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const f=ev.target, btn=$('#lg-btn');
+  const u=f.elements.username.value.trim(), p=f.elements.password.value;
+  if (!u||!p) { $('#lg-msg').innerHTML='<div class="alert bad">Enter username and password.</div>'; return; }
+  btn.disabled=true; btn.textContent='Signing in…'; $('#lg-msg').innerHTML='';
+  try { const r = await api('auth.login', { username:u, password:p, portal:'TEACHER' }); f.elements.password.value=''; if (window.cmzSplash && !r.user.mustChangePassword) cmzSplash(r.user.displayName, S.cfg.logoUrl); afterAuth(r.user, r.token); }
+  catch (e) { $('#lg-msg').innerHTML='<div class="alert bad">'+esc(e.error||'Could not sign in.')+'</div>'; }
+  finally { btn.disabled=false; btn.textContent='Sign in'; }
+});
+$('#pw-form').addEventListener('submit', async ev => {
+  ev.preventDefault(); const f=ev.target.elements, btn=$('#pw-btn');
+  if (f.newPassword.value !== f.again.value) { $('#pw-msg').innerHTML='<div class="alert bad">The two new passwords do not match.</div>'; return; }
+  btn.disabled=true; $('#pw-msg').innerHTML='';
+  try { const r = await api('auth.changePassword', { oldPassword:f.oldPassword.value, newPassword:f.newPassword.value }); S.token=r.token; try { sessionStorage.setItem('cmz_tt', r.token); } catch(e){} S.user.mustChangePassword=false; startApp(); toast('Password changed.'); }
+  catch (e) { if (SESSION_CODES.indexOf(e.code)>=0) signedOut(e.error); else $('#pw-msg').innerHTML='<div class="alert bad">'+esc(e.error)+'</div>'; }
+  finally { btn.disabled=false; }
+});
+async function doLogout() { try { await api('auth.logout'); } catch(e){} signedOut('You have signed out.'); }
+$('#logout').addEventListener('click', doLogout);
+$('#pw-out').addEventListener('click', doLogout);
+
+/* ---- nav ---- */
+const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['students','My students'],['sessions','Past classes'],['notices','Notices'],['income','Income'],['profile','Profile']];
+function buildNav(){
+  const list = NAV.filter(n => n[0] !== 'income' || can('TEACHER_INCOME_VIEW'));
+  $('#nav-items').innerHTML = list.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join('');
+}
+function go(view, arg){ S.view=view; $('#side').classList.remove('open');
+  $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
+  const main=$('#main'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
+  (VIEWS[view] || VIEWS.dashboard)(main, arg).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(fail); window.scrollTo(0,0);
+}
+$('#nav-items').addEventListener('click', ev => { const b=ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
+$('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open'));
+
+const VIEWS = {};
+
+/* ---- dashboard ---- */
+VIEWS.dashboard = async main => {
+  const d = await api('teacher.dashboard');
+  const s = d.stats;
+  const classesHtml = d.todayClasses.length ? d.todayClasses.map(c => {
+    const status = c.ActiveSessionID ? '<span class="pill ok">In progress</span>' :
+                   (c.ClosedSessionID ? '<span class="pill">Done</span>' : '');
+    const btn = c.ActiveSessionID
+      ? '<button class="btn primary" data-open="'+esc(c.ActiveSessionID)+'">Open live class</button>'
+      : (c.ClosedSessionID ? '' : '<button class="btn primary" data-start="'+esc(c.TimetableID)+'">Start class</button>');
+    return '<div class="class-row"><span class="t">'+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</span>' +
+      '<div class="d"><b>'+esc(c.SubjectName)+' · '+esc(c.BatchName)+'</b><span>'+esc(c.RoomName||'Room TBD')+'</span></div>' +
+      status + btn + '</div>';
+  }).join('') : '<div class="empty"><b>No classes scheduled today</b>Enjoy the break.</div>';
+
+  main.innerHTML = '<div class="head"><h1>Welcome, '+esc(d.teacher.Name)+'</h1><p>'+esc(S.cfg.centreName||'')+' · '+esc(fmtDate(new Date().toISOString().slice(0,10)))+'</p></div>' +
+    '<div class="stats">' +
+      '<div class="card stat"><b>'+s.todayClasses+'</b><span>Classes today</span></div>' +
+      '<div class="card stat"><b>'+s.students+'</b><span>Students assigned</span></div>' +
+      '<div class="card stat"><b>'+s.subjects+'</b><span>Subjects taught</span></div>' +
+    '</div>' +
+    '<div class="card"><h2 style="font-size:1.2rem;margin-bottom:.6rem">Today\'s classes</h2>'+classesHtml+'</div>';
+
+  main.addEventListener('click', ev => {
+    const st = ev.target.closest('[data-start]'); if (st) startClass(st.dataset.start);
+    const op = ev.target.closest('[data-open]'); if (op) go('live', op.dataset.open);
+  });
+};
+
+async function startClass(timetableId) {
+  try {
+    const r = await api('teacher.startClass', { timetableId: timetableId });
+    toast(r.reused ? 'Class already started — reopened.' : 'Class started.');
+    go('live', r.sessionId);
+  } catch (e) { fail(e); }
+}
+
+/* ---- live class ---- */
+VIEWS.live = async (main, sessionId) => {
+  if (!sessionId) { main.innerHTML = '<div class="card empty"><b>No class selected</b>Open a class from the Dashboard.</div>'; return; }
+  let poll = null, stopped = false, lastTotal = 0;
+  const cleanup = () => { stopped = true; if (poll) { clearInterval(poll); poll = null; } };
+  main.innerHTML = '<div id="live-body"><p class="muted">Loading…</p></div>';
+
+  const render = st => {
+    const s = st.session, c = st.counts;
+    lastTotal = c.total;
+    const secLeft = st.codeSecondsLeft;
+    const mm = Math.floor(secLeft / 60), ss = secLeft % 60;
+    const timerCls = secLeft <= 0 ? 'bad' : (secLeft <= 60 ? 'warn' : '');
+    const timerText = secLeft <= 0 ? 'Expired — tap “New code”' : 'Expires in '+mm+':'+String(ss).padStart(2,'0');
+    $('#live-body').innerHTML =
+      '<p><button class="link" data-go-back>← Dashboard</button></p>' +
+      '<div class="head"><h1>'+esc(s.SubjectName)+' · '+esc(s.BatchName)+'</h1><p>'+esc(s.RoomName||'')+' · started '+esc(fmtTime(s.StartedAt))+'</p></div>' +
+      '<div class="code-panel">' +
+        '<div class="label">Attendance code</div>' +
+        '<div class="code">'+esc(s.AttendanceCode)+'</div>' +
+        '<div class="timer '+timerCls+'">'+timerText+'</div>' +
+      '</div>' +
+      '<div class="row" style="margin-bottom:1rem"><button class="btn" id="new-code">New code</button> <button class="btn" id="mark-all">Mark all present</button><span class="sp"></span><button class="btn ok" id="close-class">Close class</button></div>' +
+      '<div class="live-stats">' +
+        '<div class="live-stat"><b>'+c.total+'</b><span>Total</span></div>' +
+        '<div class="live-stat present"><b>'+c.present+'</b><span>Present</span></div>' +
+        '<div class="live-stat late"><b>'+c.late+'</b><span>Late</span></div>' +
+        '<div class="live-stat absent"><b>'+c.absent+'</b><span>Absent</span></div>' +
+        '<div class="live-stat"><b>'+c.unmarked+'</b><span>Not yet</span></div>' +
+      '</div>' +
+      '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.4rem">Students</h2>' +
+        '<p class="muted" style="font-size:.85rem;margin:0 0 .5rem">If a student cannot enter the code, mark them here.</p>' +
+        '<div class="att-list">' +
+          st.students.map(x => {
+            const p = x.Status ? pill(x.Status) : '<span class="pill">—</span>';
+            const method = x.Method ? '<span class="method">'+esc(x.Method.replace('_',' ').toLowerCase())+'</span>' : '';
+            return '<div class="att-item" data-sid="'+esc(x.StudentID)+'">' +
+              '<span class="sid">'+esc(x.RollNo || x.StudentID)+'</span>' +
+              '<span class="name">'+esc(x.Name)+'</span>' + method + ' ' + p +
+              '<span class="acts">' +
+                '<button class="btn small" data-mark="PRESENT">P</button>' +
+                '<button class="btn small" data-mark="LATE">L</button>' +
+                '<button class="btn small" data-mark="ABSENT">A</button>' +
+              '</span></div>';
+          }).join('') +
+        '</div>' +
+      '</div>';
+
+    $('[data-go-back]', main).addEventListener('click', () => { cleanup(); go('dashboard'); });
+    $('#new-code').addEventListener('click', ev => busy(ev.target, async () => {
+      await api('teacher.regenerateCode', { sessionId: s.SessionID });
+      toast('New code generated.');
+      await tick();
+    }));
+    $('#mark-all').addEventListener('click', ev => {
+      if (!confirm('Mark every student who has not been marked yet as PRESENT? Students already marked are left as they are.')) return;
+      busy(ev.target, async () => {
+        const r = await api('teacher.markAll', { sessionId: s.SessionID, status: 'PRESENT' });
+        toast(r.marked ? r.marked + ' student' + (r.marked === 1 ? '' : 's') + ' marked present.' : 'Everyone is already marked.');
+        await tick();
+      });
+    });
+    $('#close-class').addEventListener('click', ev => {
+      if (!confirm('Close this class? Any student who has not been marked will be marked ABSENT.')) return;
+      busy(ev.target, async () => {
+        const r = await api('teacher.closeClass', { sessionId: s.SessionID });
+        cleanup();
+        toast('Class closed.' + (r.markedAbsent ? ' '+r.markedAbsent+' marked absent.' : ''));
+        go('dashboard');
+      });
+    });
+    $$('[data-sid]', main).forEach(row => {
+      $$('[data-mark]', row).forEach(b => b.addEventListener('click', () => busy(b, async () => {
+        await api('teacher.manualAttendance', { sessionId: s.SessionID, studentId: row.dataset.sid, status: b.dataset.mark });
+        await tick();
+      })));
+    });
+  };
+
+  const tick = async () => {
+    if (stopped) return;
+    try { const st = await api('teacher.classStatus', { sessionId: sessionId }); if (!stopped) render(st); }
+    catch (e) { if (!stopped) fail(e); }
+  };
+
+  await tick();
+  poll = setInterval(tick, lastTotal > 40 ? 8000 : 4000); // big classes refresh a little slower
+  // stop polling when navigating away
+  window.addEventListener('beforeunload', cleanup, { once: true });
+};
+
+/* ---- timetable ---- */
+VIEWS.timetable = async main => {
+  const rows = await api('teacher.timetable');
+  if (!rows.length) { main.innerHTML = '<div class="head"><h1>Timetable</h1></div><div class="card empty"><b>No classes assigned yet</b>Ask the office to assign your classes.</div>'; return; }
+  const order = ['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'];
+  const byDay = {}; rows.forEach(r => (byDay[r.Day] = byDay[r.Day] || []).push(r));
+  Object.keys(byDay).forEach(d => byDay[d].sort((a,b) => String(a.StartTime).localeCompare(String(b.StartTime))));
+  main.innerHTML = '<div class="head"><h1>Timetable</h1><p>Your weekly schedule</p></div>' +
+    order.filter(d => byDay[d]).map(d => '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">'+esc(d.charAt(0)+d.slice(1).toLowerCase())+'</h2>' +
+      byDay[d].map(c => '<div class="class-row"><span class="t">'+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</span><div class="d"><b>'+esc(c.SubjectName)+' · '+esc(c.BatchName)+'</b><span>'+esc(c.RoomName||'')+'</span></div></div>').join('') + '</div>').join('');
+};
+
+/* ---- students list ---- */
+VIEWS.students = async main => {
+  const groups = await api('teacher.students');
+  main.innerHTML = '<div class="head"><h1>My students</h1><p>Grouped by subject and batch</p></div>' +
+    (groups.length ? groups.map(g =>
+      '<div class="card" style="margin-bottom:1rem">' +
+        '<h2 style="font-size:1.15rem;margin-bottom:.4rem">'+esc(g.subjectName)+' · '+esc(g.batchName)+'</h2>' +
+        '<p class="muted" style="font-size:.85rem;margin:0 0 .5rem">'+g.students.length+' student'+(g.students.length===1?'':'s')+'</p>' +
+        (g.students.length
+          ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Roll</th><th>Student ID</th><th>Name</th></tr></thead><tbody>' +
+            g.students.map(s => '<tr><td data-l="Roll">'+esc(s.RollNo||'—')+'</td><td data-l="Student ID">'+esc(s.StudentID)+'</td><td data-l="Name">'+esc(s.Name)+'</td></tr>').join('') +
+            '</tbody></table></div>'
+          : '<div class="muted">No active students yet.</div>') +
+      '</div>'
+    ).join('') : '<div class="card empty"><b>No assigned students yet</b>Students appear here once they are assigned to your subject and batch.</div>');
+};
+
+/* ---- past sessions ---- */
+VIEWS.sessions = async main => {
+  const rows = await api('teacher.sessions', { limit: 50 });
+  main.innerHTML = '<div class="head"><h1>Past classes</h1><p>Your recent sessions and attendance counts</p></div>' +
+    (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Date</th><th>Subject</th><th>Batch</th><th>Present</th><th>Late</th><th>Absent</th><th>Total</th><th>Status</th></tr></thead><tbody>' +
+      rows.map(s => '<tr><td data-l="Date">'+esc(fmtDate(s.Date))+'</td><td data-l="Subject">'+esc(s.SubjectName)+'</td><td data-l="Batch">'+esc(s.BatchName)+'</td>' +
+        '<td data-l="Present"><b>'+s.Present+'</b></td><td data-l="Late">'+s.Late+'</td><td data-l="Absent">'+s.Absent+'</td><td data-l="Total">'+s.Total+'</td><td>'+pill(s.Status)+'</td></tr>').join('') + '</tbody></table></div>' :
+      '<div class="card empty"><b>No classes yet</b>Start a class from the dashboard.</div>');
+};
+
+/* ---- notices ---- */
+VIEWS.notices = async main => {
+  const rows = await api('teacher.notices');
+  const audLabel = n => {
+    const a = String(n.Audience || 'ALL').toUpperCase();
+    if (a === 'BATCH') return 'Batch' + (n.BatchName ? ' · ' + n.BatchName : '');
+    if (a === 'TEACHERS') return 'Teachers';
+    return 'Everyone';
+  };
+  main.innerHTML = '<div class="head"><h1>Notices</h1><p>Announcements from the centre</p></div>' +
+    (rows.length ? '<div class="card">' + rows.map(n =>
+      '<div style="padding:.8rem 0;border-bottom:1px solid var(--line)"><b>' + esc(n.Title) + '</b> <span class="pill">' + esc(audLabel(n)) + '</span>' +
+      '<div class="muted" style="font-size:.85rem">' + esc(fmtTime(n.PostedAt)) + (n.ExpiresAt ? ' · expires ' + esc(fmtDate(n.ExpiresAt)) : '') + '</div>' +
+      '<div style="margin-top:.4rem;white-space:pre-wrap">' + esc(n.Body || '') + '</div></div>'
+    ).join('') + '</div>' : '<div class="card empty"><b>No notices yet</b>Announcements will appear here.</div>');
+};
+
+/* ---- income ---- */
+VIEWS.income = async main => {
+  const d = await api('teacher.income');
+  const totalFinal = d.income.reduce((a,x) => a + (Number(x.FinalPayable)||0), 0);
+  const totalPaid = d.payments.reduce((a,x) => a + (Number(x.Amount)||0), 0);
+  main.innerHTML = '<div class="head"><h1>Income</h1><p>Monthly income and payments</p></div>' +
+    '<div class="stats">' +
+      '<div class="card stat"><b>₹'+totalFinal.toLocaleString('en-IN')+'</b><span>Total earned</span></div>' +
+      '<div class="card stat"><b>₹'+totalPaid.toLocaleString('en-IN')+'</b><span>Total paid</span></div>' +
+      '<div class="card stat"><b>₹'+(totalFinal-totalPaid).toLocaleString('en-IN')+'</b><span>Balance</span></div>' +
+    '</div>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Monthly income</h2>' +
+      (d.income.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Month</th><th>Subject</th><th>Students</th><th>Rate</th><th>Gross</th><th>Adj</th><th>Final</th><th>Status</th></tr></thead><tbody>' +
+        d.income.map(x => '<tr><td data-l="Month">'+esc(x.Month)+'</td><td data-l="Subject">'+esc(x.SubjectName)+'</td><td data-l="Students">'+x.StudentCount+'</td><td data-l="Rate">₹'+x.Rate+'</td><td data-l="Gross">₹'+x.Gross+'</td><td data-l="Adj">₹'+x.Adjustment+'</td><td data-l="Final"><b>₹'+x.FinalPayable+'</b></td><td>'+pill(x.Status)+'</td></tr>').join('') + '</tbody></table></div>' : '<div class="muted">No income records yet.</div>') +
+    '</div>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Payments received</h2>' +
+      (d.payments.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Date</th><th>Amount</th><th>Mode</th><th>Notes</th></tr></thead><tbody>' +
+        d.payments.map(p => '<tr><td data-l="Date">'+esc(fmtDate(p.Date))+'</td><td data-l="Amount"><b>₹'+p.Amount+'</b></td><td data-l="Mode">'+esc(p.Mode||'')+'</td><td data-l="Notes">'+esc(p.Notes||'')+'</td></tr>').join('') + '</tbody></table></div>' : '<div class="muted">No payments received yet.</div>') +
+    '</div>';
+};
+
+/* ---- profile / change password ---- */
+VIEWS.profile = async main => {
+  const me = await api('auth.me');
+  const p = me.profile || {};
+  main.innerHTML = '<div class="head"><h1>My profile</h1></div>' +
+    '<div class="card"><dl class="kv" style="display:grid;grid-template-columns:150px 1fr;gap:.35rem 1rem;margin:0">' +
+      '<dt>Teacher ID</dt><dd><b>'+esc(p.TeacherID||'')+'</b></dd>' +
+      '<dt>Name</dt><dd>'+esc(p.Name||'')+'</dd>' +
+      '<dt>Username</dt><dd>'+esc(me.username)+'</dd>' +
+      '<dt>Mobile</dt><dd>'+esc(p.Mobile||'—')+'</dd>' +
+      '<dt>Email</dt><dd>'+esc(p.Email||'—')+'</dd>' +
+      '<dt>Qualification</dt><dd>'+esc(p.Qualification||'—')+'</dd>' +
+      '<dt>Joined</dt><dd>'+esc(fmtDate(p.JoiningDate)||'—')+'</dd>' +
+    '</dl></div>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Change your password</h2>' +
+    '<form id="pw2-f"><div class="grid2">' +
+      '<label class="f full"><span>Current password</span><input name="old" type="password" required></label>' +
+      '<label class="f"><span>New password</span><input name="n1" type="password" required></label>' +
+      '<label class="f"><span>Confirm</span><input name="n2" type="password" required></label>' +
+    '</div><button class="btn primary" id="pw2-btn">Update password</button></form></div>';
+  $('#pw2-f').addEventListener('submit', ev => { ev.preventDefault(); busy($('#pw2-btn'), async () => {
+    const f=ev.target.elements;
+    if (f.n1.value !== f.n2.value) { toast('The two new passwords do not match.', true); return; }
+    const r = await api('auth.changePassword', { oldPassword:f.old.value, newPassword:f.n1.value });
+    S.token=r.token; try { sessionStorage.setItem('cmz_tt', r.token); } catch(e){}
+    toast('Password changed.'); ev.target.reset();
+  }); });
+};
+
+/* ---- boot ---- */
+(async function init() {
+  try {
+    const c = await api('public.config'); S.cfg = c; if (window.cmzHero) cmzHero($('#hero-slot'), c.logoUrl);
+    ['#lg-centre','#nav-centre','#tb-centre'].forEach(s => $(s).textContent = c.centreName);
+    if (c.logoUrl) {
+  const lgLogo = $('#lg-logo'); if (lgLogo) lgLogo.src = c.logoUrl;
+  const navLogo = $('#nav-logo'); if (navLogo) navLogo.src = c.logoUrl;
+  const badge = $('#nav-logo-badge'); if (badge) badge.style.display = 'flex';
+}
+    if (c.tagline) $('#lg-tagline').textContent = c.tagline;
+    document.title = c.centreName + ' · Teacher';
+  } catch (e) {}
+  let saved = null; try { saved = sessionStorage.getItem('cmz_tt'); } catch(e){}
+  if (saved) {
+    S.token = saved;
+    try {
+      const me = await api('auth.me');
+      if (me.userType !== 'TEACHER') throw { code:'SESSION_EXPIRED' };
+      S.user = { userId:me.userId, username:me.username, role:me.role, userType:me.userType, linkedId:me.linkedId,
+                 displayName:(me.profile && me.profile.Name) || me.username, mustChangePassword:me.mustChangePassword,
+                 profile:me.profile };
+      S.perms = me.permissions;
+      if (me.mustChangePassword) show('forcepw'); else startApp();
+      return;
+    } catch (e) { S.token=null; try { sessionStorage.removeItem('cmz_tt'); } catch(x){} }
+  }
+  show('login');
+})();
+</script>
+</body>
+</html>

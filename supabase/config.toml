@@ -1,0 +1,3 @@
+[functions.api]
+# The function handles public actions and verifies bearer tokens itself.
+verify_jwt = false

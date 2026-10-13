@@ -1,0 +1,162 @@
+<style>
+/* ===== Creative Math Zone: shared logo + motion (included by every page) ===== */
+@keyframes cmz-spin{to{transform:rotate(360deg)}}
+@keyframes cmz-fade{from{opacity:0}to{opacity:1}}
+@keyframes cmz-enter{from{opacity:0;transform:scale(.2) rotate(-200deg)}to{opacity:1;transform:none}}
+@keyframes cmz-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.2%)}}
+@keyframes cmz-glow{0%,100%{box-shadow:0 0 0 4px rgba(243,177,28,.9),0 0 50px 4px rgba(243,177,28,.35),0 24px 60px rgba(0,0,0,.45)}
+  50%{box-shadow:0 0 0 4px #ffd25a,0 0 90px 14px rgba(243,177,28,.6),0 24px 60px rgba(0,0,0,.45)}}
+@keyframes cmz-glow-sm{0%,100%{box-shadow:0 0 0 2px rgba(243,177,28,.85),0 0 10px rgba(243,177,28,.3)}50%{box-shadow:0 0 0 2px #ffd25a,0 0 20px rgba(243,177,28,.65)}}
+@keyframes cmz-shine{0%,60%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
+@keyframes cmz-tw{0%,100%{opacity:0;transform:scale(.4)}50%{opacity:.95;transform:scale(1.3)}}
+@keyframes cmz-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes cmz-splash-out{to{opacity:0;visibility:hidden}}
+
+/* ---- animated logo with orbiting symbols ---- */
+.cmz-hero{--size:min(58vmin,460px);position:relative;width:var(--size);height:var(--size);flex:none}
+.cmz-logo{position:absolute;inset:19%;border-radius:50%;overflow:hidden;z-index:3;background:#fff;
+  box-shadow:0 0 0 4px rgba(243,177,28,.9),0 0 60px 6px rgba(243,177,28,.45),0 24px 60px rgba(0,0,0,.45);
+  animation:cmz-enter 1.3s cubic-bezier(.2,.9,.25,1.15) both,cmz-float 7s ease-in-out 1.3s infinite,cmz-glow 3.6s ease-in-out 1.3s infinite}
+.cmz-logo img{width:100%;height:100%;display:block;object-fit:cover}
+.cmz-logo::after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.55) 50%,transparent 60%);
+  transform:translateX(-120%);animation:cmz-shine 6s ease-in-out 2.2s infinite}
+.cmz-logo.noimg{background:linear-gradient(135deg,#2a56a8,#2ea88a)}
+.cmz-logo.noimg img{display:none}
+.cmz-logo.noimg::before{content:"CMZ";position:absolute;inset:0;display:grid;place-items:center;color:#fff;font:800 2.6rem/1 'Bricolage Grotesque','Segoe UI',sans-serif;letter-spacing:-.02em}
+.cmz-halo{position:absolute;inset:16%;border-radius:50%;z-index:2;
+  background:conic-gradient(from 0deg,transparent 0 55%,#f3b11c 80%,transparent 100%);
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 4px));
+          mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 4px));
+  animation:cmz-spin 5s linear infinite,cmz-fade 1s .8s both}
+.cmz-orbit{position:absolute;inset:0;z-index:4;animation:cmz-spin var(--t) linear infinite,cmz-fade 1s .9s both}
+.cmz-orbit.rev{animation-direction:reverse,normal}
+.cmz-ring{position:absolute;inset:var(--in);border-radius:50%;border:1px dashed rgba(159,178,208,.28)}
+.cmz-sym{position:absolute;top:50%;left:50%;width:0;height:0;
+  transform:rotate(var(--a)) translateX(calc(var(--size) * var(--r))) rotate(calc(var(--a) * -1))}
+.cmz-sym i{position:absolute;left:0;top:0;display:grid;place-items:center;width:calc(var(--size)*.105);height:calc(var(--size)*.105);
+  margin:calc(var(--size)*-.0525) 0 0 calc(var(--size)*-.0525);
+  font:700 calc(var(--size)*.075)/1 'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;font-style:normal;color:var(--c);
+  text-shadow:0 0 14px color-mix(in srgb,var(--c) 70%,transparent);
+  animation:cmz-spin var(--t) linear infinite reverse}
+.cmz-orbit.rev .cmz-sym i{animation-direction:normal}
+.cmz-tw{position:absolute;width:6px;height:6px;border-radius:50%;background:#f3b11c;z-index:1;opacity:0;animation:cmz-tw 3.2s ease-in-out infinite}
+
+/* ---- sign-in pages: dark panel with the animated logo ---- */
+.sheet{background-color:#0f1b30;
+  background-image:radial-gradient(circle at 50% 42%,rgba(243,177,28,.2),transparent 56%),linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px);
+  background-size:auto,32px 32px,32px 32px;border-right:0}
+.sheet .tag{color:#fff;background:transparent}
+.sheet .tag small{color:#9fb2d0}
+.cmz-hero-slot{position:absolute;left:0;right:0;top:0;bottom:130px;display:grid;place-items:center}
+.sheet .cmz-hero{--size:min(50vmin,440px)}
+#lg-logo{display:none!important}
+
+/* ---- inside the portals ---- */
+main>*{animation:cmz-rise .5s cubic-bezier(.2,.8,.2,1) both}
+main>*:nth-child(2){animation-delay:.05s}main>*:nth-child(3){animation-delay:.1s}
+main>*:nth-child(4){animation-delay:.15s}main>*:nth-child(n+5){animation-delay:.2s}
+nav.side .brand .logo-badge{animation:cmz-glow-sm 4s ease-in-out infinite}
+nav.side .brand img#nav-logo{border-radius:50%!important;background:#fff;animation:cmz-glow-sm 4s ease-in-out infinite}
+nav.side button.item{transition:background .15s,padding-left .15s}
+nav.side button.item:hover{padding-left:1rem}
+.btn{transition:transform .12s,border-color .15s,background .15s}
+.btn:active{transform:scale(.97)}
+.card.stat{transition:transform .18s,box-shadow .18s}
+.card.stat:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(22,36,59,.08),0 12px 26px rgba(22,36,59,.12)}
+
+/* ---- loader + welcome splash ---- */
+.cmz-loader{display:grid;place-items:center;padding:4rem 0}
+.cmz-loader i{width:44px;height:44px;border-radius:50%;border:4px solid #e8eef6;border-top-color:#f3b11c;animation:cmz-spin .8s linear infinite}
+#cmz-splash{position:fixed;inset:0;z-index:300;display:grid;place-items:center;text-align:center;color:#fff;cursor:pointer;
+  background:radial-gradient(circle at 50% 45%,#1d3558,#0f1b30 70%);animation:cmz-splash-out .45s ease 1.25s forwards}
+#cmz-splash p{margin:1.2rem 0 0;font:700 1.5rem/1.2 'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;animation:cmz-fade .6s .5s both}
+#cmz-splash .cmz-logo{position:relative;inset:auto;width:132px;height:132px;margin:0 auto}
+
+@media (max-width:900px){
+  .sheet{min-height:270px;padding:1rem}
+  .sheet .tag{display:none}
+  .cmz-hero-slot{bottom:0}
+  .sheet .cmz-hero{--size:min(62vw,236px)}
+}
+@media print{main>*{animation:none!important}}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}
+  .cmz-orbit,.cmz-sym i,.cmz-halo{animation:none!important}
+}
+</style>
+<script>
+/* Builds the animated logo inside el. logoUrl may be empty (shows initials). */
+var CMZ_ORBITS = [
+  { t: 46, inset: '7%',  rev: false, r: .405, off: 0,  syms: [['π', '#f3b11c'], ['∞', '#52e0a1'], ['Σ', '#ff7aa8'], ['√', '#7ba7f5'], ['∫', '#ffd25a']] },
+  { t: 70, inset: '-1%', rev: true,  r: .5,   off: 36, syms: [['÷', '#ffffff'], ['θ', '#7ba7f5'], ['%', '#f3b11c'], ['≈', '#52e0a1'], ['x²', '#ff7aa8']] }
+];
+var CMZ_SPARKS = [[6, 30, .2], [14, 84, 1.1], [72, 92, 2], [90, 62, .7], [80, 8, 1.7], [34, 2, 2.4]];
+
+function cmzHero(el, logoUrl) {
+  if (!el) return;
+  var h = '<div class="cmz-hero" role="img" aria-label="Creative Math Zone logo"><div class="cmz-halo"></div>';
+  CMZ_ORBITS.forEach(function (o) {
+    h += '<div class="cmz-orbit' + (o.rev ? ' rev' : '') + '" style="--t:' + o.t + 's;--in:' + o.inset + '"><div class="cmz-ring"></div>';
+    o.syms.forEach(function (s, i) {
+      var a = o.off + i * 360 / o.syms.length;
+      h += '<div class="cmz-sym" style="--a:' + a + 'deg;--r:' + o.r + ';--c:' + s[1] + ';--t:' + o.t + 's"><i>' + s[0] + '</i></div>';
+    });
+    h += '</div>';
+  });
+  h += '<div class="cmz-logo"><img alt="" draggable="false"></div>';
+  CMZ_SPARKS.forEach(function (p) { h += '<span class="cmz-tw" style="top:' + p[0] + '%;left:' + p[1] + '%;animation-delay:' + p[2] + 's"></span>'; });
+  h += '</div>';
+  el.innerHTML = h;
+  cmzLogoImg(el.querySelector('.cmz-logo'), logoUrl);
+}
+
+function cmzLogoImg(box, url) {
+  var img = box.querySelector('img');
+  if (!url) { box.classList.add('noimg'); return; }
+  img.onerror = function () { box.classList.add('noimg'); };
+  img.src = url;
+}
+
+/* Short welcome screen after a fresh sign-in. Tap to skip. */
+function cmzSplash(name, logoUrl) {
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var d = document.createElement('div');
+  d.id = 'cmz-splash';
+  d.innerHTML = '<div><div class="cmz-logo"><img alt=""></div><p></p></div>';
+  d.querySelector('p').textContent = 'Welcome' + (name ? ', ' + name : '');
+  cmzLogoImg(d.querySelector('.cmz-logo'), logoUrl);
+  d.addEventListener('click', function () { d.remove(); });
+  document.body.appendChild(d);
+  setTimeout(function () { if (d.parentNode) d.remove(); }, 1900);
+}
+
+/* Counts the big numbers on a freshly drawn page up from zero. */
+function cmzAnimate(root) {
+  if (!root || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+  root.querySelectorAll('.stat b').forEach(function (b) {
+    if (b.children.length) return;
+    var raw = b.textContent.trim();
+    var m = /^(₹)?(-?[\d,]+(?:\.\d+)?)(%?)$/.exec(raw);
+    if (!m) return;
+    var target = parseFloat(m[2].replace(/,/g, ''));
+    if (!isFinite(target) || target === 0 || target > 1e9) return;
+    var dec = (m[2].split('.')[1] || '').length, grouped = !!m[1] || raw.indexOf(',') >= 0;
+    var fmt = function (n) {
+      var s = grouped ? n.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec }) : n.toFixed(dec);
+      return (m[1] || '') + s + m[3];
+    };
+    var t0 = performance.now(), dur = 700;
+    var step = function (now) {
+      var k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      if (k < 1) { b.textContent = fmt(target * e); requestAnimationFrame(step); } else { b.textContent = raw; }
+    };
+    b.textContent = fmt(0);
+    requestAnimationFrame(step);
+  });
+}
+
+/* If the page config is slow or fails, still show the hero (with initials). */
+document.addEventListener('DOMContentLoaded', function () {
+  setTimeout(function () { var s = document.getElementById('hero-slot'); if (s && !s.firstChild) cmzHero(s, ''); }, 4000);
+});
+</script>

@@ -1,0 +1,2133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Creative Math Zone · Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#f6f8fb; --card:#ffffff; --ink:#18263d; --ink-2:#4a5a73; --ink-3:#7b8aa0;
+  --line:#dde5ef; --grid:#dbe7f3; --navy:#16243b; --navy-2:#223654;
+  --pencil:#f3b11c; --pencil-dk:#b97f00; --ok:#1f7a55; --ok-bg:#e3f4ec; --bad:#b3302a; --bad-bg:#fbe9e7; --warn-bg:#fff3d6;
+  --r:10px; --shadow:0 1px 2px rgba(22,36,59,.06),0 4px 14px rgba(22,36,59,.06);
+  --display:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif; --body:'Figtree','Segoe UI',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 var(--body)}
+h1,h2,h3{font-family:var(--display);margin:0;line-height:1.15;letter-spacing:-.01em}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:inherit}
+.hidden{display:none!important}
+:focus-visible{outline:3px solid var(--pencil);outline-offset:2px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;min-height:42px;padding:.55rem 1rem;border-radius:8px;border:1px solid var(--line);background:#fff;font-weight:600;cursor:pointer}
+.btn:hover{border-color:var(--ink-3)}
+.btn.primary{background:var(--navy);border-color:var(--navy);color:#fff}
+.btn.primary:hover{background:var(--navy-2)}
+.btn.danger{color:var(--bad);border-color:#e8bcb8}
+.btn.small{min-height:34px;padding:.3rem .7rem;font-size:.9rem}
+.btn[disabled]{opacity:.55;cursor:wait}
+.link{background:none;border:0;padding:0;color:var(--navy);font-weight:600;text-decoration:underline;cursor:pointer}
+
+/* ---------- sign-in ---------- */
+#login{min-height:100vh;display:grid;grid-template-columns:1.1fr 1fr}
+.sheet{position:relative;background:#fbfdff;background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:32px 32px;border-right:1px solid var(--line);display:flex;flex-direction:column;justify-content:flex-end;padding:3rem;overflow:hidden}
+.sheet svg{position:absolute;inset:0;width:100%;height:100%}
+.sheet .axis{stroke:var(--navy);stroke-width:2}
+.sheet .curve{fill:none;stroke:var(--pencil);stroke-width:5;stroke-linecap:round;stroke-dasharray:1400;stroke-dashoffset:1400;animation:draw 2.2s .3s ease-out forwards}
+.sheet .dot{fill:var(--navy)}
+@keyframes draw{to{stroke-dashoffset:0}}
+.sheet .tag{position:relative;max-width:20ch;font-family:var(--display);font-weight:700;font-size:clamp(1.8rem,3.2vw,2.8rem);color:var(--navy);background:rgba(251,253,255,.88);padding:.4rem .6rem .5rem 0}
+.sheet .tag small{display:block;font:500 1rem var(--body);color:var(--ink-2);margin-top:.5rem}
+.signin{display:flex;align-items:center;justify-content:center;padding:2rem 1.25rem}
+.signin form{width:100%;max-width:370px}
+.signin h1{font-size:2rem;margin-bottom:.35rem}
+.signin p{color:var(--ink-2);margin:0 0 1.5rem}
+.alert{border-radius:8px;padding:.7rem .9rem;margin:0 0 1rem;font-size:.95rem}
+.alert.bad{background:var(--bad-bg);color:var(--bad)}
+.alert.warn{background:var(--warn-bg);color:#6b4c00}
+.alert.ok{background:var(--ok-bg);color:var(--ok)}
+
+/* ---------- fields ---------- */
+.f{display:block;margin-bottom:1rem}
+.f>span{display:block;font-size:.88rem;font-weight:600;color:var(--ink-2);margin-bottom:.3rem}
+.f>span em{color:var(--bad);font-style:normal}
+.f input,.f select,.f textarea{width:100%;min-height:44px;padding:.55rem .75rem;border:1px solid #c5d1e0;border-radius:8px;background:#fff}
+.f input:focus,.f select:focus,.f textarea:focus{border-color:var(--navy);outline:3px solid rgba(243,177,28,.45);outline-offset:0}
+.f small{display:block;color:var(--ink-3);font-size:.82rem;margin-top:.25rem}
+.pw{position:relative}
+.pw button{position:absolute;right:6px;top:6px;min-height:32px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 1rem}
+.grid2 .full{grid-column:1/-1}
+
+/* ---------- app shell ---------- */
+#app{display:grid;grid-template-columns:240px 1fr;min-height:100vh}
+nav.side{background:var(--navy);color:#dbe5f5;padding:1rem .75rem .75rem;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+nav.side .brand{flex-shrink:0}
+nav.side #nav-items{flex:1;overflow-y:auto;overflow-x:hidden;margin-bottom:.5rem;scrollbar-width:thin}
+nav.side #nav-items::-webkit-scrollbar{width:6px}
+nav.side #nav-items::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+nav.side .who{flex-shrink:0}
+nav.side .brand{padding:.25rem .75rem 1.25rem;font-family:var(--display);font-weight:700;font-size:1.15rem;color:#fff;line-height:1.15;letter-spacing:-.015em}
+nav.side .brand .logo-badge{display:none;width:58px;height:58px;border-radius:50%;background:#fff;align-items:center;justify-content:center;margin:0 0 .7rem;box-shadow:0 2px 10px rgba(0,0,0,.25),inset 0 0 0 3px rgba(22,36,59,.08)}
+nav.side .brand .logo-badge img{width:46px;height:46px;object-fit:contain;border-radius:50%;display:block}
+nav.side .brand small{display:block;font:500 .78rem var(--body);color:#9fb2d0;margin-top:.3rem}
+nav.side button.item{display:flex;width:100%;align-items:center;gap:.6rem;text-align:left;background:none;border:0;border-left:4px solid transparent;color:inherit;padding:.65rem .75rem;border-radius:0 8px 8px 0;cursor:pointer;font-weight:500}
+nav.side button.item:hover{background:rgba(255,255,255,.07)}
+nav.side button.item[aria-current=page]{background:rgba(255,255,255,.1);border-left-color:var(--pencil);color:#fff;font-weight:600}
+nav.side .who{margin-top:auto;padding:.75rem;border-top:1px solid rgba(255,255,255,.14);font-size:.9rem}
+nav.side .who b{display:block;color:#fff}
+nav.side .who .btn{margin-top:.6rem;width:100%;background:transparent;color:#fff;border-color:rgba(255,255,255,.3)}
+.topbar{display:none}
+main{padding:2rem clamp(1rem,3vw,2.5rem) 4rem;max-width:1200px;width:100%}
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}
+.head h1{font-size:1.9rem}
+.head p{margin:.25rem 0 0;color:var(--ink-2)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:1.25rem}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1rem;margin-bottom:1.5rem}
+.stat b{display:block;font:700 2.2rem/1 var(--display);color:var(--navy)}
+.stat span{color:var(--ink-2);font-size:.92rem}
+.toolbar{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem}
+.toolbar input,.toolbar select{min-height:42px;padding:.4rem .75rem;border:1px solid #c5d1e0;border-radius:8px;background:#fff}
+.toolbar input{flex:1;min-width:200px}
+table{width:100%;border-collapse:collapse;background:#fff}
+th,td{text-align:left;padding:.7rem .85rem;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.85rem;color:var(--ink-2);font-weight:600;background:#f1f5fa}
+tbody tr.click{cursor:pointer}
+tbody tr.click:hover{background:#f6faff}
+.tablewrap{border:1px solid var(--line);border-radius:var(--r);overflow:auto;box-shadow:var(--shadow);background:#fff}
+.pill{display:inline-block;padding:.1rem .6rem;border-radius:99px;font-size:.82rem;font-weight:600;background:#e8eef6;color:var(--ink-2)}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.warn{background:var(--warn-bg);color:#6b4c00}
+.muted{color:var(--ink-3)}
+.empty{padding:2.5rem 1rem;text-align:center;color:var(--ink-2)}
+.empty b{display:block;font:700 1.15rem var(--display);color:var(--ink);margin-bottom:.3rem}
+.tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--line);margin-bottom:1.25rem;overflow:auto}
+.tabs button{background:none;border:0;border-bottom:3px solid transparent;padding:.65rem 1rem;font-weight:600;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.tabs button[aria-selected=true]{color:var(--navy);border-bottom-color:var(--pencil)}
+.bar{height:10px;background:#e8eef6;border-radius:99px;overflow:hidden;min-width:80px}
+.bar i{display:block;height:100%;background:var(--navy);border-radius:99px}
+.steps{margin:0;padding-left:1.2rem;color:var(--ink-2)}
+.steps li{margin:.35rem 0}
+.row{display:flex;gap:.75rem;flex-wrap:wrap;align-items:center}
+.sp{flex:1}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:.35rem 1rem;margin:0}
+.kv dt{color:var(--ink-3);font-size:.9rem}.kv dd{margin:0}
+.section{margin-top:1.75rem}
+.section>h2{font-size:1.2rem;margin-bottom:.75rem}
+.perm{display:flex;gap:.6rem;align-items:flex-start;padding:.45rem 0;border-bottom:1px solid var(--line)}
+.perm input{margin-top:.3rem;width:18px;height:18px}
+
+main.quiet>*{animation:none!important}
+.live{display:flex;align-items:center;gap:.5rem;padding:.45rem .75rem;font-size:.8rem;color:#9fb2d0;flex-shrink:0}
+.live .dot{width:8px;height:8px;border-radius:50%;background:#52e0a1;flex:none;animation:livepulse 2.4s ease-in-out infinite}
+.live.stale .dot{background:var(--pencil);animation:none}
+.live.stale #live-text{color:#ffd25a}
+.live .link{color:#fff;margin-left:auto;font-size:.8rem}
+@keyframes livepulse{0%,100%{box-shadow:0 0 0 0 rgba(82,224,161,.55)}50%{box-shadow:0 0 0 5px rgba(82,224,161,0)}}
+.badge{margin-left:auto;background:var(--pencil);color:var(--navy);border-radius:99px;padding:0 .5rem;font-size:.78rem;font-weight:700;line-height:1.5}
+textarea[readonly]{background:#f8fafc}
+
+/* ---------- dialog + toast ---------- */
+dialog{border:0;border-radius:14px;padding:0;width:min(640px,94vw);max-height:92vh;box-shadow:0 20px 60px rgba(10,20,40,.35)}
+dialog::backdrop{background:rgba(16,28,48,.55)}
+.dlg-h{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.25rem;border-bottom:1px solid var(--line)}
+.dlg-h h2{font-size:1.25rem}
+.dlg-b{padding:1.25rem;overflow:auto;max-height:calc(92vh - 130px)}
+.dlg-f{display:flex;justify-content:flex-end;gap:.6rem;padding:.9rem 1.25rem;border-top:1px solid var(--line);background:#f8fafc}
+.cred{background:#f1f5fa;border:1px dashed #9fb2d0;border-radius:10px;padding:1rem;margin:1rem 0}
+.cred div{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:.3rem 0}
+.cred code{font:600 1.25rem/1.2 ui-monospace,Consolas,monospace;letter-spacing:.04em;word-break:break-all}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99;display:flex;flex-direction:column;gap:.5rem;align-items:center;pointer-events:none;width:min(560px,92vw)}
+#toast div{pointer-events:auto;padding:.7rem 1rem;border-radius:9px;background:var(--navy);color:#fff;box-shadow:var(--shadow);font-weight:500}
+#toast div.bad{background:var(--bad)}
+
+@media print {
+  html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+  body * { visibility: hidden; }
+  #app, main { display: block !important; padding: 0 !important; margin: 0 !important; grid-template-columns: none !important; min-height: 0 !important; }
+  nav.side, .topbar, .no-print, #toast, dialog, #login, #forcepw { display: none !important; }
+  #receipt-paper, #receipt-paper * { visibility: visible; }
+  #receipt-paper {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    page-break-inside: avoid;
+    page-break-after: avoid;
+  }
+  @page { size: A5; margin: 6mm; }
+}
+
+@media (max-width:900px){
+  #login{grid-template-columns:1fr}
+  .sheet{min-height:200px;padding:1.5rem;border-right:0;border-bottom:1px solid var(--line)}
+  .sheet .tag{font-size:1.5rem}
+  .sheet .tag small{display:none}
+  #app{grid-template-columns:1fr}
+  nav.side{position:fixed;inset:0 25% 0 0;z-index:40;height:100vh;transform:translateX(-102%);transition:transform .2s}
+  nav.side.open{transform:none}
+  .topbar{display:flex;align-items:center;gap:.75rem;background:var(--navy);color:#fff;padding:.6rem 1rem;position:sticky;top:0;z-index:30}
+  .topbar b{font-family:var(--display)}
+  .topbar button{background:none;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:8px;min-height:38px;padding:0 .8rem;font-weight:600}
+  .grid2{grid-template-columns:1fr}
+  .kv{grid-template-columns:1fr}
+  .head h1{font-size:1.5rem}
+  /* tables become stacked cards on phones */
+  table.stack thead{display:none}
+  table.stack,table.stack tbody,table.stack tr,table.stack td{display:block;width:100%}
+  table.stack tr{border-bottom:8px solid var(--paper);padding:.4rem 0}
+  table.stack td{border:0;padding:.25rem .85rem}
+  table.stack td[data-l]::before{content:attr(data-l) ": ";color:var(--ink-3);font-size:.85rem}
+}
+@media (prefers-reduced-motion:reduce){.sheet .curve{animation:none;stroke-dashoffset:0}nav.side{transition:none}}
+</style>
+<?!= include_('shared') ?>
+</head>
+<body>
+
+<!-- ============ SIGN IN ============ -->
+<section id="login" class="hidden">
+  <div class="sheet" aria-hidden="true">
+    <div class="cmz-hero-slot" id="hero-slot"></div>
+    <div class="tag"><span id="lg-tagline">Eat Math, Drink Math, Dream Math</span><small id="lg-centre">Creative Math Zone</small></div>
+  </div>
+  <div class="signin">
+    <form id="login-form" autocomplete="on" novalidate>
+      <img id="lg-logo" alt="" style="width:96px;height:96px;object-fit:contain;margin:0 auto .75rem;display:block">
+      <h1>Admin sign in</h1>
+      <p id="lg-sub">Use the username and password given to you.</p>
+      <div id="lg-msg"></div>
+      <label class="f"><span>Username</span><input name="username" autocomplete="username" required autocapitalize="none" spellcheck="false"></label>
+      <label class="f"><span>Password</span>
+        <div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" class="btn small" data-show="password">Show</button></div>
+      </label>
+      <button class="btn primary" style="width:100%" id="lg-btn">Sign in</button>
+    </form>
+  </div>
+</section>
+
+<!-- ============ CHANGE PASSWORD (first login) ============ -->
+<section id="forcepw" class="hidden">
+  <div class="signin" style="min-height:100vh">
+    <form id="pw-form" style="max-width:400px;width:100%">
+      <h1 style="font-size:1.8rem;margin-bottom:.4rem">Choose a new password</h1>
+      <p class="muted" style="margin:0 0 1.25rem">You are using a temporary password. Set your own before continuing.</p>
+      <div id="pw-msg"></div>
+      <label class="f"><span>Temporary password</span><input name="oldPassword" type="password" autocomplete="current-password" required></label>
+      <label class="f"><span>New password</span><input name="newPassword" type="password" autocomplete="new-password" required><small>At least 6 characters.</small></label>
+      <label class="f"><span>Type the new password again</span><input name="again" type="password" autocomplete="new-password" required></label>
+      <button class="btn primary" style="width:100%" id="pw-btn">Save and continue</button>
+      <p style="text-align:center"><button type="button" class="link" id="pw-out">Sign out</button></p>
+    </form>
+  </div>
+</section>
+
+<!-- ============ APP ============ -->
+<div id="app" class="hidden">
+  <div class="topbar"><button id="menu-btn" aria-label="Open menu">Menu</button><b id="tb-centre">Creative Math Zone</b></div>
+  <nav class="side" id="side" aria-label="Main">
+            <div class="brand"><div class="logo-badge" id="nav-logo-badge"><img id="nav-logo" alt=""></div><span id="nav-centre">Creative Math Zone</span><small>Admin</small></div>
+    <div id="nav-items"></div>
+    <div class="live" id="live"><span class="dot"></span><span id="live-text">Live</span><button class="link" id="live-btn" type="button">Refresh</button></div>
+    <div class="who"><b id="who-name"></b><span id="who-role" class="muted"></span><button class="btn small" id="logout">Sign out</button></div>
+  </nav>
+  <main id="main" tabindex="-1"></main>
+</div>
+
+<dialog id="dlg"></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* =====================================================================
+   Creative Math Zone — Admin portal
+   The browser never touches the Sheet: every action goes through api().
+   ===================================================================== */
+const S = { token: null, user: null, cfg: {}, view: 'dashboard', L: {}, perms: [] };
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const can = p => S.perms.indexOf('*') >= 0 || S.perms.indexOf(p) >= 0;
+
+const PERM_LABELS = {
+  STUDENT_VIEW: 'View students', STUDENT_EDIT: 'Add and edit students', TEACHER_VIEW: 'View teachers', TEACHER_EDIT: 'Add and edit teachers',
+  MASTER_VIEW: 'View subjects, batches, rooms', MASTER_EDIT: 'Edit subjects, batches, rooms', SETTINGS_VIEW: 'View settings', SETTINGS_EDIT: 'Change settings',
+  USER_MANAGE: 'Manage users', LOG_VIEW: 'View activity log', FINANCE_VIEW: 'View finance', FINANCE_EDIT: 'Record payments and fees',
+  TEACHER_INCOME_MANAGE: 'Manage teacher pay rates', TEACHER_INCOME_GRANT: 'Allow teachers to see their income', REPORT_VIEW: 'View reports',
+  NOTICE_EDIT: 'Post notices', ATTENDANCE_CORRECT: 'Correct attendance'
+};
+
+/* ---------- server calls ---------- */
+function api(action, payload) {
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(r => { if (r && r.v) { SYNC.v = r.v; SYNC.l = r.l; } r && r.ok ? resolve(r.data) : reject(r || { code: 'EMPTY', error: 'No response from the server.' }); })
+      .withFailureHandler(() => reject({ code: 'NETWORK', error: 'Could not reach the server. Check your internet and try again.' }))
+      .api({ action: action, token: S.token, payload: payload || {} });
+  });
+}
+const SESSION_CODES = ['SESSION_EXPIRED', 'SESSION_REVOKED', 'AUTH_REQUIRED'];
+function fail(e) {
+  if (e && SESSION_CODES.indexOf(e.code) >= 0) { signedOut(e.error); return; }
+  if (e && e.code === 'PASSWORD_CHANGE_REQUIRED') { show('forcepw'); return; }
+  toast((e && e.error) || 'Something went wrong.', true);
+}
+async function busy(btn, fn) {
+  if (btn) btn.disabled = true;
+  try { return await fn(); } catch (e) { fail(e); return undefined; } finally { if (btn) btn.disabled = false; }
+}
+
+/* ---------- small UI helpers ---------- */
+function toast(msg, bad) {
+  const d = document.createElement('div'); if (bad) d.className = 'bad'; d.textContent = msg;
+  $('#toast').appendChild(d); setTimeout(() => d.remove(), bad ? 6500 : 3500);
+}
+function show(which) {
+  ['login', 'forcepw', 'app'].forEach(id => $('#' + id).classList.toggle('hidden', id !== which));
+  if (which === 'login') $('#login-form').elements.username.focus();
+}
+function fmtDate(s) { return /^\d{4}-\d{2}-\d{2}/.test(s || '') ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : (s || ''); }
+function fmtTime(s) { return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s || '') ? fmtDate(s) + ' ' + s.slice(11, 16) : fmtDate(s); }
+function fmtHM(hhmm) {
+  if (!/^\d{2}:\d{2}/.test(hhmm || '')) return hhmm || '';
+  const h = +hhmm.slice(0, 2), m = hhmm.slice(3, 5);
+  return ((h % 12) || 12) + ':' + m + ' ' + (h < 12 ? 'AM' : 'PM');
+}
+function pill(status) {
+  const k = String(status).toUpperCase();
+  const cls = ['ACTIVE', 'COMPLETED'].indexOf(k) >= 0 ? 'ok' : (['INACTIVE', 'LEFT', 'SUSPENDED', 'ENDED', 'FAIL'].indexOf(k) >= 0 ? 'bad' : '');
+  return '<span class="pill ' + cls + '">' + esc(status || '—') + '</span>';
+}
+function openDlg(title, body, footer, onMount) {
+  const d = $('#dlg');
+  d.innerHTML = '<div class="dlg-h"><h2>' + esc(title) + '</h2><button class="btn small" type="button" data-close>Close</button></div>' +
+    '<div class="dlg-b">' + body + '</div>' + (footer ? '<div class="dlg-f">' + footer + '</div>' : '');
+  if (!d.open) d.showModal();
+  if (onMount) onMount(d);
+  return d;
+}
+function closeDlg() { const d = $('#dlg'); if (d.open) d.close(); }
+function credentials(title, username, pw, note) {
+  openDlg(title,
+    '<p>' + esc(note || 'Give these to the user. The password is shown only once and cannot be looked up later.') + '</p>' +
+    '<div class="cred"><div><span class="muted">Username</span><code id="c-u">' + esc(username) + '</code></div>' +
+    '<div><span class="muted">Temporary password</span><code id="c-p">' + esc(pw) + '</code></div></div>' +
+    '<p class="muted">They will be asked to choose their own password at first sign-in.</p>',
+    '<button class="btn" type="button" id="c-copy">Copy both</button><button class="btn primary" type="button" data-close>Done</button>',
+    d => $('#c-copy', d).addEventListener('click', () => {
+      const t = 'Username: ' + username + '\nPassword: ' + pw;
+      (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Copied.'), () => toast('Copy did not work. Select the text and copy it by hand.', true));
+    }));
+}
+
+/* ---------- generic form builder ---------- */
+function fieldHtml(f, val) {
+  const v = val == null ? '' : val, req = f.req ? ' <em>*</em>' : '';
+  let inner;
+    if (f.type === 'select') {
+    const opts = typeof f.options === 'function' ? f.options() : (f.options || []);
+    inner = '<select name="' + f.n + '"' + (f.req ? ' required' : '') + '>' + (f.req && v ? '' : '<option value="">' + esc(f.blank || 'Select…') + '</option>') +
+      opts.map(o => '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(v) ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
+  } else if (f.type === 'check') {
+    return '<label class="f ' + (f.full ? 'full' : '') + '"><span><input type="checkbox" name="' + f.n + '" style="width:auto;min-height:0;margin-right:.5rem"' + (String(v).toUpperCase() === 'TRUE' ? ' checked' : '') + '>' + esc(f.l) + '</span>' + (f.hint ? '<small>' + esc(f.hint) + '</small>' : '') + '</label>';
+  } else {
+    inner = '<input name="' + f.n + '" type="' + (f.type || 'text') + '" value="' + esc(v) + '"' + (f.req ? ' required' : '') + (f.ro ? ' readonly' : '') + (f.step ? ' step="' + f.step + '"' : '') + (f.max ? ' maxlength="' + f.max + '"' : '') + ' autocomplete="off">';
+  }
+  return '<label class="f ' + (f.full ? 'full' : '') + '"><span>' + esc(f.l) + req + '</span>' + inner + (f.hint ? '<small>' + esc(f.hint) + '</small>' : '') + '</label>';
+}
+function formHtml(fields, vals) { vals = vals || {}; return '<div class="grid2">' + fields.map(f => fieldHtml(f, vals[f.n])).join('') + '</div>'; }
+function collect(root, fields) {
+  const o = {};
+  fields.forEach(f => {
+    const el = root.querySelector('[name="' + f.n + '"]'); if (!el) return;
+    o[f.n] = f.type === 'check' ? (el.checked ? 'TRUE' : 'FALSE') : el.value.trim();
+  });
+  return o;
+}
+function changedOnly(now, orig) { const o = {}; Object.keys(now).forEach(k => { if (String(now[k]) !== String(orig[k] == null ? '' : orig[k])) o[k] = now[k]; }); return o; }
+function validForm(root) {
+  const bad = $$('[required]', root).find(el => !String(el.value).trim());
+  if (bad) { bad.focus(); toast('Please fill in: ' + (bad.closest('label').querySelector('span').textContent.replace('*', '').trim()), true); return false; }
+  return true;
+}
+
+/* ---------- lookups ---------- */
+async function loadLookups() {
+  const jobs = [];
+  if (can('MASTER_VIEW')) jobs.push(api('subjects.list').then(r => S.L.subjects = r), api('batches.list').then(r => S.L.batches = r), api('rooms.list').then(r => S.L.rooms = r));
+  if (can('TEACHER_VIEW')) jobs.push(api('teachers.list').then(r => S.L.teachers = r));
+  await Promise.all(jobs);
+}
+const L = k => S.L[k] || [];
+const nameOf = (list, idf, namef, id) => { const r = L(list).find(x => x[idf] === id); return r ? r[namef] : id; };
+const activeOnly = list => L(list).filter(x => String(x.Status).toUpperCase() === 'ACTIVE');
+
+/* ---------- sign in / out ---------- */
+function signedOut(msg) {
+  if (S.token) { try { sessionStorage.removeItem('cmz_t'); } catch (e) {} }
+  stopLive(); S.token = null; S.user = null; S.perms = []; S.L = {};
+  closeDlg(); show('login');
+  $('#lg-msg').innerHTML = msg ? '<div class="alert warn">' + esc(msg) + '</div>' : '';
+}
+function startApp() {
+  $('#who-name').textContent = S.user.displayName;
+  $('#who-role').textContent = S.user.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Accounts Admin';
+  buildNav(); show('app'); go('dashboard'); refreshRegBadge(); startLive();
+}
+function afterAuth(user, token) {
+  S.token = token; S.user = user; S.perms = user.permissions || [];
+  try { sessionStorage.setItem('cmz_t', token); } catch (e) {}
+  if (user.mustChangePassword) { show('forcepw'); $('#pw-form').reset(); $('#pw-msg').innerHTML = ''; $('#pw-form').elements.oldPassword.focus(); return; }
+  startApp();
+}
+$('#login-form').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const f = ev.target, btn = $('#lg-btn');
+  if (!f.elements.username.value.trim() || !f.elements.password.value) { $('#lg-msg').innerHTML = '<div class="alert bad">Enter your username and password.</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Signing in…'; $('#lg-msg').innerHTML = '';
+  try {
+    const r = await api('auth.login', { username: f.elements.username.value, password: f.elements.password.value, portal: 'ADMIN' });
+    f.elements.password.value = '';
+    if (window.cmzSplash && !r.user.mustChangePassword) cmzSplash(r.user.displayName, S.cfg.logoUrl); afterAuth(r.user, r.token);
+  } catch (e) { $('#lg-msg').innerHTML = '<div class="alert bad">' + esc(e.error || 'Could not sign in.') + '</div>'; }
+  finally { btn.disabled = false; btn.textContent = 'Sign in'; }
+});
+document.addEventListener('click', ev => {
+  const sh = ev.target.closest('[data-show]');
+  if (sh) { const i = sh.parentElement.querySelector('input'); i.type = i.type === 'password' ? 'text' : 'password'; sh.textContent = i.type === 'password' ? 'Show' : 'Hide'; }
+  if (ev.target.closest('[data-close]')) closeDlg();
+});
+$('#pw-form').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const f = ev.target.elements, btn = $('#pw-btn');
+  if (f.newPassword.value !== f.again.value) { $('#pw-msg').innerHTML = '<div class="alert bad">The two new passwords do not match.</div>'; return; }
+  btn.disabled = true; $('#pw-msg').innerHTML = '';
+  try {
+    const r = await api('auth.changePassword', { oldPassword: f.oldPassword.value, newPassword: f.newPassword.value });
+    S.token = r.token; try { sessionStorage.setItem('cmz_t', r.token); } catch (e) {}
+    S.user.mustChangePassword = false; startApp(); toast('Password changed.');
+  } catch (e) {
+    if (SESSION_CODES.indexOf(e.code) >= 0) signedOut(e.error); else $('#pw-msg').innerHTML = '<div class="alert bad">' + esc(e.error) + '</div>';
+  } finally { btn.disabled = false; }
+});
+async function doLogout() { try { await api('auth.logout'); } catch (e) {} signedOut('You have signed out.'); }
+$('#logout').addEventListener('click', doLogout);
+$('#pw-out').addEventListener('click', doLogout);
+
+/* ---------- navigation ---------- */
+const NAV = [
+  ['dashboard', 'Dashboard', null],
+  ['students', 'Students', 'STUDENT_VIEW'],
+  ['registrations', 'Registrations', 'STUDENT_VIEW'],
+  ['teachers', 'Teachers', 'TEACHER_VIEW'],
+  ['academic', 'Subjects, batches, rooms', 'MASTER_VIEW'],
+  ['timetable', 'Timetable', 'MASTER_VIEW'],
+  ['attendance', 'Attendance', 'STUDENT_VIEW'],
+  ['notices', 'Notices', 'NOTICE_VIEW'],
+  ['fees', 'Fee structure', 'FINANCE_VIEW'],
+  ['invoices', 'Invoices', 'FINANCE_VIEW'],
+  ['receipts', 'Receipts', 'FINANCE_VIEW'],
+  ['teacherincome', 'Teacher income', 'TEACHER_INCOME_MANAGE'],
+  ['reports', 'Reports', 'REPORT_VIEW'],
+  ['settings', 'Settings', 'SETTINGS_VIEW'],
+  ['users', 'Admin users', 'USER_MANAGE'],
+  ['logs', 'Activity log', 'LOG_VIEW']
+];
+function buildNav() {
+  $('#nav-items').innerHTML = NAV.filter(n => !n[2] || can(n[2])).map(n => '<button class="item" data-go="' + n[0] + '">' + esc(n[1]) + '</button>').join('');
+}
+function go(view, arg){ S.view=view; S.arg=arg; SYNC.stale=false; liveState('Live'); $('#side').classList.remove('open');
+  $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
+  const main=$('#main'); main.classList.remove('quiet'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
+  (VIEWS[view] || VIEWS.dashboard)(main, arg).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(fail); window.scrollTo(0,0);
+}
+$('#nav-items').addEventListener('click', ev => { const b = ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
+$('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open'));
+
+const VIEWS = {};
+
+/* ---------- dashboard ---------- */
+VIEWS.dashboard = async main => {
+  await loadLookups();
+  let students = [], total = 0;
+  if (can('STUDENT_VIEW')) { const r = await api('students.list', { limit: 1000 }); students = r.students; total = r.total; }
+  const active = students.filter(s => s.Status === 'ACTIVE').length;
+  const perBatch = L('batches').map(b => ({ b: b, n: students.filter(s => s.CurrentBatch === b.BatchID && s.Status === 'ACTIVE').length }));
+  const max = Math.max(1, ...perBatch.map(x => x.n));
+  const needsSetup = can('STUDENT_VIEW') && !L('teachers').length && !students.length;
+  main.innerHTML = '<div class="head"><div><h1>Welcome, ' + esc(S.user.displayName) + '</h1><p>' + esc(S.cfg.centreName || '') + ' · Academic year ' + esc(S.cfg.academicYear || '') + '</p></div>' +
+    '<div class="row">' + (can('STUDENT_EDIT') ? '<button class="btn primary" data-act="add-student">Add student</button>' : '') + (can('TEACHER_EDIT') ? '<button class="btn" data-act="add-teacher">Add teacher</button>' : '') + '</div></div>' +
+    '<div class="stats">' +
+      (can('STUDENT_VIEW') ? '<div class="card stat"><b>' + active + '</b><span>Active students</span></div><div class="card stat"><b>' + total + '</b><span>Students in total</span></div>' : '') +
+      (can('TEACHER_VIEW') ? '<div class="card stat"><b>' + activeOnly('teachers').length + '</b><span>Teachers</span></div>' : '') +
+      (can('MASTER_VIEW') ? '<div class="card stat"><b>' + activeOnly('subjects').length + '</b><span>Subjects offered</span></div><div class="card stat"><b>' + activeOnly('batches').length + '</b><span>Batches</span></div>' : '') +
+    '</div>' +
+    (needsSetup ? '<div class="card"><h2 style="font-size:1.2rem;margin-bottom:.6rem">Get started</h2><ol class="steps"><li>Check the subjects and batches already added under “Subjects, batches, rooms”.</li><li>Add your teachers.</li><li>Add students, then give each student their subjects.</li></ol></div>' :
+    (perBatch.length ? '<div class="section" style="margin-top:0"><h2>Active students by batch</h2><div class="tablewrap"><table><tbody>' +
+      perBatch.map(x => '<tr><td style="width:140px"><b>' + esc(x.b.BatchName) + '</b></td><td style="width:60px">' + x.n + '</td><td><div class="bar"><i style="width:' + Math.round(x.n / max * 100) + '%"></i></div></td></tr>').join('') + '</tbody></table></div></div>' : ''));
+};
+document.addEventListener('click', ev => {
+  const a = ev.target.closest('[data-act]'); if (!a) return;
+  if (a.dataset.act === 'add-student') studentDialog();
+  if (a.dataset.act === 'add-teacher') teacherDialog();
+});
+
+/* ---------- students ---------- */
+const classOpts = () => Array.from(new Set(activeOnly('batches').map(b => b.Class))).map(c => [c, 'Class ' + c]);
+const batchOpts = cls => activeOnly('batches').filter(b => !cls || b.Class === cls).map(b => [b.BatchID, b.BatchName]);
+function studentFields(isEdit) {
+  const f = [
+    { n: 'Name', l: 'Full name', req: 1, full: 1, max: 100 },
+    { n: 'CurrentClass', l: 'Class', type: 'select', req: 1, options: classOpts() },
+    { n: 'CurrentBatch', l: 'Batch', type: 'select', options: batchOpts(), blank: 'No batch yet' },
+    { n: 'DOB', l: 'Date of birth', type: 'date' }, { n: 'Gender', l: 'Gender', type: 'select', options: [['MALE', 'Male'], ['FEMALE', 'Female'], ['OTHER', 'Other']] },
+    { n: 'Mobile', l: 'Student mobile', type: 'tel', hint: '10 digits' }, { n: 'Email', l: 'Student email', type: 'email' },
+    { n: 'School', l: 'School' }, { n: 'Board', l: 'Board', hint: 'CBSE, ICSE, WBBSE…' },
+    { n: 'PreviousPercentage', l: 'Previous exam %', type: 'number', step: 'any' }, { n: 'Address', l: 'Address', full: 1 },
+    { n: 'ParentName', l: 'Parent or guardian' }, { n: 'Relationship', l: 'Relationship' },
+    { n: 'ParentMobile', l: 'Parent mobile', type: 'tel' }, { n: 'ParentWhatsApp', l: 'Parent WhatsApp', type: 'tel' }, { n: 'ParentEmail', l: 'Parent email', type: 'email', full: 1 }
+  ];
+  if (isEdit) f.splice(3, 0, { n: 'Status', l: 'Status', type: 'select', req: 1, options: ['ACTIVE', 'INACTIVE', 'COMPLETED', 'LEFT', 'SUSPENDED'].map(x => [x, x.charAt(0) + x.slice(1).toLowerCase()]) });
+  return f;
+}
+function wireClassBatch(root, current) {
+  const cls = root.querySelector('[name=CurrentClass]'), bat = root.querySelector('[name=CurrentBatch]');
+  if (!cls || !bat) return;
+  const fill = keep => { bat.innerHTML = '<option value="">No batch yet</option>' + batchOpts(cls.value).map(o => '<option value="' + esc(o[0]) + '"' + (o[0] === keep ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join(''); };
+  cls.addEventListener('change', () => fill(''));
+  fill(current);
+}
+async function studentDialog() {
+  await loadLookups();
+  if (!L('batches').length) { toast('Add a batch first under “Subjects, batches, rooms”.', true); return; }
+  const fields = studentFields(false);
+  openDlg('Add student',
+    '<form id="sf">' + formHtml(fields) + '<label class="f"><span>Password (optional)</span><input name="password" autocomplete="off"><small>Leave empty and the system makes a temporary one for you.</small></label></form>',
+    '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="sf-save">Add student</button>',
+    d => {
+      wireClassBatch(d, '');
+      $('#sf-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+        if (!validForm(d)) return;
+        const data = collect(d, fields), student = {};
+        Object.keys(data).forEach(k => { if (data[k] !== '') student[k] = data[k]; });
+        const pw = $('[name=password]', d).value.trim();
+        const r = await api('students.add', { student: student, password: pw || undefined });
+        closeDlg(); toast('Student added: ' + r.studentId);
+        credentials('Student login', r.username, r.tempPassword, 'The student signs in with their Student ID and this password.');
+        if (S.view === 'students') go('students'); else if (S.view === 'dashboard') go('dashboard');
+      }));
+    });
+}
+VIEWS.students = async main => {
+  await loadLookups();
+  const st = VIEWS.students.state = VIEWS.students.state || { q: '', status: 'ACTIVE', batch: '' };
+  main.innerHTML = '<div class="head"><div><h1>Students</h1><p id="s-count"></p></div>' + (can('STUDENT_EDIT') ? '<button class="btn primary" data-act="add-student">Add student</button>' : '') + '</div>' +
+    '<div class="toolbar"><input id="s-q" type="search" placeholder="Search by name or student ID" value="' + esc(st.q) + '">' +
+    '<select id="s-status"><option value="">All statuses</option>' + ['ACTIVE', 'INACTIVE', 'COMPLETED', 'LEFT', 'SUSPENDED'].map(x => '<option value="' + x + '"' + (st.status === x ? ' selected' : '') + '>' + x.charAt(0) + x.slice(1).toLowerCase() + '</option>').join('') + '</select>' +
+    '<select id="s-batch"><option value="">All batches</option>' + L('batches').map(b => '<option value="' + esc(b.BatchID) + '"' + (st.batch === b.BatchID ? ' selected' : '') + '>' + esc(b.BatchName) + '</option>').join('') + '</select></div>' +
+    '<div id="s-list"></div>';
+  const load = async () => {
+    const r = await api('students.list', { search: st.q, status: st.status, batchId: st.batch, limit: 500 });
+    $('#s-count').textContent = r.total + (r.total === 1 ? ' student' : ' students') + (r.total > r.students.length ? ' (showing ' + r.students.length + ')' : '');
+    $('#s-list').innerHTML = r.students.length ?
+      '<div class="tablewrap"><table class="stack"><thead><tr><th>Student ID</th><th>Name</th><th>Class</th><th>Batch</th><th>Mobile</th><th>Status</th></tr></thead><tbody>' +
+      r.students.map(s => '<tr class="click" data-id="' + esc(s.StudentID) + '"><td data-l="ID"><b>' + esc(s.StudentID) + '</b></td><td data-l="Name">' + esc(s.Name) + '</td><td data-l="Class">' + esc(s.CurrentClass) + '</td><td data-l="Batch">' + esc(nameOf('batches', 'BatchID', 'BatchName', s.CurrentBatch) || '—') + '</td><td data-l="Mobile">' + esc(s.Mobile || s.ParentMobile || '—') + '</td><td>' + pill(s.Status) + '</td></tr>').join('') + '</tbody></table></div>' :
+      '<div class="card empty"><b>No students found</b>' + (st.q || st.batch ? 'Try a different search or filter.' : (can('STUDENT_EDIT') ? 'Use “Add student” to register the first one.' : 'None have been added yet.')) + '</div>';
+  };
+  let t; $('#s-q').addEventListener('input', e => { st.q = e.target.value; clearTimeout(t); t = setTimeout(() => load().catch(fail), 300); });
+  $('#s-status').addEventListener('change', e => { st.status = e.target.value; load().catch(fail); });
+  $('#s-batch').addEventListener('change', e => { st.batch = e.target.value; load().catch(fail); });
+  $('#s-list').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) go('student', tr.dataset.id); });
+  await load();
+};
+
+VIEWS.student = async (main, id) => {
+  await loadLookups();
+  const canFinance = can('FINANCE_VIEW');
+  const [d, hist, fees] = await Promise.all([
+    api('students.get', { studentId: id }),
+    api('changes.list', { studentId: id }),
+    canFinance ? api('finance.studentFee.list', { studentId: id }).catch(() => null) : Promise.resolve(null)
+  ]);
+  const s = d.student, fields = studentFields(true), editable = can('STUDENT_EDIT');
+  const subjRows = d.subjects.slice().reverse();
+
+  const activeSubjects = d.subjects.filter(x => x.Status === 'ACTIVE').length;
+
+  main.innerHTML = '<p><button class="link" data-go-back>← All students</button></p>' +
+    '<div class="head"><div><h1>' + esc(s.Name) + '</h1><p>' + esc(s.StudentID) + ' · Class ' + esc(s.CurrentClass) + ' · ' + esc(nameOf('batches', 'BatchID', 'BatchName', s.CurrentBatch) || 'No batch') + ' · ' + pill(s.Status) + '</p></div>' +
+    (editable ? '<button class="btn" id="reset-pw">Reset password</button>' : '') + '</div>' +
+    '<div class="tabs" role="tablist">' +
+      '<button role="tab" aria-selected="true" data-tab="p">Profile</button>' +
+      '<button role="tab" aria-selected="false" data-tab="s">Subjects (' + activeSubjects + ')</button>' +
+      (canFinance && fees ? '<button role="tab" aria-selected="false" data-tab="f">Fees</button>' : '') +
+      '<button role="tab" aria-selected="false" data-tab="h">History</button>' +
+    '</div>' +
+    '<div id="tab-p" class="card"><form id="ef">' + formHtml(fields, s) +
+      (editable ? '<label class="f"><span>Reason for change (optional)</span><input name="reason" placeholder="e.g. promoted to Class XII"><small>Saved in the student’s history when class, batch or status changes.</small></label><button class="btn primary" id="ef-save">Save changes</button>' : '') + '</form>' +
+      '<dl class="kv section"><dt>Registered</dt><dd>' + esc(fmtDate(s.RegistrationDate)) + '</dd><dt>Login username</dt><dd>' + esc(d.user ? d.user.Username : '—') + '</dd><dt>Last sign-in</dt><dd>' + esc(d.user && d.user.LastLogin ? fmtTime(d.user.LastLogin) : 'Never') + '</dd></dl></div>' +
+    '<div id="tab-s" class="hidden">' + subjectsPanel(s, subjRows, editable) + '</div>' +
+    (canFinance && fees ? '<div id="tab-f" class="hidden">' + renderFeesPanel(fees) + '</div>' : '') +
+    '<div id="tab-h" class="hidden">' + (hist.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr><th>When</th><th>What</th><th>From</th><th>To</th><th>By</th><th>Reason</th></tr></thead><tbody>' +
+        hist.map(h => '<tr><td data-l="When">' + esc(fmtTime(h.ChangedAt)) + '</td><td data-l="What">' + esc(h.Field) + '</td><td data-l="From">' + esc(h.OldValue || '—') + '</td><td data-l="To">' + esc(h.NewValue) + '</td><td data-l="By">' + esc(h.ChangedBy) + '</td><td data-l="Reason">' + esc(h.Reason) + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="card empty"><b>No changes yet</b>Class, batch, status and subject changes will be listed here.</div>') + '</div>';
+
+  wireClassBatch($('#ef'), s.CurrentBatch);
+  $('[data-go-back]', main).addEventListener('click', () => go('students'));
+
+  const tabKeys = canFinance && fees ? ['p', 's', 'f', 'h'] : ['p', 's', 'h'];
+  $$('[data-tab]', main).forEach(b => b.addEventListener('click', () => {
+    $$('[data-tab]', main).forEach(x => x.setAttribute('aria-selected', x === b ? 'true' : 'false'));
+    tabKeys.forEach(k => $('#tab-' + k).classList.toggle('hidden', k !== b.dataset.tab));
+  }));
+
+  if (editable) {
+    $('#ef-save').addEventListener('click', ev => { ev.preventDefault(); busy(ev.target, async () => {
+      if (!validForm($('#ef'))) return;
+      const ch = changedOnly(collect($('#ef'), fields), s);
+      if (!Object.keys(ch).length) { toast('Nothing has changed.'); return; }
+      await api('students.update', { studentId: id, changes: ch, reason: $('#ef [name=reason]').value });
+      toast('Saved.'); go('student', id);
+    }); });
+    $('#reset-pw').addEventListener('click', () => { if (confirm('Make a new temporary password for ' + s.Name + '? Their current password will stop working.')) busy($('#reset-pw'), async () => {
+      const r = await api('students.resetPassword', { studentId: id }); credentials('New temporary password', r.username, r.tempPassword); }); });
+    wireSubjectPanel(s, id);
+  }
+
+  if (canFinance && fees && can('FINANCE_EDIT')) {
+    wireFeeDiscounts(main, fees, id);
+  }
+};
+
+function renderFeesPanel(fees) {
+  if (!fees.lines.length) {
+    return '<div class="card empty"><b>No active subjects</b>Give the student a subject first. Fees are based on subjects.</div>';
+  }
+  const fmt = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
+  return '<div class="card">' +
+    '<h2 style="font-size:1.15rem;margin-bottom:.4rem">Monthly fees</h2>' +
+    '<p class="muted" style="font-size:.85rem;margin:0 0 .75rem">Standard fee per subject from the fee structure. Apply a discount if this student has a special arrangement.</p>' +
+    '<div class="tablewrap"><table class="stack"><thead><tr>' +
+      '<th>Subject</th><th>Teacher</th><th>Standard</th><th>Discount</th><th>Final</th><th></th>' +
+    '</tr></thead><tbody>' +
+    fees.lines.map(l =>
+      '<tr data-sid="' + esc(l.SubjectID) + '">' +
+      '<td data-l="Subject"><b>' + esc(l.SubjectName) + '</b>' + (l.Reason ? '<div class="muted" style="font-size:.82rem">' + esc(l.Reason) + '</div>' : '') + '</td>' +
+      '<td data-l="Teacher">' + esc(l.TeacherName) + '</td>' +
+      '<td data-l="Standard">' + fmt(l.StandardAmount) + '</td>' +
+      '<td data-l="Discount">' + (l.DiscountAmount ? '<span class="pill warn">−' + fmt(l.DiscountAmount) + '</span>' : '—') + '</td>' +
+      '<td data-l="Final"><b>' + fmt(l.FinalAmount) + '</b></td>' +
+      '<td>' +
+        '<button class="btn small" data-set-disc="' + esc(l.SubjectID) + '">' + (l.HasOverride ? 'Edit' : 'Set discount') + '</button>' +
+        (l.HasOverride ? ' <button class="btn small danger" data-rm-disc="' + esc(l.SubjectID) + '">Remove</button>' : '') +
+      '</td>' +
+      '</tr>').join('') +
+    '</tbody></table></div>' +
+    '<div style="margin-top:1rem;padding-top:.9rem;border-top:1px solid var(--line)">' +
+      '<div style="display:flex;justify-content:space-between;font-size:1.05rem"><span class="muted">Monthly total</span><b>' + fmt(fees.monthlyTotal) + '</b></div>' +
+      '<div style="display:flex;justify-content:space-between;margin-top:.3rem"><span class="muted">Registration (one-time)</span><b>' + fmt(fees.registration) + '</b></div>' +
+    '</div>' +
+  '</div>';
+}
+
+function wireFeeDiscounts(main, fees, studentId) {
+  $$('[data-set-disc]', main).forEach(btn => btn.addEventListener('click', () => {
+    const subjectId = btn.dataset.setDisc;
+    const line = fees.lines.find(x => x.SubjectID === subjectId);
+    if (!line) return;
+    openDlg('Discount for ' + line.SubjectName,
+      '<form><div class="grid2">' +
+        '<label class="f"><span>Standard fee</span><input value="₹' + line.StandardAmount + '" readonly></label>' +
+        '<label class="f"><span>Discount (₹)</span><input name="discount" type="number" step="any" min="0" max="' + line.StandardAmount + '" value="' + line.DiscountAmount + '" required></label>' +
+        '<label class="f full"><span>Reason</span><input name="reason" maxlength="200" value="' + esc(line.Reason) + '" placeholder="e.g. sibling concession"></label>' +
+      '</div></form>',
+      '<button class="btn" type="button" data-close>Cancel</button>' +
+      '<button class="btn primary" id="disc-save">Save</button>',
+      d => $('#disc-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+        const disc = d.querySelector('[name=discount]').value;
+        const reason = d.querySelector('[name=reason]').value;
+        if (disc === '' || Number(disc) < 0) { toast('Enter a discount amount.', true); return; }
+        if (Number(disc) > line.StandardAmount) { toast('Discount cannot exceed the standard fee.', true); return; }
+        try {
+          await api('finance.studentFee.set', { studentId: studentId, subjectId: subjectId, discountAmount: disc, reason: reason });
+          closeDlg();
+          toast('Discount saved.');
+          go('student', studentId);
+          setTimeout(() => { const t = $('[data-tab=f]'); if (t) t.click(); }, 50);
+        } catch (e) { fail(e); }
+      })));
+  }));
+
+  $$('[data-rm-disc]', main).forEach(btn => btn.addEventListener('click', () => {
+    const subjectId = btn.dataset.rmDisc;
+    if (!confirm('Remove the discount on this subject? The student will be charged the standard fee from today.')) return;
+    busy(btn, async () => {
+      await api('finance.studentFee.remove', { studentId: studentId, subjectId: subjectId });
+      toast('Discount removed.');
+      go('student', studentId);
+      setTimeout(() => { const t = $('[data-tab=f]'); if (t) t.click(); }, 50);
+    });
+  }));
+}
+
+function subjectsPanel(s, rows, editable) {
+  return (editable ? '<div class="card" style="margin-bottom:1rem"><form id="af"><div class="grid2">' +
+    fieldHtml({ n: 'subjectId', l: 'Subject', type: 'select', req: 1, options: activeOnly('subjects').map(x => [x.SubjectID, x.SubjectName]) }) +
+    fieldHtml({ n: 'teacherId', l: 'Teacher', type: 'select', req: 1, options: activeOnly('teachers').map(x => [x.TeacherID, x.Name]) }) +
+    fieldHtml({ n: 'batchId', l: 'Batch', type: 'select', req: 1, options: batchOpts(s.CurrentClass) }, s.CurrentBatch) +
+    fieldHtml({ n: 'startDate', l: 'Start date', type: 'date' }, new Date().toISOString().slice(0, 10)) +
+    fieldHtml({ n: 'feeOverride', l: 'Special monthly fee (optional)', type: 'number', step: 'any', hint: 'Leave empty to use the standard fee.' }) +
+    '</div><button class="btn primary" id="af-save">Give subject</button></form></div>' : '') +
+    (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Subject</th><th>Teacher</th><th>Batch</th><th>From</th><th>To</th><th>Status</th><th></th></tr></thead><tbody>' +
+      rows.map(r => '<tr><td data-l="Subject"><b>' + esc(nameOf('subjects', 'SubjectID', 'SubjectName', r.SubjectID)) + '</b></td><td data-l="Teacher">' + esc(nameOf('teachers', 'TeacherID', 'Name', r.TeacherID)) + '</td><td data-l="Batch">' + esc(nameOf('batches', 'BatchID', 'BatchName', r.BatchID)) + '</td><td data-l="From">' + esc(fmtDate(r.StartDate)) + '</td><td data-l="To">' + esc(fmtDate(r.EndDate) || '—') + '</td><td>' + pill(r.Status) + '</td><td>' +
+        (editable && r.Status === 'ACTIVE' ? '<button class="btn small danger" data-end="' + esc(r.StudentSubjectID) + '">End</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' :
+      '<div class="card empty"><b>No subjects yet</b>' + (editable ? 'Choose a subject, teacher and batch above.' : '') + '</div>');
+}
+function wireSubjectPanel(s, id) {
+  const af = $('#af'); if (!af) return;
+  $('#af-save').addEventListener('click', ev => { ev.preventDefault(); busy(ev.target, async () => {
+    if (!validForm(af)) return;
+    const v = collect(af, [{ n: 'subjectId' }, { n: 'teacherId' }, { n: 'batchId' }, { n: 'startDate' }, { n: 'feeOverride' }]);
+    await api('studentSubjects.assign', { studentId: id, subjectId: v.subjectId, teacherId: v.teacherId, batchId: v.batchId, startDate: v.startDate || undefined, feeOverride: v.feeOverride === '' ? undefined : v.feeOverride });
+    toast('Subject added.'); go('student', id); setTimeout(() => { const b = $('[data-tab=s]'); if (b) b.click(); }, 50);
+  }); });
+  $$('[data-end]').forEach(b => b.addEventListener('click', () => {
+    if (!confirm('End this subject for ' + s.Name + ' from today? The record stays in their history.')) return;
+    busy(b, async () => { await api('studentSubjects.end', { studentSubjectId: b.dataset.end }); toast('Subject ended.'); go('student', id); setTimeout(() => { const t = $('[data-tab=s]'); if (t) t.click(); }, 50); });
+  }));
+}
+
+/* ---------- online registrations ---------- */
+function regPill(s) {
+  const k = String(s || '').toUpperCase();
+  return '<span class="pill ' + (k === 'APPROVED' ? 'ok' : (k === 'REJECTED' ? 'bad' : 'warn')) + '">' + esc(s || '—') + '</span>';
+}
+async function refreshRegBadge() {
+  const b = $('[data-go=registrations]');
+  if (!b) return;
+  try {
+    const r = await api('registrations.pendingCount');
+    if (S.regCount !== undefined && r.count > S.regCount) toast('New registration request received.');
+    S.regCount = r.count;
+    const old = $('.badge', b); if (old) old.remove();
+    if (r.count) b.insertAdjacentHTML('beforeend', '<span class="badge">' + r.count + '</span>');
+  } catch (e) { /* the badge is optional */ }
+}
+
+VIEWS.registrations = async main => {
+  await loadLookups();
+  const st = VIEWS.registrations.state = VIEWS.registrations.state || { status: 'PENDING' };
+  const edit = can('STUDENT_EDIT');
+  const data = await api('registrations.list', { status: st.status });
+  const c = data.counts, rows = data.rows;
+  const tabs = [['PENDING', 'Waiting (' + c.PENDING + ')'], ['APPROVED', 'Approved (' + c.APPROVED + ')'], ['REJECTED', 'Rejected (' + c.REJECTED + ')'], ['', 'All (' + (c.PENDING + c.APPROVED + c.REJECTED) + ')']];
+
+  main.innerHTML = '<div class="head"><div><h1>Registrations</h1><p>Students who registered online. Approving a request creates their student account.</p></div></div>' +
+    '<div class="tabs" role="tablist">' + tabs.map(t => '<button role="tab" aria-selected="' + (t[0] === st.status) + '" data-rs="' + t[0] + '">' + esc(t[1]) + '</button>').join('') + '</div>' +
+    (rows.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Request</th><th>Sent</th><th>Student</th><th>Parent</th><th>Subjects wanted</th><th>Status</th></tr></thead><tbody>' +
+        rows.map(r => '<tr class="click" data-r="' + esc(r.RegistrationID) + '">' +
+          '<td data-l="Request"><b>' + esc(r.RegistrationID) + '</b></td>' +
+          '<td data-l="Sent">' + esc(fmtTime(r.SubmittedAt)) + '</td>' +
+          '<td data-l="Student"><b>' + esc(r.Name) + '</b><div class="muted" style="font-size:.82rem">Class ' + esc(r.CurrentClass) + '</div></td>' +
+          '<td data-l="Parent">' + esc(r.ParentName) + '<div class="muted" style="font-size:.82rem">' + esc(r.ParentMobile) + '</div></td>' +
+          '<td data-l="Subjects">' + esc(r.SubjectNames || '—') + '</td>' +
+          '<td>' + regPill(r.Status) + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="card empty"><b>' + (st.status === 'PENDING' ? 'Nothing waiting' : 'No requests here') + '</b>' +
+        (st.status === 'PENDING' ? 'New online registrations will show up here. You can switch registration on or off with REGISTRATION_ENABLED in Settings.' : 'Try another tab.') + '</div>');
+
+  $$('[data-rs]', main).forEach(b => b.addEventListener('click', () => { st.status = b.dataset.rs; go('registrations'); }));
+  $$('[data-r]', main).forEach(tr => tr.addEventListener('click', () => reviewDlg(rows.find(x => x.RegistrationID === tr.dataset.r))));
+
+  const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+  const reviewDlg = row => {
+    const canAct = edit && row.Status === 'PENDING';
+    const fields = studentFields(false).filter(f => f.n !== 'CurrentBatch');
+    const meta = '<dl class="kv" style="margin-bottom:1rem">' +
+      '<dt>Request</dt><dd><b>' + esc(row.RegistrationID) + '</b> · sent ' + esc(fmtTime(row.SubmittedAt)) + '</dd>' +
+      '<dt>Status</dt><dd>' + regPill(row.Status) + '</dd>' +
+      '<dt>Subjects wanted</dt><dd>' + esc(row.SubjectNames || '—') + '</dd>' +
+      (row.Status === 'APPROVED' ? '<dt>Student ID</dt><dd><b>' + esc(row.StudentID) + '</b></dd>' : '') +
+      (row.Status === 'REJECTED' ? '<dt>Reason</dt><dd>' + esc(row.RejectReason) + '</dd>' : '') +
+      (row.ReviewedBy ? '<dt>Reviewed</dt><dd>' + esc(row.ReviewedBy) + ' · ' + esc(fmtTime(row.ReviewedAt)) + '</dd>' : '') +
+      '</dl>';
+    const body = meta + (canAct
+      ? '<form>' + formHtml(fields, row) + '</form>'
+      : '<dl class="kv">' + fields.map(f => '<dt>' + esc(f.l) + '</dt><dd>' + esc(row[f.n] || '—') + '</dd>').join('') + '</dl>');
+    const footer = '<button class="btn" type="button" data-close>Close</button>' +
+      (canAct ? '<button class="btn danger" id="rg-rej">Reject</button><button class="btn" id="rg-save">Save changes</button><button class="btn primary" id="rg-ok">Approve…</button>' : '') +
+      (row.Status === 'APPROVED' && row.StudentID ? '<button class="btn primary" id="rg-open">Open student</button>' : '');
+    openDlg('Registration ' + row.RegistrationID, body, footer, d => {
+      if (row.Status === 'APPROVED' && row.StudentID) $('#rg-open', d).addEventListener('click', () => { closeDlg(); go('student', row.StudentID); });
+      if (!canAct) return;
+      const saveEdits = async () => {
+        if (!validForm(d)) return false;
+        const ch = changedOnly(collect(d, fields), row);
+        if (Object.keys(ch).length) { await api('registrations.update', { id: row.RegistrationID, changes: ch }); Object.assign(row, ch); }
+        return true;
+      };
+      $('#rg-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+        if (await saveEdits()) { toast('Saved.'); closeDlg(); go('registrations'); }
+      }));
+      $('#rg-ok', d).addEventListener('click', ev => busy(ev.target, async () => {
+        if (await saveEdits()) approveDlg(row);
+      }));
+      $('#rg-rej', d).addEventListener('click', ev => {
+        const reason = prompt('Reason for rejecting ' + row.Name + '?');
+        if (!reason || !reason.trim()) return;
+        busy(ev.target, async () => {
+          await api('registrations.reject', { id: row.RegistrationID, reason: reason.trim() });
+          closeDlg(); toast('Request rejected.'); refreshRegBadge(); go('registrations');
+        });
+      });
+    });
+  };
+
+  const approveDlg = row => {
+    const batches = activeOnly('batches').filter(b => String(b.Class).toUpperCase() === String(row.CurrentClass).toUpperCase());
+    if (!batches.length) { toast('There is no active batch for class ' + row.CurrentClass + '. Add one under Subjects, batches, rooms.', true); return; }
+    const wanted = String(row.RequestedSubjects || '').split(',').filter(Boolean);
+    const tOpts = '<option value="">Choose teacher</option>' + activeOnly('teachers').map(t => '<option value="' + esc(t.TeacherID) + '">' + esc(t.Name) + '</option>').join('');
+    openDlg('Approve ' + row.Name,
+      '<p class="muted" style="margin:0 0 .9rem">This creates the student account for <b>' + esc(row.Name) + '</b> (Class ' + esc(row.CurrentClass) + '). They keep the password they chose on the form.</p>' +
+      '<form><div class="grid2">' +
+        '<label class="f"><span>Batch <em>*</em></span><select name="batchId" required>' + (batches.length === 1 ? '' : '<option value="">Choose a batch</option>') +
+          batches.map(b => '<option value="' + esc(b.BatchID) + '">' + esc(b.BatchName) + '</option>').join('') + '</select></label>' +
+        '<label class="f"><span>Subjects start on</span><input name="startDate" type="date" value="' + today() + '"></label>' +
+      '</div>' +
+      '<h2 style="font-size:1.05rem;margin:.4rem 0 .2rem">Subjects</h2>' +
+      '<p class="muted" style="font-size:.85rem;margin:0 0 .5rem">Tick the subjects to give now and pick a teacher for each. The student’s requests are already ticked. You can add more later from the student page.</p>' +
+      activeOnly('subjects').map(s => '<div class="perm" data-sub="' + esc(s.SubjectID) + '"><input type="checkbox"' + (wanted.indexOf(s.SubjectID) >= 0 ? ' checked' : '') + '>' +
+        '<span style="flex:1"><b>' + esc(s.SubjectName) + '</b></span><select style="min-height:38px;max-width:210px;padding:.3rem .5rem;border:1px solid #c5d1e0;border-radius:8px">' + tOpts + '</select></div>').join('') +
+      '</form>',
+      '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="ap-save">Approve and create account</button>',
+      d => $('#ap-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+        if (!validForm(d)) return;
+        const picks = [];
+        for (const el of $$('[data-sub]', d)) {
+          if (!$('input', el).checked) continue;
+          const tid = $('select', el).value;
+          if (!tid) { toast('Choose a teacher for ' + $('b', el).textContent + '.', true); return; }
+          picks.push({ subjectId: el.dataset.sub, teacherId: tid });
+        }
+        if (!picks.length && !confirm('No subject is ticked. Approve anyway? You can add subjects later.')) return;
+        const res = await api('registrations.approve', { id: row.RegistrationID, batchId: $('[name=batchId]', d).value, startDate: $('[name=startDate]', d).value || undefined, subjects: picks });
+        refreshRegBadge(); go('registrations'); approvedDlg(row, res);
+      })));
+  };
+
+  const approvedDlg = (row, res) => {
+    const centre = S.cfg.centreName || 'our centre';
+    const msg = 'Hello ' + (row.ParentName || row.Name) + ', ' + row.Name + '’s registration at ' + centre + ' has been approved.\n' +
+      'Student ID: ' + res.studentId + '\n' +
+      (res.tempPassword ? 'Temporary password: ' + res.tempPassword + '\n' : 'Sign in with this Student ID and the password chosen during registration.\n') +
+      (res.portalUrl ? 'Student portal: ' + res.portalUrl : '');
+    const num = String(row.ParentWhatsApp || row.ParentMobile || row.Mobile || '').replace(/\D/g, '').slice(-10);
+    openDlg('Student approved',
+      '<div class="alert ok"><b>' + esc(row.Name) + '</b> now has a student account.</div>' +
+      '<div class="cred"><div><span class="muted">Student ID</span><code>' + esc(res.studentId) + '</code></div></div>' +
+      (res.warnings && res.warnings.length ? '<div class="alert warn">Some subjects could not be added: ' + esc(res.warnings.join('; ')) + '. Add them from the student page.</div>' : '') +
+      '<label class="f"><span>Message for the family</span><textarea id="ap-msg" rows="6" readonly>' + esc(msg) + '</textarea></label>',
+      '<button class="btn" type="button" id="ap-copy">Copy message</button>' +
+      (num.length === 10 ? '<a class="btn" target="_blank" rel="noopener" href="https://wa.me/91' + num + '?text=' + encodeURIComponent(msg) + '">Open WhatsApp</a>' : '') +
+      '<button class="btn primary" type="button" data-close>Done</button>',
+      d => $('#ap-copy', d).addEventListener('click', () => {
+        (navigator.clipboard ? navigator.clipboard.writeText(msg) : Promise.reject()).then(() => toast('Copied.'), () => toast('Copy did not work. Select the text and copy it by hand.', true));
+      }));
+  };
+
+  refreshRegBadge();
+};
+
+/* ---------- teachers ---------- */
+function teacherFields(isNew) {
+  const f = [{ n: 'Name', l: 'Full name', req: 1, full: 1 }];
+  if (isNew) f.push({ n: 'Username', l: 'Login username', req: 1, hint: 'Letters and numbers, 3–30 characters. Cannot be changed later.' });
+  f.push({ n: 'Mobile', l: 'Mobile', type: 'tel' }, { n: 'Email', l: 'Email', type: 'email' }, { n: 'Qualification', l: 'Qualification' }, { n: 'JoiningDate', l: 'Joining date', type: 'date' }, { n: 'Address', l: 'Address', full: 1 });
+  if (!isNew) f.push({ n: 'Status', l: 'Status', type: 'select', req: 1, options: [['Active', 'Active'], ['Inactive', 'Inactive']] });
+  if (can('TEACHER_INCOME_MANAGE')) f.push({ n: 'DefaultRatePerStudent', l: 'Pay per student per month (₹)', type: 'number', step: 'any' });
+  if (can('TEACHER_INCOME_GRANT')) f.push({ n: 'IncomeVisibleToTeacher', l: 'Teacher can see their own income', type: 'check', full: 1, hint: 'Off by default. The teacher is signed out so the change applies right away.' });
+  return f;
+}
+function teacherDialog(t) {
+  const isNew = !t, fields = teacherFields(isNew);
+  openDlg(isNew ? 'Add teacher' : 'Edit teacher', '<form>' + formHtml(fields, t || {}) + (isNew ? '<label class="f"><span>Password (optional)</span><input name="password" autocomplete="off"><small>Leave empty and the system makes a temporary one.</small></label>' : '') + '</form>',
+    '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="tf-save">' + (isNew ? 'Add teacher' : 'Save changes') + '</button>',
+    d => $('#tf-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+      if (!validForm(d)) return;
+      const data = collect(d, fields);
+      if (isNew) {
+        const teacher = {}; Object.keys(data).forEach(k => { if (data[k] !== '') teacher[k] = data[k]; });
+        const r = await api('teachers.add', { teacher: teacher, password: $('[name=password]', d).value.trim() || undefined });
+        closeDlg(); toast('Teacher added: ' + r.teacherId); credentials('Teacher login', r.username, r.tempPassword);
+      } else {
+        const ch = changedOnly(data, t);
+        if (!Object.keys(ch).length) { toast('Nothing has changed.'); return; }
+        await api('teachers.update', { teacherId: t.TeacherID, changes: ch }); closeDlg(); toast('Saved.');
+      }
+      await loadLookups(); if (S.view === 'teachers') go('teachers'); else if (S.view === 'dashboard') go('dashboard');
+    })));
+}
+VIEWS.teachers = async main => {
+  await loadLookups();
+  const T = L('teachers');
+  main.innerHTML = '<div class="head"><div><h1>Teachers</h1><p>' + T.length + (T.length === 1 ? ' teacher' : ' teachers') + '</p></div>' + (can('TEACHER_EDIT') ? '<button class="btn primary" data-act="add-teacher">Add teacher</button>' : '') + '</div>' +
+    (T.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>ID</th><th>Name</th><th>Username</th><th>Mobile</th><th>Status</th><th></th></tr></thead><tbody>' +
+      T.map(t => '<tr><td data-l="ID"><b>' + esc(t.TeacherID) + '</b></td><td data-l="Name">' + esc(t.Name) + '</td><td data-l="Username">' + esc(t.Username) + '</td><td data-l="Mobile">' + esc(t.Mobile || '—') + '</td><td>' + pill(t.Status) + '</td><td>' +
+        (can('TEACHER_EDIT') ? '<button class="btn small" data-edit="' + esc(t.TeacherID) + '">Edit</button> <button class="btn small" data-reset="' + esc(t.TeacherID) + '">Reset password</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' :
+      '<div class="card empty"><b>No teachers yet</b>' + (can('TEACHER_EDIT') ? 'Use “Add teacher” to create the first one.' : '') + '</div>');
+  $$('[data-edit]', main).forEach(b => b.addEventListener('click', () => teacherDialog(T.find(x => x.TeacherID === b.dataset.edit))));
+  $$('[data-reset]', main).forEach(b => b.addEventListener('click', () => { const t = T.find(x => x.TeacherID === b.dataset.reset);
+    if (confirm('Make a new temporary password for ' + t.Name + '? Their current password will stop working.')) busy(b, async () => { const r = await api('teachers.resetPassword', { teacherId: t.TeacherID }); credentials('New temporary password', r.username, r.tempPassword); }); }));
+};
+
+/* ---------- subjects / batches / rooms ---------- */
+const MASTER = {
+  subjects: { title: 'Subjects', one: 'subject', cols: [['SubjectID', 'ID'], ['SubjectName', 'Name'], ['Status', 'Status']],
+    fields: () => [{ n: 'SubjectName', l: 'Subject name', req: 1, full: 1 }, { n: 'Status', l: 'Status', type: 'select', req: 1, options: [['Active', 'Active'], ['Inactive', 'Inactive']], skipNew: 1 }], id: 'SubjectID' },
+  batches: { title: 'Batches', one: 'batch', cols: [['BatchID', 'ID'], ['BatchName', 'Name'], ['Class', 'Class'], ['Section', 'Section'], ['Status', 'Status']],
+    fields: () => [{ n: 'BatchName', l: 'Batch name', req: 1, hint: 'e.g. XI-A' }, { n: 'Class', l: 'Class', req: 1, hint: 'e.g. XI' }, { n: 'Section', l: 'Section' }, { n: 'Status', l: 'Status', type: 'select', req: 1, options: [['Active', 'Active'], ['Inactive', 'Inactive']], skipNew: 1 }], id: 'BatchID' },
+  rooms: { title: 'Rooms', one: 'room', cols: [['RoomID', 'ID'], ['RoomName', 'Name'], ['Capacity', 'Seats'], ['Status', 'Status']],
+    fields: () => [{ n: 'RoomName', l: 'Room name', req: 1 }, { n: 'Capacity', l: 'Seats', type: 'number', step: '1' }, { n: 'Status', l: 'Status', type: 'select', req: 1, options: [['Active', 'Active'], ['Inactive', 'Inactive']], skipNew: 1 }], id: 'RoomID' }
+};
+VIEWS.academic = async (main, tab) => {
+  await loadLookups();
+  tab = tab || VIEWS.academic.tab || 'subjects'; VIEWS.academic.tab = tab;
+  const m = MASTER[tab], rows = L(tab), edit = can('MASTER_EDIT');
+  main.innerHTML = '<div class="head"><div><h1>Subjects, batches, rooms</h1><p>Set these up once; change them whenever the centre changes.</p></div>' + (edit ? '<button class="btn primary" id="m-add">Add ' + m.one + '</button>' : '') + '</div>' +
+    '<div class="tabs" role="tablist">' + Object.keys(MASTER).map(k => '<button role="tab" aria-selected="' + (k === tab) + '" data-m="' + k + '">' + MASTER[k].title + '</button>').join('') + '</div>' +
+    (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr>' + m.cols.map(c => '<th>' + c[1] + '</th>').join('') + '<th></th></tr></thead><tbody>' +
+      rows.map(r => '<tr>' + m.cols.map(c => '<td data-l="' + c[1] + '">' + (c[0] === 'Status' ? pill(r[c[0]]) : esc(r[c[0]])) + '</td>').join('') + '<td>' + (edit ? '<button class="btn small" data-e="' + esc(r[m.id]) + '">Edit</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' :
+      '<div class="card empty"><b>No ' + m.title.toLowerCase() + ' yet</b>Use the button above to add one.</div>');
+  $$('[data-m]', main).forEach(b => b.addEventListener('click', () => go('academic', b.dataset.m)));
+  const dlg = row => {
+    const fields = m.fields().filter(f => row || !f.skipNew);
+    openDlg((row ? 'Edit ' : 'Add ') + m.one, '<form>' + formHtml(fields, row || {}) + '</form>', '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="m-save">Save</button>',
+      d => $('#m-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+        if (!validForm(d)) return;
+        const data = collect(d, fields);
+        if (row) { const ch = changedOnly(data, row); if (!Object.keys(ch).length) { toast('Nothing has changed.'); return; } await api(tab + '.update', { id: row[m.id], changes: ch }); }
+        else { const item = {}; Object.keys(data).forEach(k => { if (data[k] !== '') item[k] = data[k]; }); await api(tab + '.add', { item: item }); }
+        closeDlg(); toast('Saved.'); go('academic', tab);
+      })));
+  };
+  if (edit) { $('#m-add').addEventListener('click', () => dlg(null)); $$('[data-e]', main).forEach(b => b.addEventListener('click', () => dlg(rows.find(r => r[m.id] === b.dataset.e)))); }
+};
+
+/* ---------- fee structure ---------- */
+VIEWS.fees = async main => {
+  await loadLookups();
+  const edit = can('FINANCE_EDIT');
+  const rows = await api('finance.feeStructure.list');
+
+  const typeLabel = t => t === 'REGISTRATION' ? 'Registration' : (t === 'SUBJECT' ? 'Subject' : 'Other');
+  const typePill = t => '<span class="pill ' + (t === 'REGISTRATION' ? 'warn' : '') + '">' + esc(typeLabel(t)) + '</span>';
+
+  main.innerHTML =
+    '<div class="head"><div><h1>Fee structure</h1><p>Standard monthly fee per subject for ' + esc(S.cfg.academicYear || '') + '. Change these once a year.</p></div>' +
+      (edit ? '<button class="btn primary" id="fee-add">Add item</button>' : '') + '</div>' +
+    '<div id="fee-list"></div>' +
+    '<div class="card mt-2"><h2 style="font-size:1.15rem;margin-bottom:.4rem">How fees work</h2>' +
+      '<p class="muted" style="margin:0;font-size:.9rem">Each student pays the standard subject fee unless you give them a personal discount. ' +
+      'Discounts are set per student on their profile, not here. Registration is a one-time fee charged on admission.</p></div>';
+
+  const render = list => {
+    $('#fee-list').innerHTML = list.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Type</th><th>Item</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>' +
+        list.map(r =>
+          '<tr><td>' + typePill(r.ItemType) + '</td>' +
+          '<td data-l="Item">' + (r.SubjectID ? '<b>' + esc(r.SubjectName) + '</b>' : '<b>' + esc(r.Description) + '</b>') +
+            (r.SubjectID ? '<div class="muted" style="font-size:.85rem">' + esc(r.Description) + '</div>' : '') + '</td>' +
+          '<td data-l="Amount"><b>₹' + (r.Amount || 0).toLocaleString('en-IN') + '</b></td>' +
+          '<td>' + pill(r.Status) + '</td>' +
+          '<td>' + (edit ? '<button class="btn small" data-edit="' + esc(r.FeeID) + '">Edit</button>' : '') + '</td>' +
+          '</tr>').join('') + '</tbody></table></div>'
+      : '<div class="card empty"><b>No fee items</b>Add one to get started.</div>';
+
+    if (edit) {
+      $$('[data-edit]', main).forEach(b => b.addEventListener('click', () => {
+        const r = list.find(x => x.FeeID === b.dataset.edit);
+        feeDialog(r, async () => { await main.refreshList(); });
+      }));
+    }
+  };
+
+  const refreshList = async () => {
+    const list = await api('finance.feeStructure.list');
+    render(list);
+  };
+  main.refreshList = refreshList;
+
+  const feeDialog = (row, onSaved) => {
+    const isEdit = !!row;
+    let fields;
+    if (isEdit) {
+      fields = [
+        { n: 'Description', l: 'Description', req: 1, full: 1, max: 150 },
+        { n: 'Amount', l: 'Amount (₹)', type: 'number', step: 'any', req: 1 },
+        { n: 'Status', l: 'Status', type: 'select', req: 1, options: [['Active', 'Active'], ['Inactive', 'Inactive']] }
+      ];
+    } else {
+      fields = [
+        { n: 'ItemType', l: 'Type', type: 'select', req: 1, options: [['SUBJECT', 'Subject monthly fee'], ['REGISTRATION', 'Registration fee'], ['OTHER', 'Other']] },
+        { n: 'SubjectID', l: 'Subject (for subject fees only)', type: 'select', options: () => activeOnly('subjects').map(s => [s.SubjectID, s.SubjectName]) },
+        { n: 'Description', l: 'Description', req: 1, full: 1, max: 150 },
+        { n: 'Amount', l: 'Amount (₹)', type: 'number', step: 'any', req: 1 }
+      ];
+    }
+    openDlg(isEdit ? 'Edit fee item' : 'Add fee item',
+      '<form>' + formHtml(fields, row || {}) + '</form>',
+      '<button class="btn" type="button" data-close>Cancel</button>' +
+      '<button class="btn primary" id="fee-save">' + (isEdit ? 'Save changes' : 'Add item') + '</button>',
+      d => {
+        if (!isEdit) {
+          const t = d.querySelector('[name=ItemType]');
+          const sw = d.querySelector('[name=SubjectID]').closest('label');
+          const sync = () => { sw.style.display = (t.value === 'SUBJECT') ? '' : 'none'; };
+          t.addEventListener('change', sync); sync();
+        }
+        $('#fee-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+          if (!validForm(d)) return;
+          const data = collect(d, fields);
+          try {
+            if (isEdit) {
+              const ch = changedOnly(data, row);
+              if (!Object.keys(ch).length) { toast('Nothing has changed.'); return; }
+              await api('finance.feeStructure.update', { id: row.FeeID, changes: ch });
+            } else {
+              await api('finance.feeStructure.add', { item: data });
+            }
+            closeDlg();
+            toast('Saved.');
+            if (onSaved) await onSaved();
+          } catch (e) { fail(e); }
+        }));
+      });
+  };
+
+  if (edit) $('#fee-add').addEventListener('click', () => feeDialog(null, async () => { await refreshList(); }));
+  render(rows);
+};
+
+/* ---------- timetable ---------- */
+const TT_DAYS_UI = ['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'];
+function dayLabel_(d) { return d.charAt(0) + d.slice(1).toLowerCase(); }
+
+function ttFields(isEdit) {
+  const f = [
+    { n: 'Day', l: 'Day', type: 'select', req: 1, options: TT_DAYS_UI.map(d => [d, dayLabel_(d)]) },
+    { n: 'StartTime', l: 'Start time', type: 'time', req: 1 },
+    { n: 'EndTime',   l: 'End time',   type: 'time', req: 1 },
+    { n: 'BatchID',   l: 'Batch',   type: 'select', req: 1, options: () => activeOnly('batches').map(b => [b.BatchID, b.BatchName + ' (' + b.Class + ')']) },
+    { n: 'SubjectID', l: 'Subject', type: 'select', req: 1, options: () => activeOnly('subjects').map(s => [s.SubjectID, s.SubjectName]) },
+    { n: 'TeacherID', l: 'Teacher', type: 'select', req: 1, options: () => activeOnly('teachers').map(t => [t.TeacherID, t.Name]) },
+    { n: 'RoomID',    l: 'Room',    type: 'select', req: 1, options: () => activeOnly('rooms').map(r => [r.RoomID, r.RoomName]) }
+  ];
+  if (isEdit) f.push({ n: 'Status', l: 'Status', type: 'select', req: 1, options: [['Active','Active'],['Inactive','Inactive']] });
+  return f;
+}
+
+VIEWS.timetable = async (main) => {
+  await loadLookups();
+  const st = VIEWS.timetable.state = VIEWS.timetable.state || { day: '', batchId: '', teacherId: '' };
+
+  main.innerHTML =
+    '<div class="head"><div><h1>Timetable</h1><p>Weekly class schedule for ' + esc(S.cfg.academicYear || '') + '</p></div>' +
+      (can('MASTER_EDIT') ? '<button class="btn primary" id="tt-add">Add class</button>' : '') + '</div>' +
+    '<div class="toolbar">' +
+      '<select id="tt-day"><option value="">All days</option>' +
+        TT_DAYS_UI.map(d => '<option value="' + d + '"' + (st.day === d ? ' selected' : '') + '>' + dayLabel_(d) + '</option>').join('') + '</select>' +
+      '<select id="tt-batch"><option value="">All batches</option>' +
+        L('batches').map(b => '<option value="' + esc(b.BatchID) + '"' + (st.batchId === b.BatchID ? ' selected' : '') + '>' + esc(b.BatchName) + '</option>').join('') + '</select>' +
+      '<select id="tt-teacher"><option value="">All teachers</option>' +
+        L('teachers').map(t => '<option value="' + esc(t.TeacherID) + '"' + (st.teacherId === t.TeacherID ? ' selected' : '') + '>' + esc(t.Name) + '</option>').join('') + '</select>' +
+    '</div>' +
+    '<div id="tt-list"></div>';
+
+  const load = async () => {
+    const rows = await api('timetable.list', { day: st.day, batchId: st.batchId, teacherId: st.teacherId });
+    $('#tt-list').innerHTML = rows.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr>' +
+          '<th>Day</th><th>Time</th><th>Subject</th><th>Teacher</th><th>Batch</th><th>Room</th><th>Status</th><th></th>' +
+        '</tr></thead><tbody>' +
+        rows.map(r =>
+          '<tr><td data-l="Day"><b>' + dayLabel_(r.Day) + '</b></td>' +
+          '<td data-l="Time">' + esc(fmtHM(r.StartTime)) + ' – ' + esc(fmtHM(r.EndTime)) + '</td>' +
+          '<td data-l="Subject">' + esc(r.SubjectName) + '</td>' +
+          '<td data-l="Teacher">' + esc(r.TeacherName) + '</td>' +
+          '<td data-l="Batch">' + esc(r.BatchName) + '</td>' +
+          '<td data-l="Room">' + esc(r.RoomName) + '</td>' +
+          '<td>' + pill(r.Status) + '</td>' +
+          '<td>' + (can('MASTER_EDIT')
+            ? '<button class="btn small" data-edit="' + esc(r.TimetableID) + '">Edit</button> ' +
+              '<button class="btn small ' + (r.Status === 'Active' ? 'danger' : '') + '" data-toggle="' + esc(r.TimetableID) + '">' +
+              (r.Status === 'Active' ? 'Deactivate' : 'Activate') + '</button>'
+            : '') + '</td></tr>'
+        ).join('') + '</tbody></table></div>'
+      : '<div class="card empty"><b>No classes scheduled</b>' + (can('MASTER_EDIT') ? 'Use “Add class” to create one.' : '') + '</div>';
+
+    if (can('MASTER_EDIT')) {
+      $$('[data-edit]', main).forEach(b => b.addEventListener('click', () => {
+        ttDialog(rows.find(x => x.TimetableID === b.dataset.edit));
+      }));
+      $$('[data-toggle]', main).forEach(b => b.addEventListener('click', () => {
+        const r = rows.find(x => x.TimetableID === b.dataset.toggle);
+        const to = r.Status === 'Active' ? 'Inactive' : 'Active';
+        if (!confirm((to === 'Inactive' ? 'Deactivate' : 'Activate') + ' this class?')) return;
+        busy(b, async () => {
+          try { await api('timetable.setStatus', { id: r.TimetableID, status: to }); toast('Saved.'); await load(); }
+          catch (e) { fail(e); }
+        });
+      }));
+    }
+  };
+
+  const ttDialog = (row) => {
+    const isEdit = !!row;
+    const fields = ttFields(isEdit);
+    openDlg(isEdit ? 'Edit class' : 'Add class',
+      '<form>' + formHtml(fields, row || {}) + '</form>',
+      '<button class="btn" type="button" data-close>Cancel</button>' +
+      '<button class="btn primary" id="tt-save">' + (isEdit ? 'Save changes' : 'Add class') + '</button>',
+      d => $('#tt-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+        if (!validForm(d)) return;
+        const data = collect(d, fields);
+        const showConflict = msg => {
+          const bd = d.querySelector('.dlg-b');
+          const old = bd.querySelector('.alert.bad');
+          if (old) old.remove();
+          bd.insertAdjacentHTML('afterbegin',
+            '<div class="alert bad" style="margin-bottom:.75rem">' + esc(msg) + '</div>');
+        };
+        try {
+          if (isEdit) {
+            const ch = changedOnly(data, row);
+            if (!Object.keys(ch).length) { toast('Nothing has changed.'); return; }
+            await api('timetable.update', { id: row.TimetableID, changes: ch });
+          } else {
+            await api('timetable.add', { item: data });
+          }
+          closeDlg();
+          toast('Saved.');
+          await load();
+        } catch (e) {
+          if (e.code === 'CONFLICT') { showConflict(e.error); return; }
+          throw e;
+        }
+      })));
+  };
+
+  $('#tt-day').addEventListener('change', e => { st.day = e.target.value; load().catch(fail); });
+  $('#tt-batch').addEventListener('change', e => { st.batchId = e.target.value; load().catch(fail); });
+  $('#tt-teacher').addEventListener('change', e => { st.teacherId = e.target.value; load().catch(fail); });
+  if (can('MASTER_EDIT')) $('#tt-add').addEventListener('click', () => ttDialog(null));
+
+  await load();
+};
+
+/* ---------- payment recording ---------- */
+/* ---------- payment recording ---------- */
+function paymentDialog(invoice, lines, onDone) {
+  const today = new Date().toISOString().slice(0, 10);
+  const fmt = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
+  const open = (lines || []).filter(l => l.balanceAmount > 0);
+  const lump = !open.length; // only if an invoice has no subject lines
+  const numStyle = 'width:120px;height:40px;margin:0;padding:.4rem .6rem;border:1px solid #c5d1e0;border-radius:8px';
+  const rows = open.map(l =>
+    '<div class="perm" data-sub="' + esc(l.subjectId) + '" data-bal="' + l.balanceAmount + '" style="align-items:center">' +
+      '<input type="checkbox" checked aria-label="Pay ' + esc(l.subjectName) + '">' +
+      '<span style="flex:1"><b>' + esc(l.subjectName) + '</b><div class="muted" style="font-size:.82rem">Fee ' + fmt(l.finalAmount) + ' · paid ' + fmt(l.paidAmount) + ' · balance ' + fmt(l.balanceAmount) + '</div></span>' +
+      '<input type="number" step="any" min="0" max="' + l.balanceAmount + '" value="' + l.balanceAmount + '" style="' + numStyle + '" aria-label="Amount for ' + esc(l.subjectName) + '">' +
+    '</div>').join('');
+
+  openDlg('Record payment',
+    '<p class="muted" style="margin:0 0 .75rem">' + esc(invoice.MonthLabel) + ' · ' + esc(invoice.StudentName) +
+      ' · Balance <b>' + fmt(invoice.BalanceAmount) + '</b></p>' +
+    '<form>' +
+      (lump
+        ? '<label class="f"><span>Amount received <em style="color:var(--bad);font-style:normal">*</em></span>' +
+            '<input name="amount" type="number" step="any" min="1" max="' + invoice.BalanceAmount + '" value="' + invoice.BalanceAmount + '" required></label>'
+        : '<div style="margin-bottom:.3rem"><b>Which subjects is this payment for?</b>' +
+            '<div class="muted" style="font-size:.85rem">Untick a subject that is not being paid today, or lower its amount for a part payment.</div></div>' +
+          rows +
+          '<div style="display:flex;justify-content:space-between;margin:.7rem 0 1rem;font-size:1.05rem"><span class="muted">Total received</span><b id="pay-total">₹0</b></div>') +
+      '<div class="grid2">' +
+        '<label class="f"><span>Payment date</span><input name="paymentDate" type="date" value="' + today + '"></label>' +
+        '<label class="f"><span>Mode <em style="color:var(--bad);font-style:normal">*</em></span>' +
+          '<select name="mode" required>' +
+            '<option value="CASH">Cash</option><option value="UPI">UPI</option>' +
+            '<option value="BANK_TRANSFER">Bank transfer</option><option value="CHEQUE">Cheque</option>' +
+          '</select></label>' +
+        '<label class="f full" data-refwrap><span>Reference / transaction ID</span>' +
+          '<input name="reference" maxlength="100" placeholder="Required for non-cash payments" autocomplete="off"></label>' +
+      '</div>' +
+      '<label class="f"><span>Notes</span><input name="notes" maxlength="500" autocomplete="off"></label>' +
+    '</form>',
+    '<button class="btn" type="button" data-close>Cancel</button>' +
+    '<button class="btn primary" id="pay-save">Save payment</button>',
+    d => {
+      const mode = d.querySelector('[name=mode]');
+      const refWrap = d.querySelector('[data-refwrap]');
+      const sync = () => { refWrap.style.display = (mode.value === 'CASH') ? 'none' : ''; };
+      mode.addEventListener('change', sync); sync();
+
+      const rowEls = $$('[data-sub]', d);
+      const total = () => rowEls.reduce((s, r) => s + ($('input[type=checkbox]', r).checked ? (Number($('input[type=number]', r).value) || 0) : 0), 0);
+      const showTotal = () => { const t = $('#pay-total', d); if (t) t.textContent = fmt(Math.round(total() * 100) / 100); };
+      rowEls.forEach(r => {
+        const cb = $('input[type=checkbox]', r), am = $('input[type=number]', r);
+        cb.addEventListener('change', () => {
+          am.disabled = !cb.checked;
+          if (cb.checked && !(Number(am.value) > 0)) am.value = r.dataset.bal;
+          showTotal();
+        });
+        am.addEventListener('input', showTotal);
+      });
+      showTotal();
+
+      $('#pay-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+        const md = mode.value;
+        const ref = d.querySelector('[name=reference]').value.trim();
+        const payload = {
+          invoiceId: invoice.InvoiceID, mode: md, reference: ref,
+          paymentDate: d.querySelector('[name=paymentDate]').value, notes: d.querySelector('[name=notes]').value.trim()
+        };
+        if (md !== 'CASH' && !ref) { toast('Please enter the transaction reference.', true); return; }
+        if (lump) {
+          const amt = Number(d.querySelector('[name=amount]').value);
+          if (!amt || amt <= 0) { toast('Enter an amount.', true); return; }
+          if (amt > invoice.BalanceAmount) { toast('Amount exceeds the balance.', true); return; }
+          payload.amount = amt;
+        } else {
+          const allocations = [];
+          for (const r of rowEls) {
+            if (!$('input[type=checkbox]', r).checked) continue;
+            const a = Number($('input[type=number]', r).value);
+            if (!(a > 0)) continue;
+            if (a > Number(r.dataset.bal) + 0.005) { toast($('b', r).textContent + ': amount is more than its balance.', true); return; }
+            allocations.push({ subjectId: r.dataset.sub, amount: a });
+          }
+          if (!allocations.length) { toast('Enter an amount for at least one subject.', true); return; }
+          payload.allocations = allocations;
+        }
+        const r = await api('payments.record', payload);
+        closeDlg();
+        toast('Payment recorded · Receipt ' + r.receiptId);
+        if (onDone) onDone(r);
+      }));
+    });
+}
+
+/* ---------- invoices ---------- */
+function invoiceStatusPill(s) {
+  const k = String(s || '').toUpperCase();
+  const cls = k === 'PAID' ? 'ok' : (k === 'OVERDUE' || k === 'CANCELLED' ? 'bad' : (k === 'PARTIAL' ? 'warn' : ''));
+  return '<span class="pill ' + cls + '">' + esc(k || '—') + '</span>';
+}
+
+VIEWS.invoices = async main => {
+  const st = VIEWS.invoices.state = VIEWS.invoices.state || { month: '', status: '', search: '' };
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  if (!st.month) st.month = currentMonth;
+
+  main.innerHTML =
+    '<div class="head"><div><h1>Invoices</h1><p>Monthly bills and their payment status</p></div>' +
+      (can('FINANCE_EDIT') ? '<button class="btn primary" id="inv-gen">Generate invoices</button>' : '') + '</div>' +
+    '<div class="toolbar">' +
+      '<input id="inv-month" type="month" value="' + esc(st.month) + '" style="max-width:180px">' +
+      '<select id="inv-status">' +
+        '<option value="">All statuses</option>' +
+        ['UNPAID','PARTIAL','PAID','OVERDUE','CANCELLED'].map(x =>
+          '<option value="' + x + '"' + (st.status === x ? ' selected' : '') + '>' + x + '</option>').join('') +
+      '</select>' +
+      '<input id="inv-search" placeholder="Search by student or invoice ID" value="' + esc(st.search) + '">' +
+      '<button class="btn ghost" id="inv-clear">Clear filters</button>' +
+    '</div>' +
+    '<div id="inv-summary" class="stats"></div>' +
+    '<div id="inv-list"></div>';
+
+  const load = async () => {
+    const r = await api('invoices.list', { month: st.month, status: st.status, search: st.search });
+    const t = r.totals;
+    $('#inv-summary').innerHTML =
+      '<div class="card stat"><b>' + t.count + '</b><span>Invoices</span></div>' +
+      '<div class="card stat"><b>₹' + t.billed.toLocaleString('en-IN') + '</b><span>Billed</span></div>' +
+      '<div class="card stat"><b>₹' + t.paid.toLocaleString('en-IN') + '</b><span>Collected</span></div>' +
+      '<div class="card stat"><b>₹' + t.balance.toLocaleString('en-IN') + '</b><span>Outstanding</span></div>' +
+      '<div class="card stat"><b>₹' + t.overdue.toLocaleString('en-IN') + '</b><span>Overdue</span></div>';
+
+    $('#inv-list').innerHTML = r.rows.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr>' +
+          '<th>Invoice</th><th>Student</th><th>Month</th><th>Total</th><th>Paid</th><th>Balance</th><th>Due</th><th>Status</th>' +
+        '</tr></thead><tbody>' +
+        r.rows.map(inv =>
+          '<tr class="click" data-inv="' + esc(inv.InvoiceID) + '">' +
+          '<td data-l="Invoice"><b>' + esc(inv.InvoiceID) + '</b></td>' +
+          '<td data-l="Student">' + esc(inv.StudentName) + '<div class="muted" style="font-size:.82rem">' + esc(inv.StudentID) + '</div></td>' +
+          '<td data-l="Month">' + esc(inv.MonthLabel) + '</td>' +
+          '<td data-l="Total">₹' + inv.TotalAmount.toLocaleString('en-IN') + '</td>' +
+          '<td data-l="Paid">₹' + inv.PaidAmount.toLocaleString('en-IN') + '</td>' +
+          '<td data-l="Balance"><b>₹' + inv.BalanceAmount.toLocaleString('en-IN') + '</b></td>' +
+          '<td data-l="Due">' + esc(fmtDate(inv.DueDate)) + '</td>' +
+          '<td>' + invoiceStatusPill(inv.Status) + '</td>' +
+          '</tr>').join('') + '</tbody></table></div>'
+      : '<div class="card empty"><b>No invoices for this filter</b>' +
+        (can('FINANCE_EDIT') ? 'Click “Generate invoices” to create bills for this month.' : '') + '</div>';
+
+    $$('[data-inv]', main).forEach(tr => tr.addEventListener('click', () => go('invoice', tr.dataset.inv)));
+  };
+
+  $('#inv-month').addEventListener('change', e => { st.month = e.target.value; load().catch(fail); });
+  $('#inv-status').addEventListener('change', e => { st.status = e.target.value; load().catch(fail); });
+  let tmr; $('#inv-search').addEventListener('input', e => {
+    st.search = e.target.value; clearTimeout(tmr); tmr = setTimeout(() => load().catch(fail), 300);
+  });
+  $('#inv-clear').addEventListener('click', () => {
+    st.month = currentMonth; st.status = ''; st.search = '';
+    $('#inv-month').value = currentMonth; $('#inv-status').value = ''; $('#inv-search').value = '';
+    load().catch(fail);
+  });
+
+  if (can('FINANCE_EDIT')) {
+    $('#inv-gen').addEventListener('click', () => {
+      openDlg('Generate invoices',
+        '<p>This creates one invoice per active student for the chosen month, based on their current subjects and fees.</p>' +
+        '<label class="f"><span>Month</span><input id="gen-month" type="month" value="' + esc(st.month) + '"></label>' +
+        '<p class="muted" style="font-size:.85rem">Students who already have an invoice for that month are skipped. Students with no subjects are skipped.</p>',
+        '<button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn primary" id="gen-run">Generate</button>',
+        d => $('#gen-run', d).addEventListener('click', ev => busy(ev.target, async () => {
+          const m = d.querySelector('#gen-month').value;
+          if (!/^\d{4}-\d{2}$/.test(m)) { toast('Pick a valid month.', true); return; }
+          try {
+            const r = await api('invoices.generate', { month: m });
+            closeDlg();
+            const msg = r.generated + ' invoice(s) created · ₹' + r.total.toLocaleString('en-IN') + ' billed' +
+                        (r.skippedExisting ? ' · ' + r.skippedExisting + ' already existed' : '') +
+                        (r.skippedEmpty ? ' · ' + r.skippedEmpty + ' with no active subjects' : '');
+            toast(msg);
+            st.month = m; $('#inv-month').value = m;
+            await load();
+          } catch (e) { fail(e); }
+        })));
+    });
+  }
+
+  await load();
+};
+
+VIEWS.invoice = async (main, invoiceId) => {
+  if (!invoiceId) { go('invoices'); return; }
+  const d = await api('invoices.get', { invoiceId: invoiceId });
+  const inv = d.invoice;
+  const canEdit = can('FINANCE_EDIT');
+  const isCancelled = inv.Status === 'CANCELLED';
+  const isPaid = inv.Status === 'PAID';
+
+  main.innerHTML =
+    '<p><button class="link" data-back>← All invoices</button></p>' +
+    '<div class="head"><div><h1>' + esc(inv.MonthLabel) + ' · ' + esc(inv.StudentName) + '</h1>' +
+      '<p>' + esc(inv.InvoiceID) + ' · ' + esc(inv.StudentID) + ' · Due ' + esc(fmtDate(inv.DueDate)) + ' · ' + invoiceStatusPill(inv.Status) + '</p></div>' +
+      (canEdit && !isCancelled && !isPaid ? '<button class="btn danger" id="inv-cancel">Cancel invoice</button>' : '') + '</div>' +
+
+    '<div class="stats">' +
+      '<div class="card stat"><b>₹' + inv.TotalAmount.toLocaleString('en-IN') + '</b><span>Total</span></div>' +
+      '<div class="card stat"><b>₹' + inv.PaidAmount.toLocaleString('en-IN') + '</b><span>Paid</span></div>' +
+      '<div class="card stat"><b>₹' + inv.BalanceAmount.toLocaleString('en-IN') + '</b><span>Balance</span></div>' +
+    '</div>' +
+
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Line items</h2>' +
+      '<div class="tablewrap"><table class="stack"><thead><tr>' +
+        '<th>Subject</th><th>Standard</th><th>Discount</th><th>Final</th><th>Paid</th><th>Balance</th>' +
+      '</tr></thead><tbody>' +
+      d.lines.map(l =>
+        '<tr>' +
+        '<td data-l="Subject">' + esc(l.subjectName) + '</td>' +
+        '<td data-l="Standard">₹' + (l.standardAmount || 0).toLocaleString('en-IN') + '</td>' +
+        '<td data-l="Discount">' + (l.discountAmount ? '−₹' + l.discountAmount.toLocaleString('en-IN') : '—') + '</td>' +
+        '<td data-l="Final"><b>₹' + (l.finalAmount || 0).toLocaleString('en-IN') + '</b></td>' +
+        '<td data-l="Paid">₹' + (l.paidAmount || 0).toLocaleString('en-IN') + '</td>' +
+        '<td data-l="Balance">' + (l.balanceAmount ? '<b>₹' + l.balanceAmount.toLocaleString('en-IN') + '</b>' : '<span class="pill ok">Paid</span>') + '</td>' +
+        '</tr>').join('') +
+      '<tr><td data-l="" style="text-align:right"><b>Total</b></td><td></td><td></td>' +
+      '<td data-l=""><b>₹' + inv.TotalAmount.toLocaleString('en-IN') + '</b></td>' +
+      '<td data-l=""><b>₹' + inv.PaidAmount.toLocaleString('en-IN') + '</b></td>' +
+      '<td data-l=""><b>₹' + inv.BalanceAmount.toLocaleString('en-IN') + '</b></td></tr>' +
+      '</tbody></table></div>' +
+    '</div>' +
+
+      '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Payments</h2>' +
+      (isCancelled
+        ? '<p class="muted" style="margin:0">This invoice was cancelled.</p>'
+        : (canEdit && inv.BalanceAmount > 0
+            ? '<button class="btn primary" id="rec-pay">Record payment (balance ₹' + inv.BalanceAmount.toLocaleString('en-IN') + ')</button>'
+            : (inv.Status === 'PAID' ? '<p class="muted" style="margin:.2rem 0 .75rem">Paid in full. Thank you.</p>' : ''))) +
+      (d.payments.length
+        ? '<div class="tablewrap" style="margin-top:.75rem"><table><thead><tr><th>Date</th><th>Receipt</th><th>Amount</th><th>Mode</th><th>For</th><th>Status</th><th></th></tr></thead><tbody>' +
+          d.payments.map(p =>
+            '<tr><td>' + esc(fmtDate(p.PaymentDate)) + '</td>' +
+            '<td><b>' + esc(p.ReceiptID) + '</b></td>' +
+            '<td>₹' + p.Amount.toLocaleString('en-IN') + '</td>' +
+            '<td>' + esc(p.PaymentMode || '') + (p.TransactionReference ? ' · <span class="muted">' + esc(p.TransactionReference) + '</span>' : '') + '</td>' +
+            '<td>' + esc((p.Allocations || []).map(a => a.subjectName + ' ₹' + a.amount.toLocaleString('en-IN')).join(', ') || 'All subjects') + '</td>' +
+            '<td>' + pill(p.Status) + '</td>' +
+            '<td><button class="btn small" data-receipt="' + esc(p.ReceiptID) + '">View receipt</button></td>' +
+            '</tr>').join('') +
+          '</tbody></table></div>'
+        : '') +
+    '</div>';
+
+  $('[data-back]', main).addEventListener('click', () => go('invoices'));
+
+    $$('[data-receipt]', main).forEach(b => b.addEventListener('click', () => { console.log('>>> clicked receipt button, id =', JSON.stringify(b.dataset.receipt)); go('receipt', b.dataset.receipt); }));
+  if (canEdit && !isCancelled && inv.BalanceAmount > 0) {
+    $('#rec-pay').addEventListener('click', () => paymentDialog(inv, d.lines, () => go('invoice', inv.InvoiceID)));
+  }
+
+  if (canEdit && !isCancelled && !isPaid) {
+    $('#inv-cancel').addEventListener('click', () => {
+      if (!confirm('Cancel invoice ' + inv.InvoiceID + '? The bill disappears from outstanding reports but stays in history.')) return;
+      busy($('#inv-cancel'), async () => {
+        await api('invoices.cancel', { invoiceId: inv.InvoiceID });
+        toast('Invoice cancelled.');
+        go('invoices');
+      });
+    });
+  }
+};
+
+/* ---------- receipts ---------- */
+VIEWS.receipts = async main => {
+  const st = VIEWS.receipts.state = VIEWS.receipts.state || { search: '', from: '', to: '' };
+  main.innerHTML =
+    '<div class="head"><div><h1>Receipts</h1><p>Every payment recorded, with a printable receipt.</p></div></div>' +
+    '<div class="toolbar">' +
+      '<input id="rc-search" placeholder="Search by receipt, student or ID" value="' + esc(st.search) + '">' +
+      '<input id="rc-from" type="date" value="' + esc(st.from) + '" title="From date">' +
+      '<input id="rc-to" type="date" value="' + esc(st.to) + '" title="To date">' +
+      '<button class="btn ghost" id="rc-clear">Clear</button>' +
+    '</div>' +
+    '<div id="rc-list"></div>';
+
+  const load = async () => {
+    const rows = await api('receipts.list', { search: st.search, from: st.from, to: st.to });
+    $('#rc-list').innerHTML = rows.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr>' +
+          '<th>Receipt</th><th>Date</th><th>Student</th><th>Amount</th><th>Status</th>' +
+        '</tr></thead><tbody>' +
+        rows.map(r =>
+          '<tr class="click" data-rc="' + esc(r.ReceiptID) + '">' +
+          '<td data-l="Receipt"><b>' + esc(r.ReceiptID) + '</b></td>' +
+          '<td data-l="Date">' + esc(fmtDate(r.ReceiptDate)) + '</td>' +
+          '<td data-l="Student">' + esc(r.StudentName) + '<div class="muted" style="font-size:.82rem">' + esc(r.StudentID) + '</div></td>' +
+          '<td data-l="Amount"><b>₹' + r.Amount.toLocaleString('en-IN') + '</b></td>' +
+          '<td>' + pill(r.Status) + '</td>' +
+          '</tr>').join('') + '</tbody></table></div>'
+      : '<div class="card empty"><b>No receipts found</b>Record a payment on an invoice to generate one.</div>';
+
+    $$('[data-rc]', main).forEach(tr => tr.addEventListener('click', () => go('receipt', tr.dataset.rc)));
+  };
+
+  let tmr;
+  $('#rc-search').addEventListener('input', e => { st.search = e.target.value; clearTimeout(tmr); tmr = setTimeout(() => load().catch(fail), 300); });
+  $('#rc-from').addEventListener('change', e => { st.from = e.target.value; load().catch(fail); });
+  $('#rc-to').addEventListener('change', e => { st.to = e.target.value; load().catch(fail); });
+  $('#rc-clear').addEventListener('click', () => {
+    st.search = st.from = st.to = '';
+    $('#rc-search').value = ''; $('#rc-from').value = ''; $('#rc-to').value = '';
+    load().catch(fail);
+  });
+  await load();
+};
+
+VIEWS.receipt = async (main, receiptId) => {
+  if (!receiptId) { go('receipts'); return; }
+    console.log('>>> VIEWS.receipt got id:', JSON.stringify(receiptId));
+  const d = await api('receipts.get', { receiptId: receiptId });
+  const r = d.receipt, pay = d.payment, inv = d.invoice, st = d.student, c = d.centre;
+  const isVoid = String(r.Status).toUpperCase() === 'VOID';
+  const fmt = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
+
+  const alloc = {}; ((pay && pay.Allocations) || []).forEach(a => { alloc[a.subjectId] = a.amount; });
+  const hasAlloc = Object.keys(alloc).length > 0;
+  const lineRows = inv && inv.LineItems.length
+    ? inv.LineItems.map(l =>
+        '<tr><td>' + esc(l.subjectName) + '</td>' +
+        '<td style="text-align:right">' + (l.discountAmount ? fmt(l.standardAmount) : '') + '</td>' +
+        '<td style="text-align:right">' + (l.discountAmount ? '−' + fmt(l.discountAmount) : '') + '</td>' +
+        '<td style="text-align:right"><b>' + fmt(l.finalAmount) + '</b></td>' +
+        (hasAlloc ? '<td style="text-align:right">' + (alloc[l.subjectId] ? '<b>' + fmt(alloc[l.subjectId]) + '</b>' : '—') + '</td>' : '') + '</tr>').join('')
+    : '';
+
+  main.innerHTML =
+    '<p class="no-print"><button class="link" data-back>← All receipts</button></p>' +
+    '<div class="head no-print"><div><h1>Receipt ' + esc(r.ReceiptID) + '</h1>' +
+      '<p>' + esc(fmtDate(r.ReceiptDate)) + ' · ' + esc(st ? st.Name : '') + ' · ' + pill(r.Status) + '</p></div>' +
+      '<div>' +
+        '<button class="btn" id="rc-print">Print / Save PDF</button>' +
+        (can('FINANCE_EDIT') && !isVoid ? ' <button class="btn danger" id="rc-void">Void receipt</button>' : '') +
+      '</div></div>' +
+
+    '<div id="receipt-paper" class="card" style="max-width:800px;margin:0 auto;position:relative">' +
+      (isVoid ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-25deg);font:900 6rem/1 var(--display);color:rgba(179,48,42,.15);pointer-events:none;user-select:none">VOID</div>' : '') +
+      '<div style="text-align:center;border-bottom:2px solid var(--navy);padding-bottom:.75rem;margin-bottom:1rem">' +
+        (S.cfg.logoUrl ? '<img src="' + esc(S.cfg.logoUrl) + '" alt="" style="height:64px;width:auto;object-fit:contain;margin-bottom:.4rem">' : '') +
+        '<div style="font:700 1.6rem/1.1 var(--display);color:var(--navy);letter-spacing:-.02em">' + esc(c.name) + '</div>' +
+        (c.tagline ? '<div class="muted" style="font-style:italic;margin-top:.15rem">' + esc(c.tagline) + '</div>' : '') +
+        (c.address ? '<div class="muted" style="font-size:.85rem;margin-top:.35rem">' + esc(c.address) + '</div>' : '') +
+        '<div class="muted" style="font-size:.82rem">' + [c.mobile, c.email, c.website].filter(Boolean).map(esc).join(' · ') + '</div>' +
+      '</div>' +
+
+      '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1rem">' +
+        '<div><div style="font:700 1.3rem/1 var(--display);letter-spacing:.05em;color:var(--navy)">RECEIPT</div>' +
+          '<div class="muted" style="font-size:.85rem;margin-top:.15rem">' + esc(r.ReceiptID) + '</div></div>' +
+        '<div style="text-align:right"><div class="muted" style="font-size:.82rem">Date</div>' +
+          '<div><b>' + esc(fmtDate(r.ReceiptDate)) + '</b></div></div>' +
+      '</div>' +
+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">' +
+        '<div><div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem">Received from</div>' +
+          (st ? '<div><b>' + esc(st.Name) + '</b></div><div class="muted" style="font-size:.85rem">' + esc(st.StudentID) + ' · Class ' + esc(st.CurrentClass) + '</div>' +
+                (st.ParentName ? '<div class="muted" style="font-size:.82rem">Parent: ' + esc(st.ParentName) + (st.Mobile ? ' · ' + esc(st.Mobile) : '') + '</div>' : '')
+              : '') +
+        '</div>' +
+        '<div><div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem">Payment details</div>' +
+          (pay ? '<div>Mode: <b>' + esc(pay.Mode) + '</b></div>' +
+                 (pay.Reference ? '<div class="muted" style="font-size:.85rem">Ref: ' + esc(pay.Reference) + '</div>' : '') +
+                 '<div class="muted" style="font-size:.82rem">Received by ' + esc(r.CreatedBy) + '</div>'
+               : '') +
+        '</div>' +
+      '</div>' +
+
+      (inv ?
+        '<div style="margin-bottom:1rem"><div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.35rem">Being payment for ' + esc(inv.MonthLabel) + ' · ' + esc(inv.InvoiceID) + '</div>' +
+        '<table style="width:100%;border-collapse:collapse;font-size:.9rem">' +
+          '<thead><tr style="background:#f1f5fa;color:var(--ink-2);font-size:.78rem"><th style="text-align:left;padding:.4rem .6rem">Subject</th><th style="text-align:right;padding:.4rem .6rem">Standard</th><th style="text-align:right;padding:.4rem .6rem">Discount</th><th style="text-align:right;padding:.4rem .6rem">Final</th>' + (hasAlloc ? '<th style="text-align:right;padding:.4rem .6rem">This payment</th>' : '') + '</tr></thead>' +
+          '<tbody>' + lineRows + '</tbody>' +
+        '</table></div>'
+        : '') +
+
+      '<div style="border-top:2px solid var(--navy);padding-top:.6rem;margin-top:.4rem">' +
+        (inv ? '<div style="display:flex;justify-content:space-between;margin:.15rem 0"><span class="muted">Invoice total</span><span>' + fmt(inv.TotalAmount) + '</span></div>' : '') +
+        '<div style="display:flex;justify-content:space-between;margin:.15rem 0"><span class="muted">Paid today</span><span>' + fmt(r.Amount) + '</span></div>' +
+        (inv ? '<div style="display:flex;justify-content:space-between;margin:.4rem 0 0;padding-top:.35rem;border-top:1px solid var(--line);font-size:1.05rem"><b>Amount received</b><b>' + fmt(r.Amount) + '</b></div>' : '') +
+        (inv ? '<div style="display:flex;justify-content:space-between;margin-top:.4rem"><span class="muted">Invoice balance after this payment</span><span>' + fmt(inv.BalanceAmount) + '</span></div>' : '') +
+      '</div>' +
+
+      (isVoid ? '<div style="margin-top:1rem;padding:.6rem .8rem;background:var(--bad-bg);color:var(--bad);border-radius:8px;font-size:.85rem">' +
+        'Voided on ' + esc(fmtTime(r.VoidDate)) + ' by ' + esc(r.VoidedBy) + '. Reason: ' + esc(r.VoidReason) + '</div>' : '') +
+
+      '<div style="margin-top:2.2rem;display:flex;justify-content:space-between;align-items:flex-end">' +
+        '<div class="muted" style="font-size:.8rem">Thank you.</div>' +
+        '<div style="text-align:center"><div style="border-top:1px solid var(--ink-3);width:180px;padding-top:.35rem" class="muted">Authorised signature</div></div>' +
+      '</div>' +
+    '</div>';
+
+  $('[data-back]', main).addEventListener('click', () => go('receipts'));
+  $('#rc-print').addEventListener('click', () => window.print());
+
+  if (can('FINANCE_EDIT') && !isVoid) {
+    $('#rc-void').addEventListener('click', () => {
+      const reason = prompt('Reason for voiding this receipt?');
+      if (!reason) return;
+      busy($('#rc-void'), async () => {
+        await api('receipts.void', { receiptId: r.ReceiptID, reason: reason });
+        toast('Receipt voided. The invoice balance has been restored.');
+        go('receipt', r.ReceiptID);
+      });
+    });
+  }
+};
+
+/* ---------- teacher income ---------- */
+function tiPill(s) {
+  const k = String(s || '').toUpperCase();
+  const c = k === 'PAID' ? 'ok' : (k === 'PARTIAL' ? 'warn' : '');
+  return '<span class="pill ' + c + '">' + esc(k || '—') + '</span>';
+}
+
+VIEWS.teacherincome = async main => {
+  await loadLookups();
+  const st = VIEWS.teacherincome.state = VIEWS.teacherincome.state || { month: '', teacherId: '' };
+  const cur = new Date().toISOString().slice(0, 7);
+  if (!st.month) st.month = cur;
+  const fmt = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
+
+  main.innerHTML =
+    '<div class="head"><div><h1>Teacher income</h1><p>Monthly pay worked out from active students per teacher and subject.</p></div>' +
+      '<button class="btn primary" id="ti-gen">Generate month</button></div>' +
+    '<div class="toolbar">' +
+      '<input id="ti-month" type="month" value="' + esc(st.month) + '" style="max-width:180px">' +
+      '<select id="ti-teacher"><option value="">All teachers</option>' +
+        L('teachers').map(t => '<option value="' + esc(t.TeacherID) + '"' + (st.teacherId === t.TeacherID ? ' selected' : '') + '>' + esc(t.Name) + '</option>').join('') +
+      '</select>' +
+    '</div>' +
+    '<div id="ti-summary" class="stats"></div><div id="ti-list"></div>';
+
+  const load = async () => {
+    const r = await api('teacherIncome.list', { month: st.month, teacherId: st.teacherId });
+    const t = r.totals;
+    $('#ti-summary').innerHTML =
+      '<div class="card stat"><b>' + t.count + '</b><span>Records</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.payable) + '</b><span>Payable</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.paid) + '</b><span>Paid</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.balance) + '</b><span>Still to pay</span></div>';
+    $('#ti-list').innerHTML = r.rows.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Teacher</th><th>Subject</th><th>Students</th><th>Rate</th><th>Adjust</th><th>Payable</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>' +
+        r.rows.map(x =>
+          '<tr class="click" data-ti="' + esc(x.IncomeID) + '">' +
+          '<td data-l="Teacher"><b>' + esc(x.TeacherName) + '</b></td>' +
+          '<td data-l="Subject">' + esc(x.SubjectName) + '</td>' +
+          '<td data-l="Students">' + x.StudentCount + '</td>' +
+          '<td data-l="Rate">' + fmt(x.RatePerStudent) + '</td>' +
+          '<td data-l="Adjust">' + (x.Adjustment ? (x.Adjustment > 0 ? '+' : '−') + fmt(Math.abs(x.Adjustment)) : '—') + '</td>' +
+          '<td data-l="Payable"><b>' + fmt(x.FinalPayable) + '</b></td>' +
+          '<td data-l="Paid">' + fmt(x.PaidAmount) + '</td>' +
+          '<td data-l="Balance">' + fmt(x.BalanceAmount) + '</td>' +
+          '<td>' + tiPill(x.Status) + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="card empty"><b>No income records for this month</b>Click “Generate month” to work them out.</div>';
+    $$('[data-ti]', main).forEach(tr => tr.addEventListener('click', () => detail(tr.dataset.ti)));
+  };
+
+  const detail = async id => {
+    const d = await api('teacherIncome.get', { incomeId: id });
+    const i = d.income;
+    openDlg(i.TeacherName + ' · ' + i.SubjectName + ' · ' + i.MonthLabel,
+      '<dl class="kv">' +
+        '<dt>Students</dt><dd>' + i.StudentCount + ' × ' + fmt(i.RatePerStudent) + ' = ' + fmt(i.GrossIncome) + '</dd>' +
+        '<dt>Adjustment</dt><dd>' + (i.Adjustment ? fmt(i.Adjustment) + ' · ' + esc(i.AdjustmentReason) : '—') + '</dd>' +
+        '<dt>Payable</dt><dd><b>' + fmt(i.FinalPayable) + '</b></dd>' +
+        '<dt>Paid</dt><dd>' + fmt(i.PaidAmount) + '</dd>' +
+        '<dt>Balance</dt><dd><b>' + fmt(i.BalanceAmount) + '</b> ' + tiPill(i.Status) + '</dd></dl>' +
+      '<div class="section"><h2>Payments</h2>' +
+      (d.payments.length
+        ? '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Mode</th><th>By</th></tr></thead><tbody>' +
+          d.payments.map(p => '<tr><td>' + esc(fmtDate(p.PaymentDate)) + '</td><td>' + fmt(p.Amount) + '</td><td>' + esc(p.PaymentMode) +
+            (p.UPIReference ? ' · <span class="muted">' + esc(p.UPIReference) + '</span>' : '') + '</td><td>' + esc(p.PaidBy) + '</td></tr>').join('') +
+          '</tbody></table></div>'
+        : '<p class="muted">No payments yet.</p>') + '</div>',
+      '<button class="btn" type="button" data-close>Close</button>' +
+      '<button class="btn" id="ti-adj">Adjust</button>' +
+      (i.BalanceAmount > 0 ? '<button class="btn primary" id="ti-pay">Pay teacher</button>' : ''),
+      dlg => {
+        $('#ti-adj', dlg).addEventListener('click', () => adjustDlg(i));
+        const pay = $('#ti-pay', dlg); if (pay) pay.addEventListener('click', () => payDlg(i));
+      });
+  };
+
+  const adjustDlg = i => {
+    openDlg('Adjust ' + i.TeacherName + ' · ' + i.MonthLabel,
+      '<p class="muted" style="margin:0 0 .75rem">Gross is ' + fmt(i.GrossIncome) + '. Use a positive number for a bonus and a negative number for a deduction.</p>' +
+      '<form><label class="f"><span>Adjustment (₹) <em>*</em></span><input name="adj" type="number" step="any" value="' + i.Adjustment + '" required></label>' +
+      '<label class="f"><span>Reason <em>*</em></span><input name="reason" maxlength="200" value="' + esc(i.AdjustmentReason) + '" required></label></form>',
+      '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="adj-save">Save</button>',
+      dlg => $('#adj-save', dlg).addEventListener('click', ev => busy(ev.target, async () => {
+        if (!validForm(dlg)) return;
+        await api('teacherIncome.adjust', { incomeId: i.IncomeID, adjustment: $('[name=adj]', dlg).value, reason: $('[name=reason]', dlg).value.trim() });
+        closeDlg(); toast('Adjustment saved.'); await load();
+      })));
+  };
+
+  const payDlg = i => {
+    const today = new Date().toISOString().slice(0, 10);
+    openDlg('Pay ' + i.TeacherName,
+      '<p class="muted" style="margin:0 0 .75rem">' + esc(i.SubjectName) + ' · ' + esc(i.MonthLabel) + ' · Balance <b>' + fmt(i.BalanceAmount) + '</b></p>' +
+      '<form><div class="grid2">' +
+        '<label class="f"><span>Amount <em>*</em></span><input name="amount" type="number" step="any" min="1" max="' + i.BalanceAmount + '" value="' + i.BalanceAmount + '" required></label>' +
+        '<label class="f"><span>Date</span><input name="date" type="date" value="' + today + '"></label>' +
+        '<label class="f"><span>Mode</span><select name="mode"><option value="CASH">Cash</option><option value="UPI">UPI</option><option value="BANK_TRANSFER">Bank transfer</option><option value="CHEQUE">Cheque</option></select></label>' +
+        '<label class="f" data-ref><span>Reference / UPI ID</span><input name="ref" maxlength="100" autocomplete="off"></label>' +
+      '</div><label class="f"><span>Notes</span><input name="notes" maxlength="500" autocomplete="off"></label></form>',
+      '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="tp-save">Save payment</button>',
+      dlg => {
+        const mode = $('[name=mode]', dlg), ref = $('[data-ref]', dlg);
+        const sync = () => { ref.style.display = mode.value === 'CASH' ? 'none' : ''; };
+        mode.addEventListener('change', sync); sync();
+        $('#tp-save', dlg).addEventListener('click', ev => busy(ev.target, async () => {
+          const amt = Number($('[name=amount]', dlg).value), md = mode.value, rf = $('[name=ref]', dlg).value.trim();
+          if (!amt || amt <= 0) { toast('Enter an amount.', true); return; }
+          if (amt > i.BalanceAmount) { toast('Amount exceeds the balance.', true); return; }
+          if (md !== 'CASH' && !rf) { toast('Please enter the reference.', true); return; }
+          await api('teacherIncome.pay', { incomeId: i.IncomeID, amount: amt, mode: md, reference: rf,
+            paymentDate: $('[name=date]', dlg).value, notes: $('[name=notes]', dlg).value.trim() });
+          closeDlg(); toast('Payment saved.'); await load();
+        }));
+      });
+  };
+
+  $('#ti-month').addEventListener('change', e => { st.month = e.target.value; load().catch(fail); });
+  $('#ti-teacher').addEventListener('change', e => { st.teacherId = e.target.value; load().catch(fail); });
+  $('#ti-gen').addEventListener('click', () => {
+    openDlg('Generate teacher income',
+      '<p>Counts each teacher’s active students per subject for the month and multiplies by the pay rate (the student’s special rate if set, otherwise the teacher’s default).</p>' +
+      '<label class="f"><span>Month</span><input id="gen-m" type="month" value="' + esc(st.month) + '"></label>' +
+      '<p class="muted" style="font-size:.85rem">Records that already have payments are left alone. Unpaid ones are refreshed. Teachers with no pay rate set are skipped.</p>',
+      '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="gen-run">Generate</button>',
+      dlg => $('#gen-run', dlg).addEventListener('click', ev => busy(ev.target, async () => {
+        const m = $('#gen-m', dlg).value;
+        if (!/^\d{4}-\d{2}$/.test(m)) { toast('Pick a valid month.', true); return; }
+        const r = await api('teacherIncome.generate', { month: m });
+        closeDlg();
+        toast(r.created + ' created · ' + r.refreshed + ' refreshed' + (r.skippedLocked ? ' · ' + r.skippedLocked + ' locked' : '') + (r.skippedNoRate ? ' · ' + r.skippedNoRate + ' with no pay rate' : ''));
+        st.month = m; $('#ti-month').value = m; await load();
+      })));
+  });
+
+  await load();
+};
+
+/* ---------- attendance ---------- */
+VIEWS.attendance = async main => {
+  await loadLookups();
+  const localDay = off => new Date(Date.now() - new Date().getTimezoneOffset() * 60000 + off * 86400000).toISOString().slice(0, 10);
+  const st = VIEWS.attendance.state = VIEWS.attendance.state || { from: localDay(-7), to: localDay(0), batchId: '', teacherId: '' };
+  const canFix = can('ATTENDANCE_CORRECT');
+
+  main.innerHTML =
+    '<div class="head"><div><h1>Attendance</h1><p>Class sessions and who attended. ' + (canFix ? 'Click a session to correct marks.' : 'Click a session to see details.') + '</p></div></div>' +
+    '<div class="toolbar">' +
+      '<input id="at-from" type="date" value="' + esc(st.from) + '" title="From">' +
+      '<input id="at-to" type="date" value="' + esc(st.to) + '" title="To">' +
+      '<select id="at-batch"><option value="">All batches</option>' +
+        L('batches').map(b => '<option value="' + esc(b.BatchID) + '"' + (st.batchId === b.BatchID ? ' selected' : '') + '>' + esc(b.BatchName) + '</option>').join('') + '</select>' +
+      '<select id="at-teacher"><option value="">All teachers</option>' +
+        L('teachers').map(t => '<option value="' + esc(t.TeacherID) + '"' + (st.teacherId === t.TeacherID ? ' selected' : '') + '>' + esc(t.Name) + '</option>').join('') + '</select>' +
+    '</div><div id="at-list"></div>';
+
+  const load = async () => {
+    const rows = await api('attendance.sessions', { from: st.from, to: st.to, batchId: st.batchId, teacherId: st.teacherId });
+    $('#at-list').innerHTML = rows.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Date</th><th>Time</th><th>Subject</th><th>Batch</th><th>Teacher</th><th>P</th><th>L</th><th>A</th><th>Status</th></tr></thead><tbody>' +
+        rows.map(r =>
+          '<tr class="click" data-s="' + esc(r.SessionID) + '">' +
+          '<td data-l="Date"><b>' + esc(fmtDate(r.Date)) + '</b></td>' +
+          '<td data-l="Time">' + esc(fmtHM(r.StartTime)) + ' – ' + esc(fmtHM(r.EndTime)) + '</td>' +
+          '<td data-l="Subject">' + esc(r.SubjectName) + '</td><td data-l="Batch">' + esc(r.BatchName) + '</td>' +
+          '<td data-l="Teacher">' + esc(r.TeacherName) + '</td>' +
+          '<td data-l="Present"><b>' + r.Present + '</b></td><td data-l="Late">' + r.Late + '</td><td data-l="Absent">' + r.Absent + '</td>' +
+          '<td>' + (r.Status === 'OPEN' ? '<span class="pill warn">Open</span>' : '<span class="pill">Closed</span>') + '</td></tr>').join('') +
+        '</tbody></table></div>'
+      : '<div class="card empty"><b>No sessions found</b>Try a wider date range.</div>';
+    $$('[data-s]', main).forEach(tr => tr.addEventListener('click', () => detail(tr.dataset.s).catch(fail)));
+  };
+
+  const detail = async sid => {
+    const d = await api('attendance.detail', { sessionId: sid });
+    const s = d.session;
+    const mark = (studentId, name, status) => busy(null, async () => {
+      const reason = prompt('Reason for marking ' + name + ' ' + status + '?');
+      if (!reason || !reason.trim()) return;
+      await api('attendance.correct', { sessionId: sid, studentId: studentId, status: status, reason: reason.trim() });
+      toast('Attendance updated.');
+      await detail(sid); await load();
+    });
+    openDlg(s.SubjectName + ' · ' + s.BatchName,
+      '<p class="muted" style="margin:0 0 .75rem">' + esc(fmtDate(s.Date)) + ' · ' + esc(fmtHM(s.StartTime)) + '–' + esc(fmtHM(s.EndTime)) + ' · ' + esc(s.TeacherName) + (s.RoomName ? ' · ' + esc(s.RoomName) : '') + '</p>' +
+      (d.students.length
+        ? '<div class="tablewrap"><table><thead><tr><th>Student</th><th>Status</th>' + (canFix ? '<th>Correct</th>' : '') + '</tr></thead><tbody>' +
+          d.students.map(x =>
+            '<tr data-sid="' + esc(x.StudentID) + '"><td><b>' + esc(x.Name) + '</b><div class="muted" style="font-size:.82rem">' + esc(x.RollNo || x.StudentID) + '</div></td>' +
+            '<td>' + (x.Status ? pill(x.Status) : '<span class="pill">Not marked</span>') +
+              (x.Method ? '<div class="muted" style="font-size:.78rem">' + esc(String(x.Method).replace(/_/g, ' ').toLowerCase()) + '</div>' : '') + '</td>' +
+            (canFix ? '<td><button class="btn small" data-m="PRESENT">P</button> <button class="btn small" data-m="LATE">L</button> <button class="btn small" data-m="ABSENT">A</button></td>' : '') +
+            '</tr>').join('') + '</tbody></table></div>'
+        : '<div class="card empty"><b>No students on this class</b></div>'),
+      '<button class="btn primary" type="button" data-close>Done</button>',
+      dlg => {
+        if (!canFix) return;
+        $$('[data-sid]', dlg).forEach(row => {
+          const x = d.students.find(z => z.StudentID === row.dataset.sid);
+          $$('[data-m]', row).forEach(b => b.addEventListener('click', () => mark(x.StudentID, x.Name, b.dataset.m)));
+        });
+      });
+  };
+
+  $('#at-from').addEventListener('change', e => { st.from = e.target.value; load().catch(fail); });
+  $('#at-to').addEventListener('change', e => { st.to = e.target.value; load().catch(fail); });
+  $('#at-batch').addEventListener('change', e => { st.batchId = e.target.value; load().catch(fail); });
+  $('#at-teacher').addEventListener('change', e => { st.teacherId = e.target.value; load().catch(fail); });
+  await load();
+};
+
+/* ---------- reports ---------- */
+VIEWS.reports = async (main, tab) => {
+  const localDay = off => new Date(Date.now() - new Date().getTimezoneOffset() * 60000 + off * 86400000).toISOString().slice(0, 10);
+  const st = VIEWS.reports.state = VIEWS.reports.state || { tab: '', from: localDay(-30), to: localDay(0), month: localDay(0).slice(0, 7), threshold: 75 };
+  const fmt = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
+  const tabs = [];
+  if (can('FINANCE_VIEW')) tabs.push(['collection', 'Fee collection'], ['dues', 'Outstanding dues']);
+  if (can('STUDENT_VIEW')) tabs.push(['attendance', 'Attendance']);
+  if (can('TEACHER_INCOME_MANAGE')) tabs.push(['teacherpay', 'Teacher pay']);
+  if (!tabs.length) { main.innerHTML = '<div class="card empty"><b>No reports available</b>Ask the Super Admin for access.</div>'; return; }
+  st.tab = tab || (tabs.some(t => t[0] === st.tab) ? st.tab : tabs[0][0]);
+
+  const dateBar = '<input id="rp-from" type="date" value="' + esc(st.from) + '" title="From"><input id="rp-to" type="date" value="' + esc(st.to) + '" title="To">';
+  const monthBar = '<input id="rp-month" type="month" value="' + esc(st.month) + '" style="max-width:180px">';
+  const bars = {
+    collection: dateBar,
+    dues: '<input id="rp-month" type="month" value="' + esc(st.month) + '" style="max-width:180px" title="Leave empty for all months"><button class="btn" id="rp-allm">All months</button>',
+    attendance: dateBar + '<input id="rp-th" type="number" min="1" max="100" value="' + esc(st.threshold) + '" style="max-width:120px" title="Flag students below this %">',
+    teacherpay: monthBar
+  };
+
+  main.innerHTML = '<div class="head"><div><h1>Reports</h1><p>Read-only summaries of money, dues and attendance.</p></div></div>' +
+    '<div class="tabs" role="tablist">' + tabs.map(t => '<button role="tab" aria-selected="' + (t[0] === st.tab) + '" data-rt="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>' +
+    '<div class="toolbar">' + bars[st.tab] + '</div><div id="rp-out"></div>';
+  $$('[data-rt]', main).forEach(b => b.addEventListener('click', () => go('reports', b.dataset.rt)));
+
+  const out = $('#rp-out');
+  const stat = (v, l) => '<div class="card stat"><b>' + v + '</b><span>' + l + '</span></div>';
+  const table = (head, rows) => '<div class="tablewrap"><table class="stack"><thead><tr>' + head.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+
+  const renderers = {
+    collection: async () => {
+      const r = await api('reports.collection', { from: st.from, to: st.to });
+      out.innerHTML = '<div class="stats">' + stat(fmt(r.total), 'Collected') + stat(r.count, 'Payments') + '</div>' +
+        '<div class="section" style="margin-top:0"><h2>By month</h2>' + (r.months.length ? table(['Month', 'Amount'], r.months.map(m => '<tr><td data-l="Month">' + esc(m.MonthLabel) + '</td><td data-l="Amount"><b>' + fmt(m.Amount) + '</b></td></tr>').join('')) : '<div class="card empty"><b>No payments in this range</b></div>') + '</div>' +
+        '<div class="section"><h2>By payment mode</h2>' + (r.modes.length ? table(['Mode', 'Amount'], r.modes.map(m => '<tr><td data-l="Mode">' + esc(m.Mode) + '</td><td data-l="Amount"><b>' + fmt(m.Amount) + '</b></td></tr>').join('')) : '<p class="muted">—</p>') + '</div>';
+    },
+    dues: async () => {
+      const r = await api('reports.dues', { month: st.month });
+      out.innerHTML = '<div class="stats">' + stat(r.totals.students, 'Students with dues') + stat(fmt(r.totals.balance), 'Outstanding') + stat(fmt(r.totals.overdue), 'Overdue') + '</div>' +
+        (r.rows.length ? table(['Student', 'Class', 'Phone', 'Invoices', 'Unpaid for', 'Oldest due', 'Overdue', 'Balance'],
+          r.rows.map(x => '<tr class="click" data-st="' + esc(x.StudentID) + '"><td data-l="Student"><b>' + esc(x.StudentName) + '</b><div class="muted" style="font-size:.82rem">' + esc(x.StudentID) + '</div></td><td data-l="Class">' + esc(x.CurrentClass) + '</td><td data-l="Phone">' + esc(x.Phone || '—') + '</td><td data-l="Invoices">' + x.Invoices + '</td><td data-l="Unpaid for">' + esc(x.Subjects || '—') + '</td><td data-l="Oldest due">' + esc(fmtDate(x.OldestDue) || '—') + '</td><td data-l="Overdue">' + (x.Overdue ? '<span class="pill bad">' + fmt(x.Overdue) + '</span>' : '—') + '</td><td data-l="Balance"><b>' + fmt(x.Balance) + '</b></td></tr>').join(''))
+          : '<div class="card empty"><b>No dues</b>Everyone is paid up for this selection.</div>');
+      $$('[data-st]', out).forEach(tr => tr.addEventListener('click', () => go('student', tr.dataset.st)));
+    },
+    attendance: async () => {
+      const r = await api('reports.attendance', { from: st.from, to: st.to, threshold: st.threshold });
+      out.innerHTML = '<div class="section" style="margin-top:0"><h2>By batch</h2>' +
+        (r.batches.length ? table(['Batch', 'Records', 'Present', 'Late', 'Absent', 'Attendance'],
+          r.batches.map(b => '<tr><td data-l="Batch"><b>' + esc(b.BatchName) + '</b></td><td data-l="Records">' + b.Sessions + '</td><td data-l="Present">' + b.Present + '</td><td data-l="Late">' + b.Late + '</td><td data-l="Absent">' + b.Absent + '</td><td data-l="Attendance"><div class="row"><b style="min-width:42px">' + b.Pct + '%</b><div class="bar" style="flex:1"><i style="width:' + b.Pct + '%"></i></div></div></td></tr>').join(''))
+          : '<div class="card empty"><b>No attendance in this range</b></div>') + '</div>' +
+        '<div class="section"><h2>Active students below ' + r.threshold + '%</h2>' +
+        (r.lowStudents.length ? table(['Student', 'Class', 'Records', 'Absent', 'Attendance'],
+          r.lowStudents.map(x => '<tr class="click" data-st="' + esc(x.StudentID) + '"><td data-l="Student"><b>' + esc(x.StudentName) + '</b><div class="muted" style="font-size:.82rem">' + esc(x.StudentID) + '</div></td><td data-l="Class">' + esc(x.CurrentClass) + '</td><td data-l="Records">' + x.Sessions + '</td><td data-l="Absent">' + x.Absent + '</td><td data-l="Attendance"><span class="pill bad">' + x.Pct + '%</span></td></tr>').join(''))
+          : '<p class="muted">Nobody is below the line.</p>') + '</div>';
+      $$('[data-st]', out).forEach(tr => tr.addEventListener('click', () => go('student', tr.dataset.st)));
+    },
+    teacherpay: async () => {
+      const r = await api('reports.teacherPay', { month: st.month });
+      out.innerHTML = '<div class="stats">' + stat(fmt(r.totals.payable), 'Payable') + stat(fmt(r.totals.paid), 'Paid') + stat(fmt(r.totals.balance), 'Still to pay') + '</div>' +
+        (r.rows.length ? table(['Teacher', 'Subjects', 'Students', 'Payable', 'Paid', 'Balance'],
+          r.rows.map(x => '<tr><td data-l="Teacher"><b>' + esc(x.TeacherName) + '</b></td><td data-l="Subjects">' + x.Subjects + '</td><td data-l="Students">' + x.Students + '</td><td data-l="Payable">' + fmt(x.Payable) + '</td><td data-l="Paid">' + fmt(x.Paid) + '</td><td data-l="Balance"><b>' + fmt(x.Balance) + '</b></td></tr>').join(''))
+          : '<div class="card empty"><b>No teacher income for this month</b>Generate it first under Teacher income.</div>');
+    }
+  };
+
+  const run = () => renderers[st.tab]().catch(fail);
+  const bind = (id, key, conv) => { const el = $(id); if (el) el.addEventListener('change', e => { st[key] = conv ? conv(e.target.value) : e.target.value; run(); }); };
+  bind('#rp-from', 'from'); bind('#rp-to', 'to'); bind('#rp-month', 'month');
+  bind('#rp-th', 'threshold', v => Math.min(100, Math.max(1, parseInt(v, 10) || 75)));
+  const allm = $('#rp-allm'); if (allm) allm.addEventListener('click', () => { st.month = ''; $('#rp-month').value = ''; run(); });
+  await run();
+};
+
+/* ---------- notices ---------- */
+function audienceLabel_(aud, batchName) {
+  const a = String(aud || 'ALL').toUpperCase();
+  if (a === 'BATCH')     return batchName ? 'Batch · ' + batchName : 'One batch';
+  if (a === 'STUDENTS')  return 'All students';
+  if (a === 'TEACHERS')  return 'Teachers only';
+  return 'Everyone';
+}
+
+VIEWS.notices = async main => {
+  await loadLookups();
+  const edit = can('NOTICE_EDIT');
+  const st = VIEWS.notices.state = VIEWS.notices.state || { filter: 'active' };
+
+  main.innerHTML =
+    '<div class="head"><div><h1>Notices</h1><p>Announcements shown to students and staff</p></div>' +
+      (edit ? '<button class="btn primary" id="nt-add">Post notice</button>' : '') + '</div>' +
+    '<div class="toolbar">' +
+      '<select id="nt-filter">' +
+        '<option value="active"'   + (st.filter === 'active'   ? ' selected' : '') + '>Active only</option>' +
+        '<option value=""'         + (st.filter === ''         ? ' selected' : '') + '>All notices</option>' +
+        '<option value="inactive"' + (st.filter === 'inactive' ? ' selected' : '') + '>Inactive only</option>' +
+        '<option value="expired"'  + (st.filter === 'expired'  ? ' selected' : '') + '>Expired</option>' +
+      '</select>' +
+    '</div>' +
+    '<div id="nt-list"></div>';
+
+  const load = async () => {
+    const rows = await api('notices.adminList');
+    const today = new Date().toISOString().slice(0, 10);
+    const filtered = rows.filter(r => {
+      const isExp = r.ExpiresAt && r.ExpiresAt < today;
+      if (st.filter === 'active')   return String(r.Status).toUpperCase() === 'ACTIVE' && !isExp;
+      if (st.filter === 'inactive') return String(r.Status).toUpperCase() === 'INACTIVE';
+      if (st.filter === 'expired')  return !!isExp;
+      return true;
+    });
+
+    $('#nt-list').innerHTML = filtered.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr>' +
+          '<th>Title</th><th>Audience</th><th>Posted</th><th>Expires</th><th>Status</th><th></th>' +
+        '</tr></thead><tbody>' +
+        filtered.map(r => {
+          const isExp = r.ExpiresAt && r.ExpiresAt < today;
+          const statusPill = isExp ? '<span class="pill warn">Expired</span>' : pill(r.Status);
+          const isActive = String(r.Status).toUpperCase() === 'ACTIVE';
+          return '<tr>' +
+            '<td data-l="Title"><b>' + esc(r.Title) + '</b></td>' +
+            '<td data-l="Audience">' + esc(audienceLabel_(r.Audience, r.BatchName)) + '</td>' +
+            '<td data-l="Posted">' + esc(r.PostedAt ? fmtTime(r.PostedAt) : '—') + '</td>' +
+            '<td data-l="Expires">' + esc(r.ExpiresAt ? fmtDate(r.ExpiresAt) : '—') + '</td>' +
+            '<td>' + statusPill + '</td>' +
+            '<td>' + (edit
+              ? '<button class="btn small" data-edit="' + esc(r.NoticeID) + '">Edit</button> ' +
+                '<button class="btn small ' + (isActive ? 'danger' : '') + '" data-toggle="' + esc(r.NoticeID) + '">' +
+                  (isActive ? 'Deactivate' : 'Activate') + '</button>'
+              : '') + '</td>' +
+          '</tr>';
+        }).join('') +
+      '</tbody></table></div>'
+      : '<div class="card empty"><b>No notices here</b>' +
+        (edit ? 'Use “Post notice” to create one.' : '') + '</div>';
+
+    if (edit) {
+      $$('[data-edit]', main).forEach(b => b.addEventListener('click', () => {
+        noticeDialog(rows.find(x => x.NoticeID === b.dataset.edit));
+      }));
+      $$('[data-toggle]', main).forEach(b => b.addEventListener('click', () => {
+        const r = rows.find(x => x.NoticeID === b.dataset.toggle);
+        const isActive = String(r.Status).toUpperCase() === 'ACTIVE';
+        if (!confirm((isActive ? 'Deactivate' : 'Activate') + ' “' + r.Title + '”?')) return;
+        busy(b, async () => {
+          try {
+            await api('notices.setStatus', { id: r.NoticeID, status: isActive ? 'Inactive' : 'Active' });
+            toast('Saved.'); await load();
+          } catch (e) { fail(e); }
+        });
+      }));
+    }
+  };
+
+  const noticeDialog = (row) => {
+    const isEdit = !!row;
+    const V = (k, def) => esc(row && row[k] != null ? row[k] : (def || ''));
+    const aud = String((row && row.Audience) || 'STUDENTS').toUpperCase();
+    const stat = String((row && row.Status) || 'Active');
+    const formHtml = '<form>' +
+      '<label class="f full"><span>Title <em style="color:var(--bad);font-style:normal">*</em></span>' +
+        '<input name="Title" type="text" maxlength="150" required autocomplete="off" value="' + V('Title', '') + '">' +
+      '</label>' +
+      '<label class="f full"><span>Message <em style="color:var(--bad);font-style:normal">*</em></span>' +
+        '<textarea name="Body" required rows="6" style="width:100%;padding:.55rem .75rem;border:1px solid #c5d1e0;border-radius:8px;font:inherit;min-height:130px">' + V('Body', '') + '</textarea>' +
+      '</label>' +
+      '<div class="grid2">' +
+        '<label class="f"><span>Audience <em style="color:var(--bad);font-style:normal">*</em></span>' +
+          '<select name="Audience" required>' +
+            ['STUDENTS', 'BATCH', 'TEACHERS', 'ALL'].map(a =>
+              '<option value="' + a + '"' + (aud === a ? ' selected' : '') + '>' + esc(audienceLabel_(a, '')) + '</option>'
+            ).join('') +
+          '</select>' +
+        '</label>' +
+        '<label class="f" data-batchwrap><span>Batch</span>' +
+          '<select name="BatchID">' +
+            '<option value="">Choose a batch</option>' +
+            activeOnly('batches').map(b =>
+              '<option value="' + esc(b.BatchID) + '"' + (row && row.BatchID === b.BatchID ? ' selected' : '') + '>' + esc(b.BatchName + ' (' + b.Class + ')') + '</option>'
+            ).join('') +
+          '</select>' +
+        '</label>' +
+        '<label class="f"><span>Expires on</span>' +
+          '<input name="ExpiresAt" type="date" value="' + V('ExpiresAt', '') + '">' +
+          '<small>Leave blank for no expiry.</small>' +
+        '</label>' +
+        '<label class="f"><span>Status</span>' +
+          '<select name="Status" required>' +
+            '<option value="Active"' + (stat === 'Active' ? ' selected' : '') + '>Active</option>' +
+            '<option value="Inactive"' + (stat === 'Inactive' ? ' selected' : '') + '>Inactive</option>' +
+          '</select>' +
+        '</label>' +
+      '</div>' +
+    '</form>';
+
+    openDlg(isEdit ? 'Edit notice' : 'Post notice',
+      formHtml,
+      '<button class="btn" type="button" data-close>Cancel</button>' +
+      '<button class="btn primary" id="nt-save">' + (isEdit ? 'Save changes' : 'Post notice') + '</button>',
+      d => {
+        const audSel = d.querySelector('[name=Audience]');
+        const batchWrap = d.querySelector('[data-batchwrap]');
+        const syncBatch = () => { batchWrap.style.display = (audSel.value === 'BATCH') ? '' : 'none'; };
+        audSel.addEventListener('change', syncBatch);
+        syncBatch();
+
+        $('#nt-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+          if (!validForm(d)) return;
+          const fields = [{ n: 'Title' }, { n: 'Body' }, { n: 'Audience' }, { n: 'BatchID' }, { n: 'ExpiresAt' }, { n: 'Status' }];
+          const data = collect(d, fields);
+          try {
+            if (isEdit) {
+              const ch = changedOnly(data, row);
+              if (!Object.keys(ch).length) { toast('Nothing has changed.'); return; }
+              await api('notices.update', { id: row.NoticeID, changes: ch });
+            } else {
+              await api('notices.add', { item: data });
+            }
+            closeDlg();
+            toast('Saved.');
+            await load();
+          } catch (e) { fail(e); }
+        }));
+      });
+  };
+
+  $('#nt-filter').addEventListener('change', e => { st.filter = e.target.value; load().catch(fail); });
+  if (edit) $('#nt-add').addEventListener('click', () => noticeDialog(null));
+
+  await load();
+};
+
+/* ---------- settings ---------- */
+VIEWS.settings = async main => {
+  const rows = await api('settings.get'), edit = can('SETTINGS_EDIT');
+  await loadLookups();
+  main.innerHTML = '<div class="head"><div><h1>Settings</h1><p>Changes apply straight away. Nothing else needs editing in the code.</p></div>' + (edit ? '<button class="btn primary" id="set-save">Save changes</button>' : '') + '</div>' +
+    '<div class="card"><form id="set-f">' + rows.map(r => '<label class="f"><span>' + esc(r.description || r.key) + '</span><input name="' + esc(r.key) + '" value="' + esc(r.value) + '"' + (edit ? '' : ' readonly') + '><small>' + esc(r.key) +
+      (r.key === 'SUBJECT_BLOCKED_PAIRS' ? ' — subject IDs: ' + L('subjects').map(s => s.SubjectID + ' = ' + s.SubjectName).join(', ') : '') + '</small></label>').join('') + '</form></div>';
+  if (edit) $('#set-save').addEventListener('click', ev => busy(ev.target, async () => {
+    const orig = {}; rows.forEach(r => { orig[r.key] = r.value; });
+    const cur = {}; $$('#set-f input').forEach(i => { cur[i.name] = i.value.trim(); });
+    const ch = changedOnly(cur, orig);
+    if (!Object.keys(ch).length) { toast('Nothing has changed.'); return; }
+    await api('settings.update', { changes: ch }); S.cfg = await api('public.config'); toast('Settings saved.'); go('settings');
+  }));
+};
+
+/* ---------- admin users ---------- */
+VIEWS.users = async main => {
+  const U = await api('users.list'), admins = U.filter(u => u.UserType === 'ADMIN'), others = U.length - admins.length;
+  main.innerHTML = '<div class="head"><div><h1>Admin users</h1><p>' + others + ' student and teacher accounts are managed from their own pages.</p></div><button class="btn primary" id="u-add">Add Accounts Admin</button></div>' +
+    '<div class="tablewrap"><table class="stack"><thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Last sign-in</th><th>Extra access</th><th></th></tr></thead><tbody>' +
+    admins.map(u => { const me = u.UserID === S.user.userId, sup = u.Role === 'SUPER_ADMIN'; return '<tr><td data-l="Username"><b>' + esc(u.Username) + '</b>' + (me ? ' <span class="muted">(you)</span>' : '') + '</td><td data-l="Role">' + (sup ? 'Super Admin' : 'Accounts Admin') + '</td><td>' + pill(u.Status) + '</td><td data-l="Last sign-in">' + esc(u.LastLogin ? fmtTime(u.LastLogin) : 'Never') + '</td><td data-l="Extra access">' + esc(u.ExtraPermissions ? u.ExtraPermissions.split(',').map(p => PERM_LABELS[p] || p).join(', ') : '—') + '</td><td class="row">' +
+      '<button class="btn small" data-rp="' + esc(u.UserID) + '">Reset password</button>' +
+      (sup ? '' : '<button class="btn small" data-pm="' + esc(u.UserID) + '">Access</button>') +
+      (me ? '' : '<button class="btn small ' + (u.Status === 'Active' ? 'danger' : '') + '" data-st="' + esc(u.UserID) + '">' + (u.Status === 'Active' ? 'Disable' : 'Enable') + '</button>') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+  $('#u-add').addEventListener('click', () => openDlg('Add Accounts Admin', '<p class="muted">Accounts Admins handle fees and payments. You can give them more access afterwards.</p><form><label class="f"><span>Username <em>*</em></span><input name="username" required autocomplete="off"></label></form>',
+    '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="ua-save">Create</button>',
+    d => $('#ua-save', d).addEventListener('click', ev => busy(ev.target, async () => { if (!validForm(d)) return;
+      const r = await api('users.createAdmin', { username: $('[name=username]', d).value.trim() }); closeDlg(); credentials('Accounts Admin login', r.username, r.tempPassword); go('users'); }))));
+  $$('[data-rp]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.rp);
+    if (confirm('Make a new temporary password for ' + u.Username + '? They will be signed out.')) busy(b, async () => { const r = await api('users.resetPassword', { userId: u.UserID }); credentials('New temporary password', r.username, r.tempPassword); }); }));
+  $$('[data-st]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.st), to = u.Status === 'Active' ? 'Inactive' : 'Active';
+    if (confirm((to === 'Inactive' ? 'Disable ' : 'Enable ') + u.Username + '?' + (to === 'Inactive' ? ' They will be signed out immediately.' : ''))) busy(b, async () => { await api('users.setStatus', { userId: u.UserID, status: to }); toast(u.Username + (to === 'Inactive' ? ' disabled.' : ' enabled.')); go('users'); }); }));
+  $$('[data-pm]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.pm), have = (u.ExtraPermissions || '').split(',');
+    const base = ['STUDENT_VIEW', 'TEACHER_VIEW', 'MASTER_VIEW', 'SETTINGS_VIEW', 'FINANCE_VIEW', 'FINANCE_EDIT', 'TEACHER_INCOME_MANAGE', 'REPORT_VIEW'];
+    const grantable = Object.keys(PERM_LABELS).filter(p => base.indexOf(p) < 0 && p !== 'USER_MANAGE');
+    openDlg('Extra access for ' + u.Username, '<p class="muted">Accounts Admins can already view students, teachers and settings and handle finance. Tick anything extra they should be able to do. They are signed out so the change applies right away.</p><form>' +
+      grantable.map(p => '<label class="perm"><input type="checkbox" value="' + p + '"' + (have.indexOf(p) >= 0 ? ' checked' : '') + '><span>' + esc(PERM_LABELS[p]) + '</span></label>').join('') + '</form>',
+      '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="pm-save">Save access</button>',
+      d => $('#pm-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+        await api('users.setPermissions', { userId: u.UserID, extraPermissions: $$('input:checked', d).map(i => i.value) }); closeDlg(); toast('Access saved.'); go('users'); })));
+  }));
+};
+
+/* ---------- activity log ---------- */
+VIEWS.logs = async main => {
+  const st = VIEWS.logs.state = VIEWS.logs.state || { action: '' };
+  main.innerHTML = '<div class="head"><div><h1>Activity log</h1><p>The latest 200 actions. Nothing here can be edited or deleted.</p></div></div>' +
+    '<div class="toolbar"><select id="l-a"><option value="">All actions</option>' + ['LOGIN', 'LOGOUT', 'LOGIN_FAILED', 'LOGIN_LOCKED', 'ADD_STUDENT', 'EDIT_STUDENT', 'CHANGE_BATCH', 'CHANGE_TEACHER', 'ADD_TEACHER', 'EDIT_TEACHER', 'RESET_PASSWORD', 'CHANGE_PASSWORD', 'CREATE_ADMIN', 'DISABLE_ADMIN', 'CHANGE_PERMISSIONS', 'CHANGE_SETTING', 'GENERATE_TEACHER_INCOME', 'ADJUST_TEACHER_INCOME', 'PAY_TEACHER', 'CORRECT_ATTENDANCE', 'ADD_PAYMENT', 'VOID_PAYMENT', 'GENERATE_INVOICES', 'REGISTRATION_SUBMITTED', 'APPROVE_REGISTRATION', 'REJECT_REGISTRATION'].map(a => '<option' + (st.action === a ? ' selected' : '') + '>' + a + '</option>').join('') + '</select></div><div id="l-list"></div>';
+  const load = async () => {
+    const r = await api('logs.list', { limit: 200, action: st.action });
+    $('#l-list').innerHTML = r.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Item</th><th>Details</th><th>Result</th></tr></thead><tbody>' +
+      r.map(x => '<tr><td data-l="When">' + esc(fmtTime(x.Timestamp)) + '</td><td data-l="Who">' + esc(x.Username || '—') + '</td><td data-l="Action"><b>' + esc(x.Action) + '</b></td><td data-l="Item">' + esc(x.EntityID) + '</td><td data-l="Details" style="max-width:340px;word-break:break-word">' + esc(String(x.Details).slice(0, 160)) + '</td><td>' + pill(x.Result) + '</td></tr>').join('') + '</tbody></table></div>' :
+      '<div class="card empty"><b>No matching activity</b>Try “All actions”.</div>';
+  };
+  $('#l-a').addEventListener('change', e => { st.action = e.target.value; load().catch(fail); });
+  await load();
+};
+
+/* ---------- live updates ----------
+   The server keeps a "data changed" stamp. Every 30 seconds (while this tab is visible) the page asks for it.
+   If something changed (a payment, a registration, a student marking attendance...) the current page is
+   redrawn quietly. It never redraws while a dialog is open, while you are typing, or just after you clicked. */
+const SYNC = { v: null, l: null, timer: null, busy: false, pending: false, stale: false, lastInput: 0 };
+const SYNC_MS = 30000;
+const NO_LIVE = ['settings', 'student']; // pages with edit forms: tell the user instead of redrawing
+
+['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => { SYNC.lastInput = Date.now(); }, true));
+
+function liveState(text, stale) {
+  const box = $('#live'); if (!box) return;
+  box.classList.toggle('stale', !!stale);
+  $('#live-text').textContent = text;
+}
+const clockNow = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+async function liveRefresh() {
+  const main = $('#main'), y = window.scrollY;
+  main.classList.add('quiet');
+  SYNC.pending = false; SYNC.stale = false;
+  try { await (VIEWS[S.view] || VIEWS.dashboard)(main, S.arg); } catch (e) { fail(e); }
+  window.scrollTo(0, y);
+  liveState('Updated ' + clockNow());
+}
+
+async function applyLive() {
+  const ae = document.activeElement;
+  const typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && $('#main').contains(ae);
+  if ($('#dlg').open || typing || Date.now() - SYNC.lastInput < 4000) { SYNC.pending = true; return; }
+  if (NO_LIVE.indexOf(S.view) >= 0) { SYNC.stale = true; SYNC.pending = false; liveState('New changes · refresh', true); return; }
+  await liveRefresh();
+}
+
+async function syncTick() {
+  if (!S.token || document.hidden || SYNC.busy) return;
+  SYNC.busy = true;
+  try {
+    const prevV = SYNC.v, prevL = SYNC.l;
+    const r = await api('sync.version');
+    const dataChanged = prevV !== null && r.v !== prevV;
+    const logChanged = prevL !== null && r.l !== prevL;
+    const logPage = S.view === 'logs' || S.view === 'users';
+    if (dataChanged) refreshRegBadge();
+    if (dataChanged || (logPage && logChanged) || SYNC.pending) await applyLive();
+    else if (!SYNC.stale) liveState('Updated ' + clockNow());
+  } catch (e) {
+    if (e && SESSION_CODES.indexOf(e.code) >= 0) fail(e); // a dropped connection is ignored; the next check tries again
+  } finally { SYNC.busy = false; }
+}
+
+function startLive() { stopLive(); liveState('Live'); SYNC.timer = setInterval(syncTick, SYNC_MS); }
+function stopLive() { if (SYNC.timer) { clearInterval(SYNC.timer); SYNC.timer = null; } }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token && SYNC.timer) syncTick(); });
+$('#live-btn').addEventListener('click', () => busy($('#live-btn'), () => liveRefresh()));
+
+/* ---------- start ---------- */
+(async function init() {
+  try { const c = await api('public.config'); S.cfg = c; if (window.cmzHero) cmzHero($('#hero-slot'), c.logoUrl);
+    ['#lg-centre', '#nav-centre', '#tb-centre'].forEach(s => { $(s).textContent = c.centreName; });
+    if (c.logoUrl) {
+      const lgLogo = $('#lg-logo'); if (lgLogo) { lgLogo.src = c.logoUrl; }
+      const navLogo = $('#nav-logo'); if (navLogo) navLogo.src = c.logoUrl;
+      const badge = $('#nav-logo-badge'); if (badge) badge.style.display = 'flex';
+    }
+    if (c.tagline) $('#lg-tagline').textContent = c.tagline;
+    document.title = c.centreName + ' · Admin';
+  } catch (e) { /* login still works if config fails */ }
+  let saved = null; try { saved = sessionStorage.getItem('cmz_t'); } catch (e) {}
+  if (saved) {
+    S.token = saved;
+    try { const me = await api('auth.me'); S.user = { userId: me.userId, username: me.username, role: me.role, userType: me.userType, displayName: (me.profile && me.profile.Name) || me.username, mustChangePassword: me.mustChangePassword };
+      if (me.userType !== 'ADMIN') throw { code: 'SESSION_EXPIRED' };
+      S.perms = me.permissions; if (me.mustChangePassword) { show('forcepw'); } else startApp(); return; }
+    catch (e) { S.token = null; try { sessionStorage.removeItem('cmz_t'); } catch (x) {} }
+  }
+  show('login');
+})();
+</script>
+</body>
+</html>
