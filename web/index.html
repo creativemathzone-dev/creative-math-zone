@@ -3,27 +3,71 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0f1b30">
+  <meta name="theme-color" content="#102447">
+  <meta name="description" content="Creative Math Zone student, teacher, and admin portals.">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="icon" href="./icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <script src="./pwa.js" defer></script>
   <title>Creative Math Zone</title>
   <style>
-    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f1b30;color:#fff;font:16px/1.5 'Segoe UI',sans-serif;padding:24px}.wrap{width:min(720px,100%);text-align:center}.logo{font-size:2rem;font-weight:800;color:#f3b11c}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:32px}.cards a{padding:22px;border-radius:14px;background:#fff;color:#18263d;text-decoration:none;font-weight:700}.cards a:hover{outline:3px solid #f3b11c}.note{color:#b8c7dc;margin-top:24px}
+    :root{color-scheme:dark;--navy:#102447;--deep:#0a1830;--gold:#ffc629;--ink:#142746;--muted:#d5e0f1}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;color:white;font:16px/1.55 'Segoe UI',Arial,sans-serif;background:radial-gradient(ellipse at 50% 0%,#244b7a 0%,var(--navy) 44%,var(--deep) 100%);}
+    a{color:inherit}
+    .page{width:min(1120px,100%);min-height:100vh;margin:auto;padding:26px clamp(20px,5vw,64px) 22px;display:flex;flex-direction:column}
+    header{display:flex;align-items:center;gap:14px}
+    .brand-mark{width:58px;height:58px;object-fit:contain;border-radius:50%;background:#fff;box-shadow:0 0 0 3px rgba(255,198,41,.9),0 0 24px rgba(255,198,41,.24)}
+    .brand-name{font-size:1.1rem;font-weight:800;letter-spacing:.01em}.brand-tag{font-size:.82rem;color:#c7d5e8}
+    .hero{flex:1;display:grid;grid-template-columns: minmax(240px,.85fr) minmax(380px,1.15fr);gap:clamp(36px,7vw,90px);align-items:center;padding:54px 0}
+    .intro{text-align:center}
+    .hero-logo{width:clamp(185px,24vw,280px);aspect-ratio:1;object-fit:contain;border-radius:50%;background:#fff;padding:8px;box-shadow:0 0 0 8px rgba(255,198,41,.16),0 18px 65px rgba(0,0,0,.28)}
+    .eyebrow{margin:28px 0 6px;color:var(--gold);font-weight:800;letter-spacing:.12em;text-transform:uppercase;font-size:.78rem}
+    h1{font-size:clamp(2rem,4vw,3.3rem);line-height:1.08;margin:0;letter-spacing:-.035em}
+    .intro p{max-width:400px;margin:16px auto 0;color:var(--muted);font-size:1.05rem}
+    .portals h2{margin:0 0 8px;font-size:1.55rem}
+    .portals>p{margin:0 0 22px;color:var(--muted)}
+    .cards{display:grid;gap:13px}
+    .card{display:grid;grid-template-columns:50px 1fr 28px;align-items:center;gap:15px;padding:17px 19px;border:1px solid rgba(255,255,255,.18);border-radius:17px;text-decoration:none;background:rgba(255,255,255,.08);backdrop-filter:blur(8px);transition:transform .18s,border-color .18s,background .18s}
+    .card:hover,.card:focus-visible{transform:translateY(-2px);border-color:var(--gold);background:rgba(255,255,255,.14);outline:none}
+    .symbol{display:grid;place-items:center;width:48px;height:48px;border-radius:14px;background:#fff;color:var(--ink);font-size:1.4rem}
+    .card strong{display:block;font-size:1.05rem}.card small{display:block;color:#d1dced;margin-top:2px}.arrow{font-size:1.4rem;color:var(--gold)}
+    .install-row{min-height:52px;margin-top:18px}
+    #install-app{padding:12px 17px;border:0;border-radius:12px;background:var(--gold);color:#132440;font:700 1rem 'Segoe UI',Arial,sans-serif;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.16)}
+    #install-app:hover{filter:brightness(1.07)}
+    .install-note{font-size:.88rem;color:#c1d0e5;margin:14px 0 0}
+    footer{display:flex;justify-content:space-between;gap:16px;align-items:center;border-top:1px solid rgba(255,255,255,.14);padding-top:17px;color:#bdcbe0;font-size:.85rem}
+    footer span:last-child{color:#91a6c4}
+    @media(max-width:760px){.page{padding-top:18px}.hero{grid-template-columns:1fr;gap:42px;padding:44px 0}.intro{max-width:500px;margin:auto}.hero-logo{width:150px}.eyebrow{margin-top:20px}.portals{width:min(520px,100%);margin:auto}.portals h2,.portals>p{text-align:center}footer{flex-direction:column;gap:4px;text-align:center}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
   </style>
 </head>
 <body>
-  <main class="wrap">
-    <div class="logo">Creative Math Zone</div>
-    <h1>Choose your portal</h1>
-    <div class="cards">
-      <a href="admin.html">Admin portal</a>
-      <a href="teacher.html">Teacher portal</a>
-      <a href="student.html">Student portal and registration</a>
-    </div>
-    <button id="install-app" type="button" hidden style="margin-top:24px;padding:12px 18px;border:0;border-radius:10px;background:#f3b11c;color:#0f1b30;font:700 1rem 'Segoe UI',sans-serif;cursor:pointer">Install app</button>
-    <p class="note">On Android, open Chrome’s menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
-  </main>
+  <div class="page">
+    <header>
+      <img class="brand-mark" src="./icons/creative-math-zone-logo.png" alt="Creative Math Zone logo">
+      <div><div class="brand-name">Creative Math Zone</div><div class="brand-tag">Learn · Explore · Grow</div></div>
+    </header>
+    <main class="hero">
+      <section class="intro" aria-labelledby="welcome-title">
+        <img class="hero-logo" src="./icons/creative-math-zone-logo.png" alt="Creative Math Zone emblem">
+        <p class="eyebrow">Welcome to</p>
+        <h1 id="welcome-title">Creative Math Zone</h1>
+        <p>A place to learn, teach, and make every step in mathematics count.</p>
+      </section>
+      <section class="portals" aria-labelledby="portal-title">
+        <h2 id="portal-title">Choose your portal</h2>
+        <p>Open the space that’s right for you.</p>
+        <nav class="cards" aria-label="Portals">
+          <a class="card" href="admin.html"><span class="symbol" aria-hidden="true">🛡️</span><span><strong>Admin portal</strong><small>Manage the centre and its records</small></span><span class="arrow" aria-hidden="true">›</span></a>
+          <a class="card" href="teacher.html"><span class="symbol" aria-hidden="true">📘</span><span><strong>Teacher portal</strong><small>Attendance, classes, and student progress</small></span><span class="arrow" aria-hidden="true">›</span></a>
+          <a class="card" href="student.html"><span class="symbol" aria-hidden="true">🎓</span><span><strong>Student portal</strong><small>Sign in or register for classes</small></span><span class="arrow" aria-hidden="true">›</span></a>
+        </nav>
+        <div class="install-row"><button id="install-app" type="button" hidden>Install Creative Math Zone</button></div>
+        <p class="install-note">On Android, use Chrome’s menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
+      </section>
+    </main>
+    <footer><span>© Creative Math Zone</span><span>Student · Teacher · Admin</span></footer>
+  </div>
 </body>
 </html>
