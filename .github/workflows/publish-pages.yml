@@ -27,6 +27,8 @@ jobs:
           mkdir -p _site/web
           cp index.html _site/index.html
           cp web/*.html web/*.js _site/web/
+          cp web/*.webmanifest _site/web/
+          cp -R web/icons _site/web/icons
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

@@ -3,6 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f1b30">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <script src="./pwa.js" defer></script>
   <title>Creative Math Zone</title>
   <style>
     *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f1b30;color:#fff;font:16px/1.5 'Segoe UI',sans-serif;padding:24px}.wrap{width:min(720px,100%);text-align:center}.logo{font-size:2rem;font-weight:800;color:#f3b11c}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:32px}.cards a{padding:22px;border-radius:14px;background:#fff;color:#18263d;text-decoration:none;font-weight:700}.cards a:hover{outline:3px solid #f3b11c}.note{color:#b8c7dc;margin-top:24px}
@@ -17,7 +22,8 @@
       <a href="teacher.html">Teacher portal</a>
       <a href="student.html">Student portal and registration</a>
     </div>
-    <p class="note">The new portals are being prepared. Your existing Apps Script system remains available during the migration.</p>
+    <button id="install-app" type="button" hidden style="margin-top:24px;padding:12px 18px;border:0;border-radius:10px;background:#f3b11c;color:#0f1b30;font:700 1rem 'Segoe UI',sans-serif;cursor:pointer">Install app</button>
+    <p class="note">On Android, open Chrome’s menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
   </main>
 </body>
 </html>
