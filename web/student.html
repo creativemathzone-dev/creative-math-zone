@@ -415,9 +415,10 @@ const esc = v => String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&
 function api(action, payload) {
   const cfg = window.CMZ_CONFIG || {};
   if (!cfg.supabaseUrl || !cfg.supabasePublishableKey || cfg.supabasePublishableKey.includes('PASTE_YOUR_')) return Promise.reject({ code:'SETUP', error:'Open web/config.js and paste the Supabase publishable key from your project settings.' });
+  const headers = { 'Content-Type':'application/json', apikey:cfg.supabasePublishableKey };
+  if (S.token) headers.Authorization = 'Bearer ' + S.token;
   return fetch(cfg.supabaseUrl.replace(/\/$/, '') + '/functions/v1/api', {
-    method:'POST', headers:{ 'Content-Type':'application/json', apikey:cfg.supabasePublishableKey,
-      Authorization:'Bearer ' + (S.token || cfg.supabasePublishableKey) },
+    method:'POST', headers,
     body:JSON.stringify({ action, token:S.token, payload:payload||{} })
   }).then(async res => {
     const r = await res.json();
