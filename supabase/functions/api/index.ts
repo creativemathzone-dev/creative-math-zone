@@ -573,12 +573,22 @@ Deno.serve(async (request) => {
       'student.attendance': 'SELF_VIEW', 'student.updateProfile': 'SELF_VIEW', 'student.enterCode': 'ATTENDANCE_SELF',
       'attendance.sessions': 'STUDENT_VIEW', 'attendance.detail': 'STUDENT_VIEW', 'attendance.correct': 'ATTENDANCE_CORRECT',
       'teacher.income': 'TEACHER_INCOME_VIEW',
+      'teacherIncome.list': 'TEACHER_INCOME_MANAGE', 'teacherIncome.get': 'TEACHER_INCOME_MANAGE',
+      'teacherIncome.adjust': 'TEACHER_INCOME_MANAGE', 'teacherIncome.pay': 'TEACHER_INCOME_MANAGE', 'teacherIncome.generate': 'TEACHER_INCOME_MANAGE',
       'reports.collection': 'REPORT_VIEW', 'reports.dues': 'REPORT_VIEW', 'reports.attendance': 'REPORT_VIEW', 'reports.teacherPay': 'REPORT_VIEW',
+      'sync.version': 'SELF_VIEW',
     }
     const permission = needed[action]
     const granted = permissionsFor(user)
     if (!permission) return response(fail('UNKNOWN_ACTION', 'This action has not been migrated yet.'))
     if (!granted.includes('*') && !granted.includes(permission)) return response(fail('FORBIDDEN', 'You do not have permission to perform this action.'))
+
+    if (action === 'sync.version') {
+      const { data, error } = await admin.from('admin_logs').select('logged_at').order('logged_at', { ascending: false }).limit(1).maybeSingle()
+      if (error) throw error
+      const stamp = data?.logged_at || '0'
+      return response({ ok: true, data: { v: stamp, l: stamp } })
+    }
 
     if (action === 'subjects.list') {
       const { data, error } = await admin.from('subjects').select('*').order('name')
@@ -2251,6 +2261,117 @@ Deno.serve(async (request) => {
       if (!data) throw new ApiFault('NOT_FOUND', 'Student record not found.')
       await logAction(admin, user, 'STUDENT_SELF_EDIT', 'STUDENT', user.linked_id, { changed: Object.keys(changes) })
       return response({ ok: true, data: { changed: Object.keys(row).filter((k) => k !== 'updated_at').map((k) => Object.keys(fields).find((key) => fields[key] === k)) } })
+    }
+
+    if (action.startsWith('teacherIncome.')) {
+      const paidMap = async (incomeIds: string[]) => {
+        if (!incomeIds.length) return new Map<string, number>()
+        const { data, error } = await admin.from('teacher_payments').select('income_id,amount').in('income_id', incomeIds)
+        if (error) throw error
+        const map = new Map<string, number>()
+        for (const p of data || []) if (p.income_id) map.set(p.income_id, (map.get(p.income_id) || 0) + Number(p.amount))
+        return map
+      }
+      if (action === 'teacherIncome.generate') {
+        const month = requireText(payload.month, 'Month', 7, true)
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new ApiFault('BAD_REQUEST', 'Pick a valid month (YYYY-MM).')
+        const monthStart = `${month}-01`, monthEnd = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).toISOString().slice(0, 10)
+        const [{ data: teachers, error: tError }, { data: assignments, error: aError }, { data: students, error: sError }, { data: settings }] = await Promise.all([
+          admin.from('teachers').select('id,default_rate_per_student,status').eq('status', 'Active'),
+          admin.from('student_subjects').select('*').eq('status', 'ACTIVE'), admin.from('students').select('id,status'),
+          admin.from('settings').select('setting_key,value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle(),
+        ])
+        if (tError) throw tError; if (aError) throw aError; if (sError) throw sError
+        const activeStudentIds = new Set((students || []).filter((s) => s.status.toUpperCase() === 'ACTIVE').map((s) => s.id))
+        const teacherById = new Map((teachers || []).map((t) => [t.id, t]))
+        const counts = new Map<string, { teacherId: string; subjectId: string; students: Set<string>; rate: number }>()
+        for (const a of assignments || []) {
+          if (!a.teacher_id || !a.subject_id || !activeStudentIds.has(a.student_id) || !teacherById.has(a.teacher_id)) continue
+          if (a.start_date && a.start_date > monthEnd) continue
+          if (a.end_date && a.end_date < monthStart) continue
+          const key = `${a.teacher_id}|${a.subject_id}`, t = teacherById.get(a.teacher_id)!
+          const g = counts.get(key) || { teacherId: a.teacher_id, subjectId: a.subject_id, students: new Set<string>(), rate: Number(a.teacher_rate_override ?? t.default_rate_per_student) || 0 }
+          g.students.add(a.student_id); counts.set(key, g)
+        }
+        const academicYear = String(settings?.value || `${month.slice(0, 4)}-${Number(month.slice(0, 4)) + 1}`)
+        const [{ data: existing, error: eError }, { data: subjects, error: subError }] = await Promise.all([
+          admin.from('teacher_income').select('*').eq('month', month).eq('academic_year', academicYear), admin.from('subjects').select('id,name'),
+        ])
+        if (eError) throw eError; if (subError) throw subError
+        const oldRows = existing || [], oldByKey = new Map(oldRows.map((r) => [`${r.teacher_id}|${r.subject_id}`, r]))
+        const payments = await paidMap(oldRows.map((r) => r.id)), subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
+        let created = 0, refreshed = 0, skippedLocked = 0, skippedNoRate = 0
+        const rows: Record<string, unknown>[] = []
+        for (const [key, g] of counts) {
+          if (g.rate <= 0) { skippedNoRate++; continue }
+          const studentCount = g.students.size, gross = Math.round(studentCount * g.rate * 100) / 100, old = oldByKey.get(key)
+          if (old && (payments.get(old.id) || 0) > 0) { skippedLocked++; continue }
+          rows.push({ id: old?.id || await newId(admin, 'teacher_income', 'TI-', 5), teacher_id: g.teacherId, subject_id: g.subjectId,
+            month, student_count: studentCount, rate_per_student: g.rate, gross_income: gross,
+            adjustment: old?.adjustment || 0, adjustment_reason: old?.adjustment_reason || '', final_payable: Math.max(0, gross + (Number(old?.adjustment) || 0)),
+            status: 'Pending', academic_year: academicYear })
+          if (old) refreshed++; else created++
+        }
+        for (let i = 0; i < rows.length; i += 200) { const { error } = await admin.from('teacher_income').upsert(rows.slice(i, i + 200), { onConflict: 'teacher_id,subject_id,month,academic_year' }); if (error) throw error }
+        await logAction(admin, user, 'GENERATE_TEACHER_INCOME', 'TEACHER_INCOME', month, { created, refreshed, skippedLocked, skippedNoRate })
+        return response({ ok: true, data: { created, refreshed, skippedLocked, skippedNoRate } })
+      }
+      if (action === 'teacherIncome.list') {
+        const month = requireText(payload.month, 'Month', 7), teacherId = requireText(payload.teacherId, 'Teacher ID', 60)
+        let query = admin.from('teacher_income').select('*').order('month', { ascending: false }).order('teacher_id')
+        if (month) query = query.eq('month', month); if (teacherId) query = query.eq('teacher_id', teacherId)
+        const { data: rows, error } = await query.limit(5000); if (error) throw error
+        const incomeRows = rows || [], ids = incomeRows.map((r) => r.id), paid = await paidMap(ids)
+        const [{ data: teachers }, { data: subjects }] = await Promise.all([admin.from('teachers').select('id,name'), admin.from('subjects').select('id,name')])
+        const tm = new Map((teachers || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name]))
+        let payable = 0, paidTotal = 0
+        const result = incomeRows.map((r) => { const p = paid.get(r.id) || 0, f = Number(r.final_payable) || 0, balance = Math.max(0, f - p); payable += f; paidTotal += p
+          return { IncomeID: r.id, TeacherID: r.teacher_id, TeacherName: tm.get(r.teacher_id) || r.teacher_id, SubjectID: r.subject_id, SubjectName: sm.get(r.subject_id) || r.subject_id,
+            Month: r.month, MonthLabel: monthLabel(r.month), StudentCount: r.student_count, RatePerStudent: r.rate_per_student, GrossIncome: r.gross_income,
+            Adjustment: r.adjustment, AdjustmentReason: r.adjustment_reason, FinalPayable: f, PaidAmount: p, BalanceAmount: balance, Status: balance <= 0 ? 'PAID' : p > 0 ? 'PARTIAL' : 'PENDING' } })
+        return response({ ok: true, data: { rows: result, totals: { count: result.length, payable, paid: paidTotal, balance: Math.max(0, payable - paidTotal) } } })
+      }
+      const incomeId = requireText(payload.incomeId, 'Income ID', 60, true)
+      const { data: income, error: incomeError } = await admin.from('teacher_income').select('*').eq('id', incomeId).maybeSingle()
+      if (incomeError) throw incomeError
+      if (!income) throw new ApiFault('NOT_FOUND', 'Teacher income record not found.')
+      const { data: payRows, error: payError } = await admin.from('teacher_payments').select('*').eq('income_id', incomeId).order('payment_date', { ascending: false })
+      if (payError) throw payError
+      const paid = (payRows || []).reduce((sum, p) => sum + Number(p.amount), 0), balance = Math.max(0, Number(income.final_payable) - paid)
+      if (action === 'teacherIncome.get') {
+        const userIds = [...new Set((payRows || []).map((p) => p.paid_by).filter(Boolean))]
+        const [{ data: teacher }, { data: subject }, { data: users }] = await Promise.all([admin.from('teachers').select('name').eq('id', income.teacher_id).maybeSingle(),
+          admin.from('subjects').select('name').eq('id', income.subject_id).maybeSingle(), userIds.length ? admin.from('app_users').select('id,username').in('id', userIds) : Promise.resolve({ data: [], error: null })])
+        const un = new Map((users || []).map((u) => [u.id, u.username]))
+        return response({ ok: true, data: { income: { IncomeID: income.id, TeacherID: income.teacher_id, TeacherName: teacher?.name || income.teacher_id,
+          SubjectID: income.subject_id, SubjectName: subject?.name || income.subject_id, Month: income.month, MonthLabel: monthLabel(income.month),
+          StudentCount: income.student_count, RatePerStudent: income.rate_per_student, GrossIncome: income.gross_income, Adjustment: income.adjustment,
+          AdjustmentReason: income.adjustment_reason, FinalPayable: income.final_payable, PaidAmount: paid, BalanceAmount: balance, Status: balance <= 0 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'PENDING' },
+          payments: (payRows || []).map((p) => ({ PaymentID: p.id, PaymentDate: p.payment_date, Amount: p.amount, PaymentMode: p.payment_mode, UPIReference: p.upi_reference, PaidBy: un.get(p.paid_by) || '' })) } })
+      }
+      if (action === 'teacherIncome.adjust') {
+        const adjustment = Number(payload.adjustment), reason = requireText(payload.reason, 'Reason', 200, true)
+        if (!Number.isFinite(adjustment) || Math.abs(adjustment) > 10000000) throw new ApiFault('BAD_REQUEST', 'Enter a valid adjustment amount.')
+        if (Number(income.gross_income) + adjustment < paid) throw new ApiFault('BAD_REQUEST', 'The payable amount cannot be less than what has already been paid.')
+        const { error } = await admin.from('teacher_income').update({ adjustment, adjustment_reason: reason, final_payable: Number(income.gross_income) + adjustment,
+          status: paid >= Number(income.gross_income) + adjustment ? 'Paid' : paid > 0 ? 'Partial' : 'Pending' }).eq('id', incomeId)
+        if (error) throw error
+        await logAction(admin, user, 'ADJUST_TEACHER_INCOME', 'TEACHER_INCOME', incomeId, { adjustment, reason })
+        return response({ ok: true, data: { updated: true } })
+      }
+      if (action === 'teacherIncome.pay') {
+        const amount = Math.round(Number(payload.amount) * 100) / 100, mode = requireText(payload.mode, 'Payment mode', 20, true).toUpperCase()
+        const paymentDate = requireText(payload.paymentDate || todayDate(), 'Payment date', 10, true), reference = requireText(payload.reference, 'Reference', 100), notes = requireText(payload.notes, 'Notes', 500)
+        if (!Number.isFinite(amount) || amount <= 0 || amount > balance) throw new ApiFault('BAD_REQUEST', `Enter an amount up to the remaining balance (${balance}).`)
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) throw new ApiFault('BAD_REQUEST', 'Payment date must use yyyy-mm-dd.')
+        if (mode !== 'CASH' && !reference) throw new ApiFault('BAD_REQUEST', 'Please enter the reference.')
+        const { data: paymentId, error } = await admin.rpc('record_teacher_payment', { p_income_id: incomeId, p_payment_date: paymentDate,
+          p_amount: amount, p_payment_mode: mode, p_reference: reference, p_paid_by: user.id, p_notes: notes })
+        if (error) { if (String(error.message).includes('remaining balance')) throw new ApiFault('BAD_REQUEST', 'Payment exceeds the remaining balance. Refresh the page and try again.'); throw error }
+        await logAction(admin, user, 'PAY_TEACHER_INCOME', 'TEACHER_PAYMENT', String(paymentId), { incomeId, amount, mode })
+        return response({ ok: true, data: { PaymentID: paymentId } })
+      }
+      throw new ApiFault('UNKNOWN_ACTION', 'Teacher income action not found.')
     }
 
     if (action === 'teacher.income') {

@@ -14,9 +14,9 @@ The supplied Apps Script has 24 logical data tables and a single action-based AP
 
 ## Database foundation
 
-The initial schema is in [`supabase/migrations/20261013000000_initial_schema.sql`](supabase/migrations/20261013000000_initial_schema.sql). It defines the core relational model and enables row-level security on application data. The server-side action router in `supabase/functions/api/` now covers configuration and authentication, student and teacher records, registrations, master data, timetable and notices, fee structures and student discounts, invoices/payments/receipts, student and teacher portal reads, and core class attendance actions. Finance payment/receipt updates run through database transactions. The Apps Script pages still call `google.script.run`, so they are reference screens and are not yet connected to the Supabase backend.
+The initial schema is in [`supabase/migrations/20261013000000_initial_schema.sql`](supabase/migrations/20261013000000_initial_schema.sql). It defines the core relational model and enables row-level security on application data. The server-side action router in `supabase/functions/api/` covers configuration and authentication, student and teacher records, registrations, master data, timetable and notices, fee structures and discounts, invoices/payments/receipts, teacher income, reports, attendance, and the portal reads. The browser-ready copies are in [`web/`](web/) and call the Supabase Edge Function; the original files in `legacy-appscript/` remain the migration reference. The new pages are not deployed yet.
 
-The first two database migrations (`20261013000000_initial_schema.sql` and `20261013010000_id_counters.sql`) have already been applied to the user's Supabase project. The remaining migrations, including `20261013050000_attendance_constraints.sql`, must be applied in filename order before deploying the latest API. Follow [`docs/bootstrap.md`](docs/bootstrap.md) for beginner-friendly setup steps.
+The first two database migrations (`20261013000000_initial_schema.sql` and `20261013010000_id_counters.sql`) have already been applied to the user's Supabase project. The remaining migrations, including `20261013060000_teacher_payment_transaction.sql`, must be applied in filename order before deploying the latest API. Follow [`docs/bootstrap.md`](docs/bootstrap.md) for beginner-friendly setup steps.
 
 ## Legacy reference
 
@@ -24,10 +24,9 @@ The first two database migrations (`20261013000000_initial_schema.sql` and `2026
 
 ## Next implementation steps
 
-1. Finish remaining admin workflows such as teacher income management and reports.
-2. Port the existing portals off `google.script.run` and connect them to the Supabase API.
-3. Apply the remaining migrations, deploy the Edge Function, and configure a static host.
-4. Exercise the app against a non-production Supabase project.
-5. Prepare and verify a Google Sheets export/import before cutover.
+1. Add the Supabase publishable key to `web/config.js` and apply the remaining SQL migrations in order.
+2. Deploy the `api` Edge Function with its server-side keys, then publish the static `web/` folder.
+3. Check every portal and permission against the empty project, then fix any issues before use.
+4. Prepare and verify a Google Sheets export/import before cutover. Keep the Apps Script site live until the new site and migrated data are ready.
 
 Never put a Supabase secret key in browser code or commit secrets to GitHub.

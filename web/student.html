@@ -1,0 +1,1026 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="config.js"></script>
+<title>Creative Math Zone · Student</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#f6f8fb; --card:#ffffff; --ink:#18263d; --ink-2:#4a5a73; --ink-3:#7b8aa0;
+  --line:#dde5ef; --grid:#dbe7f3; --navy:#16243b; --navy-2:#223654;
+  --pencil:#f3b11c; --pencil-dk:#b97f00; --ok:#1f7a55; --ok-bg:#e3f4ec; --bad:#b3302a; --bad-bg:#fbe9e7; --warn-bg:#fff3d6;
+  --r:10px; --shadow:0 1px 2px rgba(22,36,59,.06),0 4px 14px rgba(22,36,59,.06);
+  --display:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif; --body:'Figtree','Segoe UI',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 var(--body)}
+h1,h2,h3{font-family:var(--display);margin:0;line-height:1.15;letter-spacing:-.01em}
+button,input,select,textarea{font:inherit;color:inherit}
+.hidden{display:none!important}
+:focus-visible{outline:3px solid var(--pencil);outline-offset:2px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;min-height:42px;padding:.55rem 1rem;border-radius:8px;border:1px solid var(--line);background:#fff;font-weight:600;cursor:pointer}
+.btn:hover{border-color:var(--ink-3)}
+.btn.primary{background:var(--navy);border-color:var(--navy);color:#fff}
+.btn.primary:hover{background:var(--navy-2)}
+.btn.small{min-height:34px;padding:.3rem .7rem;font-size:.9rem}
+.btn[disabled]{opacity:.55;cursor:wait}
+.link{background:none;border:0;padding:0;color:var(--navy);font-weight:600;text-decoration:underline;cursor:pointer}
+
+/* sign-in screen */
+#login{min-height:100vh;display:grid;grid-template-columns:1.1fr 1fr}
+.sheet{position:relative;background:#fbfdff;background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:32px 32px;border-right:1px solid var(--line);display:flex;flex-direction:column;justify-content:flex-end;padding:3rem;overflow:hidden}
+.sheet svg{position:absolute;inset:0;width:100%;height:100%}
+.sheet .axis{stroke:var(--navy);stroke-width:2}
+.sheet .curve{fill:none;stroke:var(--pencil);stroke-width:5;stroke-linecap:round;stroke-dasharray:1400;stroke-dashoffset:1400;animation:draw 2.2s .3s ease-out forwards}
+.sheet .dot{fill:var(--navy)}
+@keyframes draw{to{stroke-dashoffset:0}}
+.sheet .tag{position:relative;max-width:22ch;font-family:var(--display);font-weight:700;font-size:clamp(1.8rem,3.2vw,2.8rem);color:var(--navy);background:rgba(251,253,255,.88);padding:.4rem .6rem .5rem 0}
+.sheet .tag small{display:block;font:500 1rem var(--body);color:var(--ink-2);margin-top:.5rem}
+.signin{display:flex;align-items:center;justify-content:center;padding:2rem 1.25rem}
+.signin form{width:100%;max-width:380px}
+.signin h1{font-size:2rem;margin-bottom:.35rem}
+.signin p{color:var(--ink-2);margin:0 0 1.5rem}
+
+.alert{border-radius:8px;padding:.7rem .9rem;margin:0 0 1rem;font-size:.95rem}
+.alert.bad{background:var(--bad-bg);color:var(--bad)}
+.alert.warn{background:var(--warn-bg);color:#6b4c00}
+.alert.ok{background:var(--ok-bg);color:var(--ok)}
+
+/* fields */
+.f{display:block;margin-bottom:1rem}
+.f>span{display:block;font-size:.88rem;font-weight:600;color:var(--ink-2);margin-bottom:.3rem}
+.f input,.f select,.f textarea{width:100%;min-height:44px;padding:.55rem .75rem;border:1px solid #c5d1e0;border-radius:8px;background:#fff}
+.f input:focus,.f select:focus,.f textarea:focus{border-color:var(--navy);outline:3px solid rgba(243,177,28,.45);outline-offset:0}
+.f small{display:block;color:var(--ink-3);font-size:.82rem;margin-top:.25rem}
+.pw{position:relative}
+.pw button{position:absolute;right:6px;top:6px;min-height:32px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 1rem}
+.grid2 .full{grid-column:1/-1}
+
+/* app shell */
+#app{display:grid;grid-template-columns:240px 1fr;min-height:100vh}
+nav.side{background:var(--navy);color:#dbe5f5;padding:1rem .75rem .75rem;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+nav.side .brand{flex-shrink:0}
+nav.side #nav-items{flex:1;overflow-y:auto;overflow-x:hidden;margin-bottom:.5rem;scrollbar-width:thin}
+nav.side #nav-items::-webkit-scrollbar{width:6px}
+nav.side #nav-items::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+nav.side .who{flex-shrink:0}
+nav.side .brand{padding:.25rem .75rem 1.25rem;font-family:var(--display);font-weight:700;font-size:1.2rem;color:#fff;line-height:1.1}
+nav.side .brand small{display:block;font:500 .78rem var(--body);color:#9fb2d0;margin-top:.3rem}
+nav.side .sid{font-family:ui-monospace,Consolas,monospace;font-size:.85rem;background:rgba(255,255,255,.1);padding:.3rem .6rem;border-radius:6px;display:inline-block;margin:0 .75rem 1rem;letter-spacing:.05em}
+nav.side button.item{display:flex;width:100%;align-items:center;gap:.6rem;text-align:left;background:none;border:0;border-left:4px solid transparent;color:inherit;padding:.65rem .75rem;border-radius:0 8px 8px 0;cursor:pointer;font-weight:500}
+nav.side button.item:hover{background:rgba(255,255,255,.07)}
+nav.side button.item[aria-current=page]{background:rgba(255,255,255,.1);border-left-color:var(--pencil);color:#fff;font-weight:600}
+nav.side .who{margin-top:auto;padding:.75rem;border-top:1px solid rgba(255,255,255,.14);font-size:.9rem}
+nav.side .who b{display:block;color:#fff}
+nav.side .who .btn{margin-top:.6rem;width:100%;background:transparent;color:#fff;border-color:rgba(255,255,255,.3)}
+.topbar{display:none}
+main{padding:2rem clamp(1rem,3vw,2.5rem) 4rem;max-width:1200px;width:100%}
+.head{margin-bottom:1.5rem}
+.head h1{font-size:1.9rem}
+.head p{margin:.25rem 0 0;color:var(--ink-2)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:1.25rem}
+.card+.card{margin-top:1rem}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem}
+.stat b{display:block;font:700 2.2rem/1 var(--display);color:var(--navy)}
+.stat span{color:var(--ink-2);font-size:.92rem}
+.ring{display:inline-flex;align-items:center;justify-content:center;width:100px;height:100px;border-radius:50%;background:conic-gradient(var(--navy) calc(var(--p)*1%),#e8eef6 0);position:relative}
+.ring::after{content:'';position:absolute;inset:10px;background:var(--card);border-radius:50%}
+.ring b{position:relative;z-index:1;font:700 1.6rem var(--display);color:var(--navy)}
+.schedule{margin:0;padding:0;list-style:none}
+.schedule li{display:flex;gap:.9rem;padding:.7rem 0;border-bottom:1px solid var(--line);align-items:center}
+.schedule li:last-child{border-bottom:0}
+.schedule .t{font-family:ui-monospace,Consolas,monospace;font-weight:600;color:var(--navy);min-width:120px}
+.schedule .d{flex:1}
+.schedule .d b{display:block}
+.schedule .d span{color:var(--ink-3);font-size:.88rem}
+.pill{display:inline-block;padding:.1rem .6rem;border-radius:99px;font-size:.82rem;font-weight:600;background:#e8eef6;color:var(--ink-2)}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.warn{background:var(--warn-bg);color:#6b4c00}
+.muted{color:var(--ink-3)}
+.empty{padding:2.5rem 1rem;text-align:center;color:var(--ink-2)}
+.empty b{display:block;font:700 1.15rem var(--display);color:var(--ink);margin-bottom:.3rem}
+table{width:100%;border-collapse:collapse;background:#fff}
+th,td{text-align:left;padding:.7rem .85rem;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.85rem;color:var(--ink-2);font-weight:600;background:#f1f5fa}
+.tablewrap{border:1px solid var(--line);border-radius:var(--r);overflow:auto;box-shadow:var(--shadow);background:#fff}
+.tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--line);margin-bottom:1.25rem;overflow:auto}
+.tabs button{background:none;border:0;border-bottom:3px solid transparent;padding:.65rem 1rem;font-weight:600;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.tabs button[aria-selected=true]{color:var(--navy);border-bottom-color:var(--pencil)}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:.35rem 1rem;margin:0}
+.kv dt{color:var(--ink-3);font-size:.9rem}.kv dd{margin:0}
+.section{margin-top:1.75rem}
+.section>h2{font-size:1.15rem;margin-bottom:.75rem}
+.day{padding:.9rem 1.1rem;border-bottom:1px solid var(--line)}
+.day:last-child{border-bottom:0}
+.day h3{font-size:1rem;color:var(--ink-2);margin-bottom:.5rem}
+.day .cls{display:flex;gap:.9rem;padding:.5rem 0;align-items:center;border-top:1px dashed var(--line)}
+.day .cls:first-of-type{border-top:0}
+.day .t{font-family:ui-monospace,Consolas,monospace;font-weight:600;min-width:120px;color:var(--navy)}
+.day .subj{flex:1;font-weight:600}
+.day .meta{color:var(--ink-3);font-size:.88rem}
+
+/* receipts and invoices (print to PDF) */
+#doc-overlay{position:fixed;inset:0;z-index:150;background:var(--paper);overflow:auto;padding:1rem}
+.doc-bar{display:flex;justify-content:space-between;gap:.6rem;max-width:800px;margin:0 auto 1rem}
+#doc-paper{position:relative;max-width:800px;margin:0 auto;padding:1.5rem}
+#doc-paper table{font-size:.9rem}
+#doc-paper .r{text-align:right}
+@media print{
+  html,body{background:#fff!important;overflow:visible!important}
+  body>*:not(#doc-overlay){display:none!important}
+  #doc-overlay{position:static;padding:0;overflow:visible;background:#fff}
+  .doc-bar{display:none!important}
+  #doc-paper{box-shadow:none;border:0;margin:0;max-width:100%;padding:0}
+  @page{margin:8mm}
+}
+
+/* online registration */
+.reg-wrap{max-width:780px;margin:0 auto;padding:2rem 1.25rem 4rem}
+.reg-wrap .card+.card{margin-top:1rem}
+.reg-wrap .card>h2{font-size:1.15rem;margin-bottom:.8rem}
+.checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.5rem}
+.checks label{display:flex;gap:.55rem;align-items:center;padding:.55rem .75rem;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;font-weight:500}
+.checks input{width:18px;height:18px;margin:0}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.reqid{display:inline-block;font:700 1.9rem/1 ui-monospace,Consolas,monospace;letter-spacing:.08em;color:var(--navy);background:#f1f5fa;border:1px dashed #9fb2d0;border-radius:10px;padding:.8rem 1.1rem;margin:.6rem 0}
+
+/* dialog + toast */
+dialog{border:0;border-radius:14px;padding:0;width:min(560px,94vw);max-height:92vh;box-shadow:0 20px 60px rgba(10,20,40,.35)}
+dialog::backdrop{background:rgba(16,28,48,.55)}
+.dlg-h{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.25rem;border-bottom:1px solid var(--line)}
+.dlg-h h2{font-size:1.2rem}
+.dlg-b{padding:1.25rem;overflow:auto;max-height:calc(92vh - 130px)}
+.dlg-f{display:flex;justify-content:flex-end;gap:.6rem;padding:.9rem 1.25rem;border-top:1px solid var(--line);background:#f8fafc}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99;display:flex;flex-direction:column;gap:.5rem;align-items:center;pointer-events:none;width:min(560px,92vw)}
+#toast div{pointer-events:auto;padding:.7rem 1rem;border-radius:9px;background:var(--navy);color:#fff;box-shadow:var(--shadow);font-weight:500}
+#toast div.bad{background:var(--bad)}
+
+@media (max-width:900px){
+  #login{grid-template-columns:1fr}
+  .sheet{min-height:180px;padding:1.5rem;border-right:0;border-bottom:1px solid var(--line)}
+  .sheet .tag{font-size:1.5rem}
+  .sheet .tag small{display:none}
+  #app{grid-template-columns:1fr}
+  nav.side{position:fixed;inset:0 25% 0 0;z-index:40;height:100vh;transform:translateX(-102%);transition:transform .2s}
+  nav.side.open{transform:none}
+  .topbar{display:flex;align-items:center;gap:.75rem;background:var(--navy);color:#fff;padding:.6rem 1rem;position:sticky;top:0;z-index:30}
+  .topbar b{font-family:var(--display)}
+  .topbar button{background:none;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:8px;min-height:38px;padding:0 .8rem;font-weight:600}
+  .grid2{grid-template-columns:1fr}
+  .kv{grid-template-columns:1fr}
+  .head h1{font-size:1.5rem}
+  table.stack thead{display:none}
+  table.stack,table.stack tbody,table.stack tr,table.stack td{display:block;width:100%}
+  table.stack tr{border-bottom:8px solid var(--paper);padding:.4rem 0}
+  table.stack td{border:0;padding:.25rem .85rem}
+  table.stack td[data-l]::before{content:attr(data-l) ": ";color:var(--ink-3);font-size:.85rem}
+}
+@media (prefers-reduced-motion:reduce){.sheet .curve{animation:none;stroke-dashoffset:0}nav.side{transition:none}}
+</style>
+<style>
+/* ===== Creative Math Zone: shared logo + motion (included by every page) ===== */
+@keyframes cmz-spin{to{transform:rotate(360deg)}}
+@keyframes cmz-fade{from{opacity:0}to{opacity:1}}
+@keyframes cmz-enter{from{opacity:0;transform:scale(.2) rotate(-200deg)}to{opacity:1;transform:none}}
+@keyframes cmz-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.2%)}}
+@keyframes cmz-glow{0%,100%{box-shadow:0 0 0 4px rgba(243,177,28,.9),0 0 50px 4px rgba(243,177,28,.35),0 24px 60px rgba(0,0,0,.45)}
+  50%{box-shadow:0 0 0 4px #ffd25a,0 0 90px 14px rgba(243,177,28,.6),0 24px 60px rgba(0,0,0,.45)}}
+@keyframes cmz-glow-sm{0%,100%{box-shadow:0 0 0 2px rgba(243,177,28,.85),0 0 10px rgba(243,177,28,.3)}50%{box-shadow:0 0 0 2px #ffd25a,0 0 20px rgba(243,177,28,.65)}}
+@keyframes cmz-shine{0%,60%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
+@keyframes cmz-tw{0%,100%{opacity:0;transform:scale(.4)}50%{opacity:.95;transform:scale(1.3)}}
+@keyframes cmz-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes cmz-splash-out{to{opacity:0;visibility:hidden}}
+
+/* ---- animated logo with orbiting symbols ---- */
+.cmz-hero{--size:min(58vmin,460px);position:relative;width:var(--size);height:var(--size);flex:none}
+.cmz-logo{position:absolute;inset:19%;border-radius:50%;overflow:hidden;z-index:3;background:#fff;
+  box-shadow:0 0 0 4px rgba(243,177,28,.9),0 0 60px 6px rgba(243,177,28,.45),0 24px 60px rgba(0,0,0,.45);
+  animation:cmz-enter 1.3s cubic-bezier(.2,.9,.25,1.15) both,cmz-float 7s ease-in-out 1.3s infinite,cmz-glow 3.6s ease-in-out 1.3s infinite}
+.cmz-logo img{width:100%;height:100%;display:block;object-fit:cover}
+.cmz-logo::after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.55) 50%,transparent 60%);
+  transform:translateX(-120%);animation:cmz-shine 6s ease-in-out 2.2s infinite}
+.cmz-logo.noimg{background:linear-gradient(135deg,#2a56a8,#2ea88a)}
+.cmz-logo.noimg img{display:none}
+.cmz-logo.noimg::before{content:"CMZ";position:absolute;inset:0;display:grid;place-items:center;color:#fff;font:800 2.6rem/1 'Bricolage Grotesque','Segoe UI',sans-serif;letter-spacing:-.02em}
+.cmz-halo{position:absolute;inset:16%;border-radius:50%;z-index:2;
+  background:conic-gradient(from 0deg,transparent 0 55%,#f3b11c 80%,transparent 100%);
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 4px));
+          mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 4px));
+  animation:cmz-spin 5s linear infinite,cmz-fade 1s .8s both}
+.cmz-orbit{position:absolute;inset:0;z-index:4;animation:cmz-spin var(--t) linear infinite,cmz-fade 1s .9s both}
+.cmz-orbit.rev{animation-direction:reverse,normal}
+.cmz-ring{position:absolute;inset:var(--in);border-radius:50%;border:1px dashed rgba(159,178,208,.28)}
+.cmz-sym{position:absolute;top:50%;left:50%;width:0;height:0;
+  transform:rotate(var(--a)) translateX(calc(var(--size) * var(--r))) rotate(calc(var(--a) * -1))}
+.cmz-sym i{position:absolute;left:0;top:0;display:grid;place-items:center;width:calc(var(--size)*.105);height:calc(var(--size)*.105);
+  margin:calc(var(--size)*-.0525) 0 0 calc(var(--size)*-.0525);
+  font:700 calc(var(--size)*.075)/1 'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;font-style:normal;color:var(--c);
+  text-shadow:0 0 14px color-mix(in srgb,var(--c) 70%,transparent);
+  animation:cmz-spin var(--t) linear infinite reverse}
+.cmz-orbit.rev .cmz-sym i{animation-direction:normal}
+.cmz-tw{position:absolute;width:6px;height:6px;border-radius:50%;background:#f3b11c;z-index:1;opacity:0;animation:cmz-tw 3.2s ease-in-out infinite}
+
+/* ---- sign-in pages: dark panel with the animated logo ---- */
+.sheet{background-color:#0f1b30;
+  background-image:radial-gradient(circle at 50% 42%,rgba(243,177,28,.2),transparent 56%),linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px);
+  background-size:auto,32px 32px,32px 32px;border-right:0}
+.sheet .tag{color:#fff;background:transparent}
+.sheet .tag small{color:#9fb2d0}
+.cmz-hero-slot{position:absolute;left:0;right:0;top:0;bottom:130px;display:grid;place-items:center}
+.sheet .cmz-hero{--size:min(50vmin,440px)}
+#lg-logo{display:none!important}
+
+/* ---- inside the portals ---- */
+main>*{animation:cmz-rise .5s cubic-bezier(.2,.8,.2,1) both}
+main>*:nth-child(2){animation-delay:.05s}main>*:nth-child(3){animation-delay:.1s}
+main>*:nth-child(4){animation-delay:.15s}main>*:nth-child(n+5){animation-delay:.2s}
+nav.side .brand .logo-badge{animation:cmz-glow-sm 4s ease-in-out infinite}
+nav.side .brand img#nav-logo{border-radius:50%!important;background:#fff;animation:cmz-glow-sm 4s ease-in-out infinite}
+nav.side button.item{transition:background .15s,padding-left .15s}
+nav.side button.item:hover{padding-left:1rem}
+.btn{transition:transform .12s,border-color .15s,background .15s}
+.btn:active{transform:scale(.97)}
+.card.stat{transition:transform .18s,box-shadow .18s}
+.card.stat:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(22,36,59,.08),0 12px 26px rgba(22,36,59,.12)}
+
+/* ---- loader + welcome splash ---- */
+.cmz-loader{display:grid;place-items:center;padding:4rem 0}
+.cmz-loader i{width:44px;height:44px;border-radius:50%;border:4px solid #e8eef6;border-top-color:#f3b11c;animation:cmz-spin .8s linear infinite}
+#cmz-splash{position:fixed;inset:0;z-index:300;display:grid;place-items:center;text-align:center;color:#fff;cursor:pointer;
+  background:radial-gradient(circle at 50% 45%,#1d3558,#0f1b30 70%);animation:cmz-splash-out .45s ease 1.25s forwards}
+#cmz-splash p{margin:1.2rem 0 0;font:700 1.5rem/1.2 'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;animation:cmz-fade .6s .5s both}
+#cmz-splash .cmz-logo{position:relative;inset:auto;width:132px;height:132px;margin:0 auto}
+
+@media (max-width:900px){
+  .sheet{min-height:270px;padding:1rem}
+  .sheet .tag{display:none}
+  .cmz-hero-slot{bottom:0}
+  .sheet .cmz-hero{--size:min(62vw,236px)}
+}
+@media print{main>*{animation:none!important}}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}
+  .cmz-orbit,.cmz-sym i,.cmz-halo{animation:none!important}
+}
+</style>
+<script>
+/* Builds the animated logo inside el. logoUrl may be empty (shows initials). */
+var CMZ_ORBITS = [
+  { t: 46, inset: '7%',  rev: false, r: .405, off: 0,  syms: [['π', '#f3b11c'], ['∞', '#52e0a1'], ['Σ', '#ff7aa8'], ['√', '#7ba7f5'], ['∫', '#ffd25a']] },
+  { t: 70, inset: '-1%', rev: true,  r: .5,   off: 36, syms: [['÷', '#ffffff'], ['θ', '#7ba7f5'], ['%', '#f3b11c'], ['≈', '#52e0a1'], ['x²', '#ff7aa8']] }
+];
+var CMZ_SPARKS = [[6, 30, .2], [14, 84, 1.1], [72, 92, 2], [90, 62, .7], [80, 8, 1.7], [34, 2, 2.4]];
+
+function cmzHero(el, logoUrl) {
+  if (!el) return;
+  var h = '<div class="cmz-hero" role="img" aria-label="Creative Math Zone logo"><div class="cmz-halo"></div>';
+  CMZ_ORBITS.forEach(function (o) {
+    h += '<div class="cmz-orbit' + (o.rev ? ' rev' : '') + '" style="--t:' + o.t + 's;--in:' + o.inset + '"><div class="cmz-ring"></div>';
+    o.syms.forEach(function (s, i) {
+      var a = o.off + i * 360 / o.syms.length;
+      h += '<div class="cmz-sym" style="--a:' + a + 'deg;--r:' + o.r + ';--c:' + s[1] + ';--t:' + o.t + 's"><i>' + s[0] + '</i></div>';
+    });
+    h += '</div>';
+  });
+  h += '<div class="cmz-logo"><img alt="" draggable="false"></div>';
+  CMZ_SPARKS.forEach(function (p) { h += '<span class="cmz-tw" style="top:' + p[0] + '%;left:' + p[1] + '%;animation-delay:' + p[2] + 's"></span>'; });
+  h += '</div>';
+  el.innerHTML = h;
+  cmzLogoImg(el.querySelector('.cmz-logo'), logoUrl);
+}
+
+function cmzLogoImg(box, url) {
+  var img = box.querySelector('img');
+  if (!url) { box.classList.add('noimg'); return; }
+  img.onerror = function () { box.classList.add('noimg'); };
+  img.src = url;
+}
+
+/* Short welcome screen after a fresh sign-in. Tap to skip. */
+function cmzSplash(name, logoUrl) {
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var d = document.createElement('div');
+  d.id = 'cmz-splash';
+  d.innerHTML = '<div><div class="cmz-logo"><img alt=""></div><p></p></div>';
+  d.querySelector('p').textContent = 'Welcome' + (name ? ', ' + name : '');
+  cmzLogoImg(d.querySelector('.cmz-logo'), logoUrl);
+  d.addEventListener('click', function () { d.remove(); });
+  document.body.appendChild(d);
+  setTimeout(function () { if (d.parentNode) d.remove(); }, 1900);
+}
+
+/* Counts the big numbers on a freshly drawn page up from zero. */
+function cmzAnimate(root) {
+  if (!root || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+  root.querySelectorAll('.stat b').forEach(function (b) {
+    if (b.children.length) return;
+    var raw = b.textContent.trim();
+    var m = /^(₹)?(-?[\d,]+(?:\.\d+)?)(%?)$/.exec(raw);
+    if (!m) return;
+    var target = parseFloat(m[2].replace(/,/g, ''));
+    if (!isFinite(target) || target === 0 || target > 1e9) return;
+    var dec = (m[2].split('.')[1] || '').length, grouped = !!m[1] || raw.indexOf(',') >= 0;
+    var fmt = function (n) {
+      var s = grouped ? n.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec }) : n.toFixed(dec);
+      return (m[1] || '') + s + m[3];
+    };
+    var t0 = performance.now(), dur = 700;
+    var step = function (now) {
+      var k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      if (k < 1) { b.textContent = fmt(target * e); requestAnimationFrame(step); } else { b.textContent = raw; }
+    };
+    b.textContent = fmt(0);
+    requestAnimationFrame(step);
+  });
+}
+
+/* If the page config is slow or fails, still show the hero (with initials). */
+document.addEventListener('DOMContentLoaded', function () {
+  setTimeout(function () { var s = document.getElementById('hero-slot'); if (s && !s.firstChild) cmzHero(s, ''); }, 4000);
+});
+</script>
+
+</head>
+<body>
+
+<!-- ===== LOGIN ===== -->
+<section id="login" class="hidden">
+  <div class="sheet" aria-hidden="true">
+    <div class="cmz-hero-slot" id="hero-slot"></div>
+    <div class="tag"><span id="lg-tagline">Eat Math, Drink Math, Dream Math</span><small id="lg-centre">Creative Math Zone</small></div>
+  </div>
+  <div class="signin">
+    <form id="login-form" autocomplete="on" novalidate>
+      <img id="lg-logo" alt="" style="width:96px;height:96px;object-fit:contain;margin:0 auto .75rem;display:block">
+      <h1>Student sign in</h1>
+      <p id="lg-sub">Use the Student ID and password given to you by the centre.</p>
+      <div id="lg-msg"></div>
+      <label class="f"><span>Student ID</span><input name="username" autocomplete="username" required autocapitalize="characters" spellcheck="false" placeholder="CMZ-2026-001" style="text-transform:uppercase"></label>
+      <label class="f"><span>Password</span>
+        <div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" class="btn small" data-show="password">Show</button></div>
+      </label>
+      <button class="btn primary" style="width:100%" id="lg-btn">Sign in</button>
+      <p style="text-align:center;margin-top:1rem" class="muted" id="lg-foot"></p>
+      <p style="text-align:center;margin:.25rem 0 0" class="muted"><span id="lg-reg-wrap" class="hidden">New student? <button type="button" class="link" id="go-register">Register here</button> · </span><button type="button" class="link" id="go-status">Check request status</button></p>
+    </form>
+  </div>
+</section>
+
+<!-- ===== ONLINE REGISTRATION (public) ===== -->
+<section id="register" class="hidden"><div class="reg-wrap" id="reg-body"></div></section>
+
+<!-- ===== FORCE PASSWORD ===== -->
+<section id="forcepw" class="hidden">
+  <div class="signin" style="min-height:100vh">
+    <form id="pw-form" style="max-width:400px;width:100%">
+      <h1 style="font-size:1.8rem;margin-bottom:.4rem">Choose your new password</h1>
+      <p class="muted" style="margin:0 0 1.25rem">You are using a temporary password. Set your own before continuing.</p>
+      <div id="pw-msg"></div>
+      <label class="f"><span>Temporary password</span><input name="oldPassword" type="password" autocomplete="current-password" required></label>
+      <label class="f"><span>New password</span><input name="newPassword" type="password" autocomplete="new-password" required minlength="8"><small>At least 8 characters.</small></label>
+      <label class="f"><span>Type it again</span><input name="again" type="password" autocomplete="new-password" required></label>
+      <button class="btn primary" style="width:100%" id="pw-btn">Save and continue</button>
+      <p style="text-align:center"><button type="button" class="link" id="pw-out">Sign out</button></p>
+    </form>
+  </div>
+</section>
+
+<!-- ===== APP ===== -->
+<div id="app" class="hidden">
+  <div class="topbar"><button id="menu-btn" aria-label="Open menu">Menu</button><b id="tb-centre">Creative Math Zone</b></div>
+  <nav class="side" id="side" aria-label="Main">
+    <div class="brand"><img id="nav-logo" alt="" style="display:none;width:42px;height:42px;object-fit:contain;margin-bottom:.4rem;border-radius:6px"><span id="nav-centre">Creative Math Zone</span><small>Student</small></div>
+    <div><span class="sid" id="nav-sid">—</span></div>
+    <div id="nav-items"></div>
+    <div class="who"><b id="who-name"></b><span id="who-class" class="muted"></span><button class="btn small" id="logout">Sign out</button></div>
+  </nav>
+  <main id="main" tabindex="-1"></main>
+</div>
+
+<dialog id="dlg"></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const S = { token:null, user:null, cfg:{}, view:'dashboard' };
+const $ = (s,r) => (r||document).querySelector(s);
+const $$ = (s,r) => Array.from((r||document).querySelectorAll(s));
+const esc = v => String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function api(action, payload) {
+  const cfg = window.CMZ_CONFIG || {};
+  if (!cfg.supabaseUrl || !cfg.supabasePublishableKey || cfg.supabasePublishableKey.includes('PASTE_YOUR_')) return Promise.reject({ code:'SETUP', error:'Open web/config.js and paste the Supabase publishable key from your project settings.' });
+  return fetch(cfg.supabaseUrl.replace(/\/$/, '') + '/functions/v1/api', {
+    method:'POST', headers:{ 'Content-Type':'application/json', apikey:cfg.supabasePublishableKey,
+      Authorization:'Bearer ' + (S.token || cfg.supabasePublishableKey) },
+    body:JSON.stringify({ action, token:S.token, payload:payload||{} })
+  }).then(async res => {
+    const r = await res.json();
+    if (!res.ok || !r || !r.ok) throw r || { code:'HTTP', error:'The server could not complete this request.' };
+    return r.data;
+  }).catch(e => { if (e && e.code) throw e; throw { code:'NETWORK', error:'Could not reach Supabase. Check your internet and project settings.' }; });
+}
+const SESSION_CODES = ['SESSION_EXPIRED','SESSION_REVOKED','AUTH_REQUIRED'];
+function fail(e) {
+  if (e && SESSION_CODES.indexOf(e.code) >= 0) { signedOut(e.error); return; }
+  if (e && e.code === 'PASSWORD_CHANGE_REQUIRED') { show('forcepw'); return; }
+  toast((e && e.error) || 'Something went wrong.', true);
+}
+async function busy(btn, fn) { if (btn) btn.disabled=true; try { return await fn(); } catch(e){ fail(e);} finally { if (btn) btn.disabled=false; } }
+/* Retries when the server is briefly busy (many students at once). Safe: the server never marks a student twice. */
+async function apiRetry(action, payload, onWait) {
+  const pause = ms => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; ; i++) {
+    try { return await api(action, payload); }
+    catch (e) {
+      if (i >= 3 || !e || ['BUSY', 'NETWORK', 'SERVER_ERROR'].indexOf(e.code) < 0) throw e;
+      if (onWait) onWait(i + 1);
+      await pause(1000 + Math.random() * 2000);
+    }
+  }
+}
+
+function toast(msg, bad) { const d = document.createElement('div'); if (bad) d.className='bad'; d.textContent=msg; $('#toast').appendChild(d); setTimeout(()=>d.remove(), bad?6500:3500); }
+function show(which) { ['login','register','forcepw','app'].forEach(id => $('#'+id).classList.toggle('hidden', id!==which)); if (which==='login') $('#login-form').elements.username.focus(); }
+function fmtDate(s){ return /^\d{4}-\d{2}-\d{2}/.test(s||'') ? s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4) : (s||''); }
+function fmtTime(s){ return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s||'') ? fmtDate(s)+' '+s.slice(11,16) : fmtDate(s); }
+function fmtDay(s){ return /^\d{4}-\d{2}-\d{2}$/.test(s||'') ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(s+'T00:00:00').getDay()] : ''; }
+function fmtHM(hhmm){ if (!/^\d{2}:\d{2}/.test(hhmm||'')) return hhmm||''; const h=+hhmm.slice(0,2), m=hhmm.slice(3,5); return ((h%12)||12)+':'+m+' '+(h<12?'AM':'PM'); }
+function pill(s){ const k=String(s).toUpperCase(); const c=['ACTIVE','PRESENT','COMPLETED'].indexOf(k)>=0?'ok':(['ABSENT','INACTIVE','LEFT','SUSPENDED','ENDED'].indexOf(k)>=0?'bad':'warn'); return '<span class="pill '+c+'">'+esc(s||'—')+'</span>'; }
+
+function openDlg(title, body, footer, mount) {
+  const d=$('#dlg');
+  d.innerHTML='<div class="dlg-h"><h2>'+esc(title)+'</h2><button class="btn small" data-close>Close</button></div><div class="dlg-b">'+body+'</div>'+(footer?'<div class="dlg-f">'+footer+'</div>':'');
+  if(!d.open) d.showModal(); if(mount) mount(d); return d;
+}
+function closeDlg(){ const d=$('#dlg'); if(d.open) d.close(); }
+document.addEventListener('click', ev => {
+  const sh = ev.target.closest('[data-show]');
+  if (sh) { const i = sh.parentElement.querySelector('input'); i.type = i.type==='password'?'text':'password'; sh.textContent = i.type==='password'?'Show':'Hide'; }
+  if (ev.target.closest('[data-close]')) closeDlg();
+});
+
+/* ---- sign in/out ---- */
+function signedOut(msg) {
+  S.token=null; S.user=null; try { sessionStorage.removeItem('cmz_st'); } catch(e){}
+  closeDlg(); show('login');
+  $('#lg-msg').innerHTML = msg ? '<div class="alert warn">'+esc(msg)+'</div>' : '';
+}
+function afterAuth(user, token) {
+  S.token=token; S.user=user;
+  try { sessionStorage.setItem('cmz_st', token); } catch(e){}
+  if (user.mustChangePassword) { show('forcepw'); $('#pw-form').reset(); $('#pw-msg').innerHTML=''; return; }
+  startApp();
+}
+function startApp() {
+  $('#who-name').textContent = S.user.displayName;
+  $('#who-class').textContent = (S.user.profile && S.user.profile.CurrentClass ? 'Class '+S.user.profile.CurrentClass : '');
+  $('#nav-sid').textContent = S.user.linkedId;
+  buildNav(); show('app'); go('dashboard');
+}
+$('#login-form').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const f=ev.target, btn=$('#lg-btn');
+  const u=f.elements.username.value.trim(), p=f.elements.password.value;
+  if (!u || !p) { $('#lg-msg').innerHTML='<div class="alert bad">Enter your Student ID and password.</div>'; return; }
+  btn.disabled=true; btn.textContent='Signing in…'; $('#lg-msg').innerHTML='';
+  try {
+    const r = await api('auth.login', { username:u, password:p, portal:'STUDENT' });
+    f.elements.password.value='';
+    if (window.cmzSplash && !r.user.mustChangePassword) cmzSplash(r.user.displayName, S.cfg.logoUrl); afterAuth(r.user, r.token);
+  } catch (e) { $('#lg-msg').innerHTML='<div class="alert bad">'+esc(e.error||'Could not sign in.')+'</div>'; }
+  finally { btn.disabled=false; btn.textContent='Sign in'; }
+});
+$('#pw-form').addEventListener('submit', async ev => {
+  ev.preventDefault(); const f=ev.target.elements, btn=$('#pw-btn');
+  if (f.newPassword.value !== f.again.value) { $('#pw-msg').innerHTML='<div class="alert bad">The two new passwords do not match.</div>'; return; }
+  btn.disabled=true; $('#pw-msg').innerHTML='';
+  try {
+    const r = await api('auth.changePassword', { oldPassword:f.oldPassword.value, newPassword:f.newPassword.value });
+    S.token=r.token; try { sessionStorage.setItem('cmz_st', r.token); } catch(e){}
+    S.user.mustChangePassword=false; startApp(); toast('Password changed.');
+  } catch (e) {
+    if (SESSION_CODES.indexOf(e.code)>=0) signedOut(e.error); else $('#pw-msg').innerHTML='<div class="alert bad">'+esc(e.error)+'</div>';
+  } finally { btn.disabled=false; }
+});
+async function doLogout() { try { await api('auth.logout'); } catch(e){} signedOut('You have signed out.'); }
+$('#logout').addEventListener('click', doLogout);
+$('#pw-out').addEventListener('click', doLogout);
+
+/* ---- nav ---- */
+const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['subjects','Subjects'],['attendance','Attendance'],['fees','Fees'],['notices','Notices'],['profile','Profile']];
+function buildNav(){ $('#nav-items').innerHTML = NAV.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join(''); }
+function go(view){ S.view=view; $('#side').classList.remove('open');
+  $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
+  const main=$('#main'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
+  (VIEWS[view] || VIEWS.dashboard)(main).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(fail); window.scrollTo(0,0);
+}
+$('#nav-items').addEventListener('click', ev => { const b=ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
+$('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open'));
+
+const VIEWS = {};
+
+/* ---- dashboard ---- */
+VIEWS.dashboard = async main => {
+  const d = await api('student.dashboard');
+  const st = d.student, s = d.stats;
+  const classesHtml = d.todayClasses.length ? '<ul class="schedule">' + d.todayClasses.map(c =>
+    '<li><span class="t">'+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</span><div class="d"><b>'+esc(c.SubjectName)+'</b><span>'+esc(c.TeacherName)+(c.RoomName?' · '+esc(c.RoomName):'')+'</span></div></li>'
+  ).join('') + '</ul>' : '<div class="empty"><b>No classes today</b>Enjoy the break.</div>';
+
+  const noticesHtml = d.recentNotices.length ? d.recentNotices.map(n =>
+    '<div style="padding:.6rem 0;border-bottom:1px solid var(--line)"><b>'+esc(n.Title)+'</b><div class="muted" style="font-size:.85rem">'+esc(fmtTime(n.PostedAt))+'</div><div style="margin-top:.3rem">'+esc(String(n.Body||'').slice(0,180))+'</div></div>'
+  ).join('') + '<p style="margin-top:.75rem"><button class="link" data-go="notices">See all notices →</button></p>' : '<div class="empty"><b>No notices yet</b>Announcements from the centre will appear here.</div>';
+
+  main.innerHTML =
+    '<div class="head"><h1>Welcome, '+esc(st.Name)+'</h1><p>'+esc(st.StudentID)+' · Class '+esc(st.CurrentClass)+' · '+esc(batchLabel(st.CurrentBatch))+'</p></div>' +
+
+    '<div class="stats">' +
+      '<div class="card stat" style="display:flex;gap:1rem;align-items:center"><div class="ring" style="--p:'+s.attendancePct+'"><b>'+s.attendancePct+'%</b></div><div><b style="font:700 1.1rem var(--display);color:var(--navy)">Attendance</b><span class="muted" style="font-size:.85rem">last 30 days</span></div></div>' +
+      '<div class="card stat"><b>'+s.activeSubjects+'</b><span>Subjects you take</span></div>' +
+      '<div class="card stat"><b>'+s.present+'</b><span>Present last 30 days</span></div>' +
+      '<div class="card stat"><b>'+s.absent+'</b><span>Absent last 30 days</span></div>' +
+    '</div>' +
+
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Today\'s classes</h2>'+classesHtml+'</div>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Latest notices</h2>'+noticesHtml+'</div>';
+  main.addEventListener('click', ev => { const b = ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
+};
+
+function batchLabel(id) { return id ? id : 'No batch'; }
+
+/* ---- timetable ---- */
+VIEWS.timetable = async main => {
+  const rows = await api('student.timetable');
+  if (!rows.length) {
+    main.innerHTML = '<div class="head"><h1>Timetable</h1></div><div class="card empty"><b>No timetable yet</b>Your class schedule will appear here once it is published.</div>';
+    return;
+  }
+  const order = ['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'];
+  const byDay = {};
+  rows.forEach(r => { (byDay[r.Day] = byDay[r.Day] || []).push(r); });
+  Object.keys(byDay).forEach(d => byDay[d].sort((a,b) => String(a.StartTime).localeCompare(String(b.StartTime))));
+  main.innerHTML = '<div class="head"><h1>Timetable</h1><p>Your weekly schedule</p></div>' +
+    '<div class="card">' + order.filter(d => byDay[d]).map(d =>
+      '<div class="day"><h3>'+esc(d.charAt(0)+d.slice(1).toLowerCase())+'</h3>' +
+      byDay[d].map(c => '<div class="cls"><span class="t">'+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</span><span class="subj">'+esc(c.SubjectName)+'</span><span class="meta">'+esc(c.TeacherName)+(c.RoomName?' · '+esc(c.RoomName):'')+'</span></div>').join('') +
+      '</div>'
+    ).join('') + '</div>';
+};
+
+/* ---- subjects ---- */
+VIEWS.subjects = async main => {
+  const rows = await api('student.subjects');
+  const active = rows.filter(r => String(r.Status).toUpperCase()==='ACTIVE');
+  const ended  = rows.filter(r => String(r.Status).toUpperCase()!=='ACTIVE');
+  main.innerHTML = '<div class="head"><h1>Subjects</h1><p>'+active.length+' active'+(ended.length?' · '+ended.length+' past':'')+'</p></div>' +
+    (active.length ? '<div class="card"><h2 style="font-size:1.1rem;margin-bottom:.6rem">Currently taking</h2>' +
+      active.map(r => '<div style="padding:.7rem 0;border-bottom:1px solid var(--line)"><b>'+esc(r.SubjectName)+'</b><div class="muted" style="font-size:.88rem">'+esc(r.TeacherName)+' · '+esc(r.BatchName)+' · since '+esc(fmtDate(r.StartDate))+'</div></div>').join('') + '</div>' : '') +
+    (ended.length ? '<div class="card"><h2 style="font-size:1.1rem;margin-bottom:.6rem">Past</h2>' +
+      ended.map(r => '<div style="padding:.7rem 0;border-bottom:1px solid var(--line)"><b>'+esc(r.SubjectName)+'</b> '+pill(r.Status)+'<div class="muted" style="font-size:.88rem">'+esc(r.TeacherName)+' · '+esc(r.BatchName)+' · '+esc(fmtDate(r.StartDate))+' → '+esc(fmtDate(r.EndDate))+'</div></div>').join('') + '</div>' : '') +
+    (!rows.length ? '<div class="card empty"><b>No subjects yet</b>Talk to the centre office if you think this is wrong.</div>' : '');
+};
+
+/* ---- attendance ---- */
+VIEWS.attendance = async main => {
+  const st = VIEWS.attendance.state = VIEWS.attendance.state || { days: 60 };
+  main.innerHTML = '<div class="head"><h1>Attendance</h1><p id="att-sub"></p></div>' +
+    '<div class="card" style="margin-bottom:1rem">' +
+      '<h2 style="font-size:1.15rem;margin-bottom:.4rem">Enter attendance code</h2>' +
+      '<p class="muted" style="margin:0 0 .8rem">When your teacher starts a class, they will show a 4-digit code. Type it here to mark yourself present.</p>' +
+      '<form id="code-f" style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end">' +
+        '<label class="f" style="flex:1;min-width:160px;margin:0"><span>4-digit code</span>' +
+          '<input name="code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="0000" autocomplete="off" style="font:700 1.5rem ui-monospace,Consolas,monospace;letter-spacing:.35em;text-align:center">' +
+        '</label>' +
+        '<button class="btn primary" id="code-btn" type="submit">Mark present</button>' +
+      '</form>' +
+      '<div id="code-msg" style="margin-top:.6rem"></div>' +
+    '</div>' +
+    '<div class="toolbar" style="margin-bottom:1rem"><select id="att-days"><option value="30">Last 30 days</option><option value="60">Last 60 days</option><option value="90">Last 90 days</option><option value="180">Last 180 days</option><option value="365">Last 1 year</option></select></div>' +
+    '<div id="att-summary" class="stats"></div><div id="att-list"></div>';
+
+  $('#att-days').value = String(st.days);
+
+  const load = async () => {
+    const r = await api('student.attendance', { days: st.days });
+    const s = r.summary;
+    $('#att-sub').textContent = s.total + ' sessions since ' + fmtDate(r.from);
+    $('#att-summary').innerHTML =
+      '<div class="card stat"><b>'+s.pct+'%</b><span>Attendance %</span></div>' +
+      '<div class="card stat"><b>'+s.present+'</b><span>Present</span></div>' +
+      '<div class="card stat"><b>'+s.late+'</b><span>Late</span></div>' +
+      '<div class="card stat"><b>'+s.absent+'</b><span>Absent</span></div>';
+    $('#att-list').innerHTML = r.rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Date</th><th>Subject</th><th>Batch</th><th>Status</th><th>Marked</th></tr></thead><tbody>' +
+      r.rows.map(x => '<tr><td data-l="Date">'+esc(fmtDate(x.Date))+' <span class="muted">('+esc(fmtDay(x.Date))+')</span></td><td data-l="Subject">'+esc(x.SubjectName)+'</td><td data-l="Batch">'+esc(x.BatchName)+'</td><td>'+pill(x.Status)+'</td><td data-l="Marked">'+esc(x.MarkedAt?fmtTime(x.MarkedAt):'—')+'</td></tr>').join('') + '</tbody></table></div>' :
+      '<div class="card empty"><b>No attendance records yet</b>Once classes start and you mark attendance, they will show here.</div>';
+  };
+
+  $('#att-days').addEventListener('change', e => { st.days = +e.target.value; load().catch(fail); });
+
+  $('#code-f').addEventListener('submit', ev => {
+    ev.preventDefault();
+    const btn = $('#code-btn'), codeEl = ev.target.elements.code;
+    const code = codeEl.value.trim();
+    if (!/^\d{4}$/.test(code)) { $('#code-msg').innerHTML = '<div class="alert bad">Enter all four digits.</div>'; return; }
+    btn.disabled = true; btn.textContent = 'Checking…'; $('#code-msg').innerHTML = '';
+    apiRetry('student.enterCode', { code: code }, () => { btn.textContent = 'Still trying…'; }).then(res => {
+      $('#code-msg').innerHTML = '<div class="alert ok"><b>' + (res.alreadyMarked ? 'Already marked' : 'Marked ' + res.status.toLowerCase()) + '</b> — ' + esc(res.subjectName) + ' at ' + esc(fmtTime(res.markedAt)) + '</div>';
+      codeEl.value = '';
+      return load();
+    }).catch(e => {
+      $('#code-msg').innerHTML = '<div class="alert bad">' + esc(e.error || 'Could not mark attendance.') + '</div>';
+    }).finally(() => { btn.disabled = false; btn.textContent = 'Mark present'; });
+  });
+
+  await load();
+};
+
+/* ---- fees ---- */
+VIEWS.fees = async main => {
+  const d = await api('student.invoices');
+  const fmt = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
+  const stPill = s => {
+    const k = String(s || '').toUpperCase();
+    const c = k === 'PAID' ? 'ok' : (k === 'OVERDUE' ? 'bad' : 'warn');
+    return '<span class="pill ' + c + '">' + esc(k) + '</span>';
+  };
+  const t = d.totals;
+  const recent = [].concat.apply([], d.rows.map(r => r.Payments.map(p => Object.assign({ MonthLabel: r.MonthLabel }, p))))
+    .sort((a, b) => String(b.PaymentDate).localeCompare(String(a.PaymentDate)) || String(b.ReceiptID).localeCompare(String(a.ReceiptID)))
+    .slice(0, 5);
+  const recentHtml = recent.length
+    ? '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.2rem">Recent payments</h2>' +
+      '<p class="muted" style="font-size:.85rem;margin:0 0 .5rem">Download the receipt for any payment you have made.</p>' +
+      recent.map(p => '<div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;padding:.65rem 0;border-top:1px solid var(--line)">' +
+        '<div style="flex:1;min-width:200px"><b>' + fmt(p.Amount) + '</b> <span class="muted">· ' + esc(fmtDate(p.PaymentDate)) + ' · ' + esc(p.MonthLabel) + '</span>' +
+        '<div class="muted" style="font-size:.85rem">' + esc((p.Allocations || []).map(a => a.subjectName).join(', ') || 'All subjects') + ' · ' + esc(p.ReceiptID) + '</div></div>' +
+        '<button class="btn small primary" data-rcpt-doc="' + esc(p.ReceiptID) + '">Download receipt</button></div>').join('') + '</div>'
+    : '';
+  main.innerHTML = '<div class="head"><h1>Fees</h1><p>Your monthly bills and payments</p></div>' +
+    '<div class="stats">' +
+      '<div class="card stat"><b>' + fmt(t.balance) + '</b><span>Balance to pay</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.overdue) + '</b><span>Overdue</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.paid) + '</b><span>Paid so far</span></div>' +
+    '</div>' + recentHtml +
+    (d.rows.length ? d.rows.map(r =>
+      '<div class="card"><div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:center">' +
+        '<div><h2 style="font-size:1.15rem">' + esc(r.MonthLabel) + '</h2><span class="muted" style="font-size:.85rem">' + esc(r.InvoiceID) + ' · due ' + esc(fmtDate(r.DueDate)) + '</span></div>' +
+        '<div style="text-align:right">' + stPill(r.Status) + '<div style="margin-top:.2rem"><b>' + fmt(r.BalanceAmount) + '</b> <span class="muted">of ' + fmt(r.TotalAmount) + ' due</span></div></div>' +
+      '</div>' +
+      '<div style="margin-top:.8rem"><button class="btn small primary" data-inv-doc="' + esc(r.InvoiceID) + '">Download invoice</button></div><details style="margin-top:.6rem"><summary style="cursor:pointer;font-weight:600;color:var(--navy)">Details</summary>' +
+        '<div class="tablewrap" style="margin-top:.6rem"><table><thead><tr><th>Subject</th><th>Standard</th><th>Discount</th><th>Fee</th><th>Paid</th><th>Balance</th><th>Copy</th></tr></thead><tbody>' +
+        r.Lines.map(l => '<tr><td>' + esc(l.subjectName) + '</td><td>' + fmt(l.standardAmount) + '</td><td>' + (l.discountAmount ? '−' + fmt(l.discountAmount) : '—') + '</td><td><b>' + fmt(l.finalAmount) + '</b></td><td>' + fmt(l.paidAmount) + '</td><td>' + (l.balanceAmount ? '<b>' + fmt(l.balanceAmount) + '</b>' : '<span class="pill ok">Paid</span>') + '</td><td><button class="btn small" data-inv-doc="' + esc(r.InvoiceID) + '" data-sub="' + esc(l.subjectId) + '">Download</button></td></tr>').join('') +
+        '</tbody></table></div>' +
+        (r.Payments.length
+          ? '<div class="tablewrap" style="margin-top:.6rem"><table><thead><tr><th>Paid on</th><th>Amount</th><th>Mode</th><th>Receipt</th><th>For</th></tr></thead><tbody>' +
+            r.Payments.map(p => '<tr><td>' + esc(fmtDate(p.PaymentDate)) + '</td><td>' + fmt(p.Amount) + '</td><td>' + esc(p.PaymentMode) + '</td><td>' + esc(p.ReceiptID) + ' <button class="btn small" data-rcpt-doc="' + esc(p.ReceiptID) + '">Download</button></td><td>' + esc((p.Allocations || []).map(a => a.subjectName + ' ' + fmt(a.amount)).join(', ') || 'All subjects') + '</td></tr>').join('') +
+            '</tbody></table></div>'
+          : '<p class="muted" style="margin:.6rem 0 0">No payments yet.</p>') +
+      '</details></div>'
+    ).join('') : '<div class="card empty"><b>No bills yet</b>Your monthly bills will appear here once the centre generates them.</div>');
+};
+
+/* ---- notices ---- */
+VIEWS.notices = async main => {
+  const rows = await api('notices.list');
+  main.innerHTML = '<div class="head"><h1>Notices</h1><p>Announcements from Creative Math Zone</p></div>' +
+    (rows.length ? '<div class="card">' + rows.map(n =>
+      '<div style="padding:.8rem 0;border-bottom:1px solid var(--line)"><b>'+esc(n.Title)+'</b> '+pill(n.Audience||'ALL')+'<div class="muted" style="font-size:.85rem">'+esc(fmtTime(n.PostedAt))+(n.ExpiresAt?' · expires '+esc(fmtDate(n.ExpiresAt)):'')+'</div><div style="margin-top:.4rem;white-space:pre-wrap">'+esc(n.Body||'')+'</div></div>'
+    ).join('') + '</div>' : '<div class="card empty"><b>No notices yet</b>Announcements will appear here.</div>');
+};
+
+/* ---- profile ---- */
+const EDITABLE = ['Mobile','Email','Address','ParentName','ParentMobile','ParentWhatsApp','ParentEmail'];
+VIEWS.profile = async main => {
+  const me = await api('auth.me');
+  const p = me.profile || {};
+  const rows = (p) => Object.keys(p).map(k => '<dt>'+esc(k)+'</dt><dd>'+esc(p[k]||'—')+'</dd>').join('');
+  main.innerHTML = '<div class="head"><h1>Profile</h1><p>Keep your contact details up to date.</p></div>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Student information</h2>' +
+    '<dl class="kv">'+
+      '<dt>Student ID</dt><dd><b>'+esc(p.StudentID||'')+'</b></dd>' +
+      '<dt>Name</dt><dd>'+esc(p.Name||'')+'</dd>' +
+      '<dt>Class</dt><dd>'+esc(p.CurrentClass||'')+'</dd>' +
+      '<dt>Batch</dt><dd>'+esc(batchLabel(p.CurrentBatch))+'</dd>' +
+      '<dt>Date of birth</dt><dd>'+esc(fmtDate(p.DOB)||'—')+'</dd>' +
+      '<dt>Gender</dt><dd>'+esc(p.Gender||'—')+'</dd>' +
+      '<dt>School</dt><dd>'+esc(p.School||'—')+'</dd>' +
+      '<dt>Board</dt><dd>'+esc(p.Board||'—')+'</dd>' +
+      '<dt>Registered</dt><dd>'+esc(fmtDate(p.RegistrationDate)||'—')+'</dd>' +
+    '</dl></div>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Contact details you can edit</h2>' +
+    '<form id="prof-f"><div class="grid2">' +
+      fieldHtml({n:'Mobile',l:'Your mobile',type:'tel'}, p.Mobile) +
+      fieldHtml({n:'Email',l:'Your email',type:'email'}, p.Email) +
+      fieldHtml({n:'Address',l:'Address',full:1}, p.Address) +
+      fieldHtml({n:'ParentName',l:'Parent / guardian'}, p.ParentName) +
+      fieldHtml({n:'ParentMobile',l:'Parent mobile',type:'tel'}, p.ParentMobile) +
+      fieldHtml({n:'ParentWhatsApp',l:'Parent WhatsApp',type:'tel'}, p.ParentWhatsApp) +
+      fieldHtml({n:'ParentEmail',l:'Parent email',type:'email',full:1}, p.ParentEmail) +
+    '</div><button class="btn primary" id="prof-save">Save changes</button></form></div>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Change your password</h2>' +
+    '<form id="pw2-f"><div class="grid2">' +
+      '<label class="f full"><span>Current password</span><input name="old" type="password" required></label>' +
+      '<label class="f"><span>New password</span><input name="n1" type="password" required><small>At least 6 characters.</small></label>' +
+      '<label class="f"><span>Confirm new password</span><input name="n2" type="password" required></label>' +
+    '</div><button class="btn" id="pw2-btn">Update password</button></form></div>';
+
+  $('#prof-save').addEventListener('click', ev => busy(ev.target, async () => {
+    const f=ev.target.form; const changes={};
+    EDITABLE.forEach(k => { const el=$('[name='+k+']', f); if (el) changes[k]=el.value.trim(); });
+    const orig = {}; EDITABLE.forEach(k => orig[k]=p[k]||'');
+    const diff = {}; Object.keys(changes).forEach(k => { if (String(changes[k])!==String(orig[k])) diff[k]=changes[k]; });
+    if (!Object.keys(diff).length) { toast('Nothing has changed.'); return; }
+    await api('student.updateProfile', { changes: diff });
+    toast('Profile updated.'); go('profile');
+  }));
+  $('#pw2-f').addEventListener('submit', ev => { ev.preventDefault(); busy($('#pw2-btn'), async () => {
+    const f=ev.target.elements;
+    if (f.n1.value !== f.n2.value) { toast('The two new passwords do not match.', true); return; }
+    const r = await api('auth.changePassword', { oldPassword:f.old.value, newPassword:f.n1.value });
+    S.token=r.token; try { sessionStorage.setItem('cmz_st', r.token); } catch(e){}
+    toast('Password changed.'); ev.target.reset();
+  }); });
+};
+
+function fieldHtml(f, val) {
+  const v = val==null?'':val, req = f.req ? ' <em style="color:var(--bad);font-style:normal">*</em>' : '';
+  const t = f.type||'text';
+  return '<label class="f '+(f.full?'full':'')+'"><span>'+esc(f.l)+req+'</span><input name="'+f.n+'" type="'+t+'" value="'+esc(v)+'"'+(f.req?' required':'')+' autocomplete="off">'+(f.hint?'<small>'+esc(f.hint)+'</small>':'')+'</label>';
+}
+
+/* ---- downloadable receipt and invoice (Print / Save as PDF) ---- */
+const money = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
+
+function docHead(c) {
+  const logo = S.cfg && S.cfg.logoUrl ? '<img src="' + esc(S.cfg.logoUrl) + '" alt="" style="height:64px;width:64px;object-fit:cover;border-radius:50%;margin-bottom:.4rem">' : '';
+  return '<div style="text-align:center;border-bottom:2px solid var(--navy);padding-bottom:.75rem;margin-bottom:1rem">' + logo +
+    '<div style="font:700 1.6rem/1.1 var(--display);color:var(--navy);letter-spacing:-.02em">' + esc(c.name) + '</div>' +
+    (c.tagline ? '<div class="muted" style="font-style:italic;margin-top:.15rem">' + esc(c.tagline) + '</div>' : '') +
+    (c.address ? '<div class="muted" style="font-size:.85rem;margin-top:.35rem">' + esc(c.address) + '</div>' : '') +
+    '<div class="muted" style="font-size:.82rem">' + [c.mobile, c.email, c.website].filter(Boolean).map(x => esc(x)).join(' · ') + '</div></div>';
+}
+function docShell(inner) {
+  let o = $('#doc-overlay');
+  if (!o) { o = document.createElement('div'); o.id = 'doc-overlay'; document.body.appendChild(o); }
+  o.innerHTML = '<div class="doc-bar"><button class="btn" data-doc-close>← Back</button><button class="btn primary" data-doc-print>Print / Save as PDF</button></div>' +
+    '<div id="doc-paper" class="card">' + inner + '</div>';
+  o.scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+}
+function closeDoc() { const o = $('#doc-overlay'); if (o) o.remove(); document.body.style.overflow = ''; }
+
+function showReceiptDoc(d) {
+  const r = d.receipt, pay = d.payment, inv = d.invoice, st = d.student, c = d.centre;
+  const lines = inv ? inv.LineItems : [];
+  const allocs = (pay && pay.Allocations) || [];
+  const rows = allocs.length
+    ? allocs.map(a => { const l = lines.find(x => x.subjectId === a.subjectId) || {};
+        return '<tr><td>' + esc(a.subjectName || l.subjectName || '') + '</td><td class="r">' + money(l.finalAmount) + '</td><td class="r"><b>' + money(a.amount) + '</b></td></tr>'; }).join('')
+    : '<tr><td>Fees for the month</td><td class="r">' + money(inv ? inv.TotalAmount : r.Amount) + '</td><td class="r"><b>' + money(r.Amount) + '</b></td></tr>';
+  docShell(docHead(c) +
+    '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1rem">' +
+      '<div><div style="font:700 1.3rem/1 var(--display);letter-spacing:.05em;color:var(--navy)">RECEIPT</div><div class="muted" style="font-size:.85rem;margin-top:.15rem">' + esc(r.ReceiptID) + '</div></div>' +
+      '<div style="text-align:right"><div class="muted" style="font-size:.82rem">Date</div><div><b>' + esc(fmtDate(r.ReceiptDate)) + '</b></div></div></div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">' +
+      '<div><div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem">Received from</div>' +
+        (st ? '<div><b>' + esc(st.Name) + '</b></div><div class="muted" style="font-size:.85rem">' + esc(st.StudentID) + ' · Class ' + esc(st.CurrentClass) + '</div>' +
+              (st.ParentName ? '<div class="muted" style="font-size:.82rem">Parent: ' + esc(st.ParentName) + '</div>' : '') : '') + '</div>' +
+      '<div><div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem">Payment details</div>' +
+        (pay ? '<div>Mode: <b>' + esc(String(pay.Mode || '').replace('_', ' ')) + '</b></div>' + (pay.Reference ? '<div class="muted" style="font-size:.85rem">Ref: ' + esc(pay.Reference) + '</div>' : '') : '') + '</div></div>' +
+    (inv ? '<div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.35rem">Payment for ' + esc(inv.MonthLabel) + ' · ' + esc(inv.InvoiceID) + '</div>' : '') +
+    '<table><thead><tr><th>Subject</th><th class="r">Fee</th><th class="r">Paid now</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<div style="border-top:2px solid var(--navy);padding-top:.6rem;margin-top:1rem">' +
+      '<div style="display:flex;justify-content:space-between;font-size:1.1rem"><b>Amount received</b><b>' + money(r.Amount) + '</b></div>' +
+      (inv ? '<div style="display:flex;justify-content:space-between;margin-top:.4rem"><span class="muted">Invoice total</span><span>' + money(inv.TotalAmount) + '</span></div>' +
+             '<div style="display:flex;justify-content:space-between;margin-top:.2rem"><span class="muted">Invoice balance today</span><span>' + money(inv.BalanceAmount) + '</span></div>' : '') +
+    '</div>' +
+    '<p class="muted" style="margin:1.6rem 0 0;font-size:.8rem">Thank you. This is a computer-generated receipt.</p>');
+}
+
+function showInvoiceDoc(d, subjectId) {
+  const inv = d.invoice, st = d.student, c = d.centre;
+  const lines = subjectId ? d.lines.filter(l => l.subjectId === subjectId) : d.lines;
+  if (!lines.length) { toast('That subject is not on this invoice.', true); return; }
+  const sum = k => lines.reduce((s, l) => s + (Number(l[k]) || 0), 0);
+  const fee = sum('finalAmount'), paid = sum('paidAmount'), bal = Math.max(0, fee - paid);
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const overdue = inv.DueDate && inv.DueDate < today;
+  const lineStatus = l => l.balanceAmount <= 0 ? '<span class="pill ok">PAID</span>' : (overdue ? '<span class="pill bad">OVERDUE</span>' : (l.paidAmount > 0 ? '<span class="pill warn">PART PAID</span>' : '<span class="pill warn">DUE</span>'));
+  const pays = d.payments.map(p => {
+    const mine = subjectId ? (p.Allocations || []).filter(a => a.subjectId === subjectId) : (p.Allocations || []);
+    if (subjectId && !mine.length) return null;
+    const amt = subjectId ? mine.reduce((s, a) => s + a.amount, 0) : p.Amount;
+    return '<tr><td>' + esc(fmtDate(p.PaymentDate)) + '</td><td>' + esc(p.ReceiptID) + '</td><td>' + esc(String(p.PaymentMode || '').replace('_', ' ')) + '</td><td>' +
+      esc(mine.map(a => a.subjectName).join(', ') || 'All subjects') + '</td><td class="r"><b>' + money(amt) + '</b></td></tr>';
+  }).filter(Boolean);
+  const only = subjectId ? lines[0].subjectName : '';
+  docShell(docHead(c) +
+    (bal <= 0 ? '<div style="position:absolute;top:40%;left:50%;transform:translate(-50%,-50%) rotate(-20deg);font:900 5rem/1 var(--display);color:rgba(31,122,85,.15);border:6px solid rgba(31,122,85,.15);padding:.1em .3em;border-radius:12px;pointer-events:none;user-select:none">PAID</div>' : '') +
+    '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1rem">' +
+      '<div><div style="font:700 1.3rem/1 var(--display);letter-spacing:.05em;color:var(--navy)">INVOICE</div><div class="muted" style="font-size:.85rem;margin-top:.15rem">' + esc(inv.InvoiceID) + ' · ' + esc(inv.MonthLabel) + '</div>' +
+        (only ? '<div style="margin-top:.35rem"><span class="pill">Copy for ' + esc(only) + ' only</span></div>' : '') + '</div>' +
+      '<div style="text-align:right"><div class="muted" style="font-size:.82rem">Due date</div><div><b>' + esc(fmtDate(inv.DueDate)) + '</b></div></div></div>' +
+    (st ? '<div style="margin-bottom:1rem"><div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem">Billed to</div><div><b>' + esc(st.Name) + '</b></div>' +
+          '<div class="muted" style="font-size:.85rem">' + esc(st.StudentID) + ' · Class ' + esc(st.CurrentClass) + (st.ParentName ? ' · Parent: ' + esc(st.ParentName) : '') + '</div></div>' : '') +
+    '<table><thead><tr><th>Subject</th><th class="r">Standard</th><th class="r">Discount</th><th class="r">Fee</th><th class="r">Paid</th><th class="r">Balance</th><th>Status</th></tr></thead><tbody>' +
+    lines.map(l => '<tr><td>' + esc(l.subjectName) + '</td><td class="r">' + money(l.standardAmount) + '</td><td class="r">' + (l.discountAmount ? '−' + money(l.discountAmount) : '—') +
+      '</td><td class="r"><b>' + money(l.finalAmount) + '</b></td><td class="r">' + money(l.paidAmount) + '</td><td class="r"><b>' + money(l.balanceAmount) + '</b></td><td>' + lineStatus(l) + '</td></tr>').join('') +
+    '<tr><td colspan="3" class="r"><b>Total</b></td><td class="r"><b>' + money(fee) + '</b></td><td class="r"><b>' + money(paid) + '</b></td><td class="r"><b>' + money(bal) + '</b></td><td></td></tr></tbody></table>' +
+    (pays.length ? '<div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin:1.2rem 0 .35rem">Payments received</div>' +
+      '<table><thead><tr><th>Date</th><th>Receipt</th><th>Mode</th><th>For</th><th class="r">Amount</th></tr></thead><tbody>' + pays.join('') + '</tbody></table>'
+      : '<p class="muted" style="margin:1.2rem 0 0">No payment received yet.</p>') +
+    '<p class="muted" style="margin:1.6rem 0 0;font-size:.8rem">Amounts shown are up to ' + esc(fmtDate(today)) + '. This is a computer-generated invoice.</p>');
+}
+
+document.addEventListener('click', ev => {
+  const rc = ev.target.closest('[data-rcpt-doc]');
+  if (rc) { busy(rc, async () => showReceiptDoc(await api('student.receipt', { receiptId: rc.dataset.rcptDoc }))); return; }
+  const iv = ev.target.closest('[data-inv-doc]');
+  if (iv) { busy(iv, async () => showInvoiceDoc(await api('student.invoiceDoc', { invoiceId: iv.dataset.invDoc }), iv.dataset.sub || '')); return; }
+  if (ev.target.closest('[data-doc-close]')) closeDoc();
+  if (ev.target.closest('[data-doc-print]')) window.print();
+});
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeDoc(); });
+
+/* ---- online registration (public, no login) ---- */
+const REG = { opts: null };
+const REG_BACK = '<p><button type="button" class="link" data-reg-back>← Back to sign in</button></p>';
+function regBody(html) { $('#reg-body').innerHTML = html; window.scrollTo(0, 0); }
+document.addEventListener('click', ev => { if (ev.target.closest('[data-reg-back]')) show('login'); });
+
+function rf(n, l, o) {
+  o = o || {};
+  return '<label class="f' + (o.full ? ' full' : '') + '"><span>' + esc(l) + (o.req ? ' <em style="color:var(--bad);font-style:normal">*</em>' : '') + '</span>' +
+    '<input name="' + n + '" type="' + (o.type || 'text') + '"' + (o.req ? ' required' : '') + (o.attrs ? ' ' + o.attrs : '') + ' autocomplete="' + (o.ac || 'off') + '">' +
+    (o.hint ? '<small>' + esc(o.hint) + '</small>' : '') + '</label>';
+}
+function rs(n, l, opts, o) {
+  o = o || {};
+  return '<label class="f' + (o.full ? ' full' : '') + '"><span>' + esc(l) + (o.req ? ' <em style="color:var(--bad);font-style:normal">*</em>' : '') + '</span>' +
+    '<select name="' + n + '"' + (o.req ? ' required' : '') + '><option value="">' + esc(o.blank || 'Select…') + '</option>' +
+    opts.map(x => '<option value="' + esc(x[0]) + '">' + esc(x[1]) + '</option>').join('') + '</select></label>';
+}
+
+async function openRegister() {
+  show('register');
+  regBody(REG_BACK + '<p class="muted">Loading…</p>');
+  try {
+    REG.opts = await api('public.registerOptions');
+    if (!REG.opts.enabled) {
+      regBody(REG_BACK + '<div class="card empty"><b>Registration is closed</b>Please contact the centre to join.</div>');
+      return;
+    }
+    renderRegForm();
+  } catch (e) {
+    regBody(REG_BACK + '<div class="alert bad">' + esc(e.error || 'Could not load the form. Please try again.') + '</div>');
+  }
+}
+
+function renderRegForm() {
+  const o = REG.opts;
+  const subjects = o.subjects.length
+    ? '<div class="card"><h2>Subjects you want to join</h2><p class="muted" style="font-size:.88rem;margin:0 0 .7rem">Tick what you are interested in. The centre confirms the final subjects and teachers.</p>' +
+      '<div class="checks">' + o.subjects.map(s => '<label><input type="checkbox" name="subj" value="' + esc(s.id) + '">' + esc(s.name) + '</label>').join('') + '</div>' +
+      '<div id="reg-clash" style="margin-top:.7rem"></div></div>'
+    : '';
+  regBody(REG_BACK +
+    '<div class="head"><h1>Register as a new student</h1><p>Fill in this form. The centre will check it and then open your student portal.</p></div>' +
+    '<form id="reg-f">' +
+    '<div class="card"><h2>About the student</h2><div class="grid2">' +
+      rf('Name', 'Full name', { req: 1, full: 1, ac: 'name' }) +
+      rs('CurrentClass', 'Class', o.classes.map(c => [c, 'Class ' + c]), { req: 1 }) +
+      rf('DOB', 'Date of birth', { type: 'date' }) +
+      rs('Gender', 'Gender', [['MALE', 'Male'], ['FEMALE', 'Female'], ['OTHER', 'Other']]) +
+      rf('Mobile', 'Student mobile', { type: 'tel', hint: '10 digits, optional' }) +
+      rf('Email', 'Student email', { type: 'email' }) +
+      rf('School', 'School') +
+      rf('Board', 'Board', { hint: 'CBSE, ICSE, WBBSE…' }) +
+      rf('PreviousPercentage', 'Previous exam %', { attrs: 'inputmode="decimal"', hint: 'For example 82.5' }) +
+      rf('Address', 'Address', { full: 1 }) +
+    '</div></div>' +
+    '<div class="card"><h2>Parent or guardian</h2><div class="grid2">' +
+      rf('ParentName', 'Name', { req: 1 }) +
+      rf('Relationship', 'Relationship', { hint: 'Father, Mother, Guardian…' }) +
+      rf('ParentMobile', 'Mobile', { req: 1, type: 'tel', hint: 'The centre uses this to contact you.' }) +
+      rf('ParentWhatsApp', 'WhatsApp number', { type: 'tel' }) +
+      rf('ParentEmail', 'Email', { type: 'email', full: 1 }) +
+    '</div></div>' +
+    subjects +
+    '<div class="card"><h2>Choose your password</h2>' +
+      '<p class="muted" style="font-size:.88rem;margin:0 0 .8rem">You will sign in with this password once the centre approves you. Nobody at the centre can see it.</p>' +
+      '<div class="grid2">' +
+      '<label class="f"><span>Password <em style="color:var(--bad);font-style:normal">*</em></span><div class="pw"><input name="password" type="password" required minlength="8" maxlength="100" autocomplete="new-password"><button type="button" class="btn small" data-show="password">Show</button></div><small>At least 8 characters.</small></label>' +
+      '<label class="f"><span>Type it again <em style="color:var(--bad);font-style:normal">*</em></span><input name="again" type="password" required minlength="8" maxlength="100" autocomplete="new-password"></label>' +
+      '</div></div>' +
+    '<div class="hp" aria-hidden="true"><label>Website <input name="website" tabindex="-1" autocomplete="off"></label></div>' +
+    '<div id="reg-msg" style="margin-top:1rem"></div>' +
+    '<button class="btn primary" style="width:100%;margin-top:.5rem" id="reg-btn">Send registration</button>' +
+    '</form>');
+
+  const form = $('#reg-f');
+  form.addEventListener('change', ev => {
+    if (ev.target.name !== 'subj') return;
+    const sel = $$('input[name=subj]:checked', form).map(i => i.value);
+    const names = {}; REG.opts.subjects.forEach(s => { names[s.id] = s.name; });
+    const bad = (REG.opts.blockedPairs || []).find(p => sel.indexOf(p[0]) >= 0 && sel.indexOf(p[1]) >= 0);
+    $('#reg-clash').innerHTML = bad ? '<div class="alert warn" style="margin:0">' + esc((names[bad[0]] || bad[0]) + ' and ' + (names[bad[1]] || bad[1]) + ' cannot be taken together.') + '</div>' : '';
+  });
+  form.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const f = form.elements, btn = $('#reg-btn');
+    if (f.password.value !== f.again.value) { $('#reg-msg').innerHTML = '<div class="alert bad">The two passwords do not match.</div>'; return; }
+    const student = {};
+    ['Name', 'CurrentClass', 'DOB', 'Gender', 'Mobile', 'Email', 'School', 'Board', 'PreviousPercentage', 'Address',
+     'ParentName', 'Relationship', 'ParentMobile', 'ParentWhatsApp', 'ParentEmail'].forEach(k => { const v = f[k].value.trim(); if (v) student[k] = v; });
+    const subjects = $$('input[name=subj]:checked', form).map(i => i.value);
+    btn.disabled = true; btn.textContent = 'Sending…'; $('#reg-msg').innerHTML = '';
+    try {
+      const r = await api('public.register', { student: student, subjects: subjects, password: f.password.value, website: f.website.value });
+      renderRegDone(r.requestId, student.Name);
+    } catch (e) {
+      $('#reg-msg').innerHTML = '<div class="alert bad">' + esc(e.error || 'Could not send the registration.') + '</div>';
+      btn.disabled = false; btn.textContent = 'Send registration';
+    }
+  });
+}
+
+function renderRegDone(id, name) {
+  regBody('<div class="card" style="text-align:center;padding:2rem 1.25rem">' +
+    '<h1 style="font-size:1.7rem;margin-bottom:.4rem">Registration sent</h1>' +
+    '<p class="muted" style="margin:0">Thank you, ' + esc(name) + '. The centre will check your details.</p>' +
+    '<div class="reqid">' + esc(id) + '</div>' +
+    '<p style="max-width:46ch;margin:.2rem auto 1.2rem">Write down this request ID. Once you are approved, sign in with your <b>Student ID</b> and the password you just chose. Use “Check request status” on the sign-in page to see your Student ID.</p>' +
+    '<div class="row" style="justify-content:center;display:flex;gap:.6rem;flex-wrap:wrap"><button class="btn primary" id="rd-status">Check status</button><button class="btn" data-reg-back>Back to sign in</button></div></div>');
+  $('#rd-status').addEventListener('click', () => openStatus(id));
+}
+
+function openStatus(prefill) {
+  show('register');
+  regBody(REG_BACK +
+    '<div class="head"><h1>Check request status</h1><p>Enter the request ID you received and the student’s or parent’s mobile number from the form.</p></div>' +
+    '<div class="card"><form id="st-f"><div class="grid2">' +
+      rf('requestId', 'Request ID', { req: 1, attrs: 'placeholder="REG-00001" style="text-transform:uppercase"' }) +
+      rf('mobile', 'Mobile number', { req: 1, type: 'tel' }) +
+    '</div><button class="btn primary" id="st-btn">Check status</button></form><div id="st-out" style="margin-top:1rem"></div></div>');
+  const form = $('#st-f');
+  if (prefill) form.elements.requestId.value = prefill;
+  form.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const btn = $('#st-btn'), out = $('#st-out');
+    btn.disabled = true; btn.textContent = 'Checking…'; out.innerHTML = '';
+    try {
+      const r = await api('public.registerStatus', { requestId: form.elements.requestId.value, mobile: form.elements.mobile.value });
+      if (r.Status === 'APPROVED') {
+        out.innerHTML = '<div class="alert ok" style="margin:0"><b>Approved.</b> Your Student ID is <b style="font-family:ui-monospace,Consolas,monospace">' + esc(r.StudentID) + '</b>. Sign in with it and the password you chose on the form.</div>' +
+          '<p style="margin:.9rem 0 0"><button type="button" class="btn primary" data-reg-back>Go to sign in</button></p>';
+      } else if (r.Status === 'REJECTED') {
+        out.innerHTML = '<div class="alert bad" style="margin:0"><b>Not approved.</b> ' + esc(r.RejectReason || '') + ' Please contact the centre.</div>';
+      } else {
+        out.innerHTML = '<div class="alert warn" style="margin:0"><b>Waiting for approval.</b> Sent on ' + esc(fmtTime(r.SubmittedAt)) + '. Check again later.</div>';
+      }
+    } catch (e) {
+      out.innerHTML = '<div class="alert bad" style="margin:0">' + esc(e.error || 'Could not check the status.') + '</div>';
+    } finally { btn.disabled = false; btn.textContent = 'Check status'; }
+  });
+}
+$('#go-register').addEventListener('click', () => openRegister());
+$('#go-status').addEventListener('click', () => openStatus());
+
+/* ---- boot ---- */
+(async function init() {
+  try {
+    const c = await api('public.config'); S.cfg = c; if (window.cmzHero) cmzHero($('#hero-slot'), c.logoUrl);
+    ['#lg-centre','#nav-centre','#tb-centre'].forEach(s => $(s).textContent = c.centreName);
+    if (c.logoUrl) {
+      const lgLogo = $('#lg-logo'); if (lgLogo) lgLogo.src = c.logoUrl;
+      const navLogo = $('#nav-logo'); if (navLogo) { navLogo.src = c.logoUrl; navLogo.style.display = 'inline-block'; }
+    }
+    if (c.tagline) $('#lg-tagline').textContent = c.tagline;
+    document.title = c.centreName + ' · Student';
+    $('#lg-foot').textContent = 'Academic year ' + (c.academicYear||'');
+    if (c.registrationEnabled) $('#lg-reg-wrap').classList.remove('hidden');
+  } catch (e) {}
+  let saved = null; try { saved = sessionStorage.getItem('cmz_st'); } catch(e){}
+  if (saved) {
+    S.token = saved;
+    try {
+      const me = await api('auth.me');
+      if (me.userType !== 'STUDENT') throw { code:'SESSION_EXPIRED' };
+      S.user = { userId: me.userId, username: me.username, role: me.role, userType: me.userType, linkedId: me.linkedId,
+                 displayName: (me.profile && me.profile.Name) || me.username, mustChangePassword: me.mustChangePassword,
+                 profile: me.profile };
+      if (me.mustChangePassword) show('forcepw'); else startApp();
+      return;
+    } catch (e) { S.token=null; try { sessionStorage.removeItem('cmz_st'); } catch(x){} }
+  }
+  show('login');
+})();
+</script>
+</body>
+</html>
