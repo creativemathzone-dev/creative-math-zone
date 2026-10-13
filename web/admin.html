@@ -426,6 +426,8 @@ const PERM_LABELS = {
   TEACHER_INCOME_MANAGE: 'Manage teacher pay rates', TEACHER_INCOME_GRANT: 'Allow teachers to see their income', REPORT_VIEW: 'View reports',
   NOTICE_EDIT: 'Post notices', ATTENDANCE_CORRECT: 'Correct attendance'
 };
+const userExtraPermissions = value => (Array.isArray(value) ? value : String(value || '').split(','))
+  .map(permission => String(permission).trim()).filter(Boolean);
 
 /* ---------- server calls ---------- */
 function api(action, payload) {
@@ -448,6 +450,13 @@ function fail(e) {
   if (e && SESSION_CODES.indexOf(e.code) >= 0) { signedOut(e.error); return; }
   if (e && e.code === 'PASSWORD_CHANGE_REQUIRED') { show('forcepw'); return; }
   toast((e && e.error) || 'Something went wrong.', true);
+}
+function viewFail(main, view, arg, error) {
+  if (error && (SESSION_CODES.indexOf(error.code) >= 0 || error.code === 'PASSWORD_CHANGE_REQUIRED')) { fail(error); return; }
+  console.error('Portal page failed to load:', view, error);
+  const message = String((error && (error.error || error.message)) || 'The page could not load. Refresh and try again.').slice(0, 500);
+  main.innerHTML = '<section class="card" role="alert"><h1>Could not load this page</h1><p>' + esc(message) + '</p><button class="btn primary" type="button" id="view-retry">Retry</button></section>';
+  $('#view-retry', main).addEventListener('click', () => go(view, arg));
 }
 async function busy(btn, fn) {
   if (btn) btn.disabled = true;
@@ -616,7 +625,7 @@ function buildNav() {
 function go(view, arg){ S.view=view; S.arg=arg; SYNC.stale=false; liveState('Live'); $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
   const main=$('#main'); main.classList.remove('quiet'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
-  (VIEWS[view] || VIEWS.dashboard)(main, arg).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(fail); window.scrollTo(0,0);
+  Promise.resolve().then(() => (VIEWS[view] || VIEWS.dashboard)(main, arg)).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(e => viewFail(main, view, arg, e)); window.scrollTo(0,0);
 }
 $('#nav-items').addEventListener('click', ev => { const b = ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
 $('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open'));
@@ -2182,7 +2191,7 @@ VIEWS.users = async main => {
   const U = await api('users.list'), admins = U.filter(u => u.UserType === 'ADMIN'), others = U.length - admins.length;
   main.innerHTML = '<div class="head"><div><h1>Admin users</h1><p>' + others + ' student and teacher accounts are managed from their own pages.</p></div><button class="btn primary" id="u-add">Add Accounts Admin</button></div>' +
     '<div class="tablewrap"><table class="stack"><thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Last sign-in</th><th>Extra access</th><th></th></tr></thead><tbody>' +
-    admins.map(u => { const me = u.UserID === S.user.userId, sup = u.Role === 'SUPER_ADMIN'; return '<tr><td data-l="Username"><b>' + esc(u.Username) + '</b>' + (me ? ' <span class="muted">(you)</span>' : '') + '</td><td data-l="Role">' + (sup ? 'Super Admin' : 'Accounts Admin') + '</td><td>' + pill(u.Status) + '</td><td data-l="Last sign-in">' + esc(u.LastLogin ? fmtTime(u.LastLogin) : 'Never') + '</td><td data-l="Extra access">' + esc(u.ExtraPermissions ? u.ExtraPermissions.split(',').map(p => PERM_LABELS[p] || p).join(', ') : '—') + '</td><td class="row">' +
+    admins.map(u => { const me = u.UserID === S.user.userId, sup = u.Role === 'SUPER_ADMIN', extras = userExtraPermissions(u.ExtraPermissions); return '<tr><td data-l="Username"><b>' + esc(u.Username) + '</b>' + (me ? ' <span class="muted">(you)</span>' : '') + '</td><td data-l="Role">' + (sup ? 'Super Admin' : 'Accounts Admin') + '</td><td>' + pill(u.Status) + '</td><td data-l="Last sign-in">' + esc(u.LastLogin ? fmtTime(u.LastLogin) : 'Never') + '</td><td data-l="Extra access">' + esc(extras.length ? extras.map(p => PERM_LABELS[p] || p).join(', ') : '—') + '</td><td class="row">' +
       '<button class="btn small" data-rp="' + esc(u.UserID) + '">Reset password</button>' +
       (sup ? '' : '<button class="btn small" data-pm="' + esc(u.UserID) + '">Access</button>') +
       (me ? '' : '<button class="btn small ' + (u.Status === 'Active' ? 'danger' : '') + '" data-st="' + esc(u.UserID) + '">' + (u.Status === 'Active' ? 'Disable' : 'Enable') + '</button>') + '</td></tr>'; }).join('') + '</tbody></table></div>';
@@ -2194,7 +2203,7 @@ VIEWS.users = async main => {
     if (confirm('Make a new temporary password for ' + u.Username + '? They will be signed out.')) busy(b, async () => { const r = await api('users.resetPassword', { userId: u.UserID }); credentials('New temporary password', r.username, r.tempPassword); }); }));
   $$('[data-st]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.st), to = u.Status === 'Active' ? 'Inactive' : 'Active';
     if (confirm((to === 'Inactive' ? 'Disable ' : 'Enable ') + u.Username + '?' + (to === 'Inactive' ? ' They will be signed out immediately.' : ''))) busy(b, async () => { await api('users.setStatus', { userId: u.UserID, status: to }); toast(u.Username + (to === 'Inactive' ? ' disabled.' : ' enabled.')); go('users'); }); }));
-  $$('[data-pm]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.pm), have = (u.ExtraPermissions || '').split(',');
+  $$('[data-pm]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.pm), have = userExtraPermissions(u.ExtraPermissions);
     const base = ['STUDENT_VIEW', 'TEACHER_VIEW', 'MASTER_VIEW', 'SETTINGS_VIEW', 'FINANCE_VIEW', 'FINANCE_EDIT', 'TEACHER_INCOME_MANAGE', 'REPORT_VIEW'];
     const grantable = Object.keys(PERM_LABELS).filter(p => base.indexOf(p) < 0 && p !== 'USER_MANAGE');
     openDlg('Extra access for ' + u.Username, '<p class="muted">Accounts Admins can already view students, teachers and settings and handle finance. Tick anything extra they should be able to do. They are signed out so the change applies right away.</p><form>' +

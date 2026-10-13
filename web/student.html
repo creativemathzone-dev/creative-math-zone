@@ -432,6 +432,13 @@ function fail(e) {
   if (e && e.code === 'PASSWORD_CHANGE_REQUIRED') { show('forcepw'); return; }
   toast((e && e.error) || 'Something went wrong.', true);
 }
+function viewFail(main, view, error) {
+  if (error && (SESSION_CODES.indexOf(error.code) >= 0 || error.code === 'PASSWORD_CHANGE_REQUIRED')) { fail(error); return; }
+  console.error('Portal page failed to load:', view, error);
+  const message = String((error && (error.error || error.message)) || 'The page could not load. Refresh and try again.').slice(0, 500);
+  main.innerHTML = '<section class="card" role="alert"><h1>Could not load this page</h1><p>' + esc(message) + '</p><button class="btn primary" type="button" id="view-retry">Retry</button></section>';
+  $('#view-retry', main).addEventListener('click', () => go(view));
+}
 async function busy(btn, fn) { if (btn) btn.disabled=true; try { return await fn(); } catch(e){ fail(e);} finally { if (btn) btn.disabled=false; } }
 /* Retries when the server is briefly busy (many students at once). Safe: the server never marks a student twice. */
 async function apiRetry(action, payload, onWait) {
@@ -519,7 +526,7 @@ function buildNav(){ $('#nav-items').innerHTML = NAV.map(n => '<button class="it
 function go(view){ S.view=view; $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
   const main=$('#main'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
-  (VIEWS[view] || VIEWS.dashboard)(main).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(fail); window.scrollTo(0,0);
+  Promise.resolve().then(() => (VIEWS[view] || VIEWS.dashboard)(main)).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(e => viewFail(main, view, e)); window.scrollTo(0,0);
 }
 $('#nav-items').addEventListener('click', ev => { const b=ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
 $('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open'));
