@@ -25,8 +25,9 @@ The first two database migrations (`20261013000000_initial_schema.sql` and `2026
 ## Next implementation steps
 
 1. Add the Supabase publishable key to `web/config.js` and apply the remaining SQL migrations in order.
-2. Deploy the `api` Edge Function with its server-side keys, then publish the static `web/` folder.
-3. Check every portal and permission against the empty project, then fix any issues before use.
-4. Prepare and verify a Google Sheets export/import before cutover. Keep the Apps Script site live until the new site and migrated data are ready.
+2. Add the Supabase access token as a GitHub Actions secret and run the manual `Deploy Supabase API` workflow.
+3. Publish the static `web/` folder.
+4. Check every portal and permission against the empty project, then fix any issues before use.
+5. Prepare and verify a Google Sheets export/import before cutover. Keep the Apps Script site live until the new site and migrated data are ready.
 
 Never put a Supabase secret key in browser code or commit secrets to GitHub.
