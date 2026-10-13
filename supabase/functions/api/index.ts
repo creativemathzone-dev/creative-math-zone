@@ -508,6 +508,9 @@ Deno.serve(async (request) => {
       'notices.list': 'NOTICE_VIEW',
       'registrations.list': 'STUDENT_VIEW', 'registrations.pendingCount': 'STUDENT_VIEW',
       'registrations.update': 'STUDENT_EDIT', 'registrations.approve': 'STUDENT_EDIT', 'registrations.reject': 'STUDENT_EDIT',
+      'finance.feeStructure.list': 'FINANCE_VIEW', 'finance.feeStructure.add': 'FINANCE_EDIT',
+      'finance.feeStructure.update': 'FINANCE_EDIT', 'finance.studentFee.list': 'FINANCE_VIEW',
+      'finance.studentFee.set': 'FINANCE_EDIT', 'finance.studentFee.remove': 'FINANCE_EDIT',
     }
     const permission = needed[action]
     const granted = permissionsFor(user)
@@ -1108,6 +1111,148 @@ Deno.serve(async (request) => {
       }
       await logAction(admin, user, 'APPROVE_REGISTRATION', 'REGISTRATION', registrationId, { studentId, batchId, subjects: chosenSubjectIds })
       return response({ ok: true, data: { studentId, username: studentId, tempPassword: '', warnings: [], portalUrl: '' } })
+    }
+
+    if (action === 'finance.feeStructure.list') {
+      const { data, error } = await admin.from('fee_structure').select('*').order('item_type').order('description')
+      if (error) throw error
+      const { data: subjects } = await admin.from('subjects').select('id,name')
+      const subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
+      return response({ ok: true, data: (data || []).map((r) => ({ FeeID: r.id, ItemType: r.item_type,
+        SubjectID: r.subject_id || '', SubjectName: r.subject_id ? subjectNames.get(r.subject_id) || '' : '',
+        Description: r.description, Amount: Number(r.amount), AcademicYear: r.academic_year, Status: r.status })) })
+    }
+
+    if (action === 'finance.feeStructure.add') {
+      const item = payload.item
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw new ApiFault('BAD_REQUEST', 'Provide the fee item details.')
+      const itemType = requireText(item.ItemType, 'ItemType', 20, true).toUpperCase()
+      if (!['SUBJECT','REGISTRATION','OTHER'].includes(itemType)) throw new ApiFault('BAD_REQUEST', 'Choose a valid fee type.')
+      const description = requireText(item.Description, 'Description', 150, true)
+      const amount = Number(item.Amount)
+      if (!Number.isFinite(amount) || amount < 0 || amount > 10000000) throw new ApiFault('BAD_REQUEST', 'Amount must be from 0 to 10000000.')
+      const subjectId = requireText(item.SubjectID, 'Subject', 40)
+      if (itemType === 'SUBJECT' && !subjectId) throw new ApiFault('BAD_REQUEST', 'Choose a subject for this monthly fee.')
+      if (subjectId) {
+        const { data: subject } = await admin.from('subjects').select('id').eq('id', subjectId).maybeSingle()
+        if (!subject) throw new ApiFault('BAD_REQUEST', 'Subject not found.')
+      }
+      const { data: yearSetting } = await admin.from('settings').select('value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle()
+      const academicYear = yearSetting?.value || '2026-27'
+      if (itemType === 'SUBJECT') {
+        const { data: duplicate } = await admin.from('fee_structure').select('id').eq('item_type', 'SUBJECT')
+          .eq('subject_id', subjectId).eq('academic_year', academicYear).eq('status', 'Active').maybeSingle()
+        if (duplicate) throw new ApiFault('DUPLICATE', 'An active fee already exists for this subject and academic year.')
+      }
+      const id = await newId(admin, 'fee_structure', 'FEE-', 4)
+      const { error } = await admin.from('fee_structure').insert({ id, item_type: itemType, subject_id: subjectId || null,
+        description, amount, academic_year: academicYear, status: 'Active' })
+      if (error) throw error
+      await logAction(admin, user, 'ADD_FEE_STRUCTURE', 'FEE_STRUCTURE', id, { itemType, subjectId, amount, academicYear })
+      return response({ ok: true, data: { FeeID: id } })
+    }
+
+    if (action === 'finance.feeStructure.update') {
+      const id = requireText(payload.id, 'Fee ID', 40, true)
+      const input = payload.changes
+      if (!input || typeof input !== 'object' || Array.isArray(input) || !Object.keys(input).length) throw new ApiFault('BAD_REQUEST', 'Nothing to update.')
+      const row: Record<string, unknown> = {}
+      for (const [key, raw] of Object.entries(input)) {
+        if (key === 'Description') row.description = requireText(raw, key, 150, true)
+        else if (key === 'Amount') {
+          const amount = Number(raw)
+          if (!Number.isFinite(amount) || amount < 0 || amount > 10000000) throw new ApiFault('BAD_REQUEST', 'Amount must be from 0 to 10000000.')
+          row.amount = amount
+        } else if (key === 'Status') {
+          const status = requireText(raw, key, 10, true)
+          if (!['Active','Inactive'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Status must be Active or Inactive.')
+          row.status = status
+        } else throw new ApiFault('BAD_REQUEST', `Unknown fee field: ${key}`)
+      }
+      const { data, error } = await admin.from('fee_structure').update(row).eq('id', id).select('id').maybeSingle()
+      if (error) throw error
+      if (!data) throw new ApiFault('NOT_FOUND', 'Fee item not found.')
+      await logAction(admin, user, 'EDIT_FEE_STRUCTURE', 'FEE_STRUCTURE', id, row)
+      return response({ ok: true, data: { changed: Object.keys(row).map((key) => key === 'description' ? 'Description' : key === 'amount' ? 'Amount' : 'Status') } })
+    }
+
+    if (action === 'finance.studentFee.list') {
+      const studentId = requireText(payload.studentId, 'Student ID', 40, true)
+      const [{ data: assignments, error }, { data: feeRows, error: feeError }, { data: activeFees, error: activeFeeError }, { data: subjects }, { data: teachers }, { data: yearSetting }] = await Promise.all([
+        admin.from('student_subjects').select('*').eq('student_id', studentId).eq('status', 'ACTIVE'),
+        admin.from('fee_structure').select('*').eq('item_type', 'SUBJECT').eq('status', 'Active'),
+        admin.from('student_fees').select('*').eq('student_id', studentId).eq('status', 'Active').is('effective_to', null),
+        admin.from('subjects').select('id,name'), admin.from('teachers').select('id,name'),
+        admin.from('settings').select('value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle(),
+      ])
+      if (error || feeError || activeFeeError) throw error || feeError || activeFeeError
+      const academicYear = yearSetting?.value || '2026-27'
+      const subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
+      const teacherNames = new Map((teachers || []).map((t) => [t.id, t.name]))
+      const standardBySubject = new Map((feeRows || []).filter((r) => r.academic_year === academicYear).map((r) => [r.subject_id, Number(r.amount)]))
+      const overrides = new Map((activeFees || []).map((r) => [r.subject_id, r]))
+      const lines = (assignments || []).map((a) => {
+        const standard = a.fee_override !== null && a.fee_override !== undefined ? Number(a.fee_override) : standardBySubject.get(a.subject_id) || 0
+        const override = overrides.get(a.subject_id)
+        const discount = override ? Number(override.discount_amount) : 0
+        return { StudentID: studentId, SubjectID: a.subject_id, SubjectName: subjectNames.get(a.subject_id) || a.subject_id,
+          TeacherID: a.teacher_id || '', TeacherName: a.teacher_id ? teacherNames.get(a.teacher_id) || a.teacher_id : '',
+          StandardAmount: standard, DiscountAmount: discount, FinalAmount: Math.max(0, standard - discount),
+          HasOverride: !!override, Reason: override?.reason || '' }
+      })
+      const [{ data: registrationItems }, { data: otherItems }] = await Promise.all([
+        admin.from('fee_structure').select('amount').eq('item_type', 'REGISTRATION').eq('status', 'Active').eq('academic_year', academicYear),
+        admin.from('fee_structure').select('amount').eq('item_type', 'OTHER').eq('status', 'Active').eq('academic_year', academicYear),
+      ])
+      const monthlyTotal = lines.reduce((sum, line) => sum + line.FinalAmount, 0)
+      const registration = registrationItems?.reduce((sum, item) => sum + Number(item.amount), 0) || 0
+      const other = otherItems?.reduce((sum, item) => sum + Number(item.amount), 0) || 0
+      return response({ ok: true, data: { lines, monthlyTotal, registration, other, academicYear } })
+    }
+
+    if (action === 'finance.studentFee.set') {
+      const studentId = requireText(payload.studentId, 'Student ID', 40, true)
+      const subjectId = requireText(payload.subjectId, 'Subject', 40, true)
+      const discountAmount = Number(payload.discountAmount)
+      if (!Number.isFinite(discountAmount) || discountAmount < 0 || discountAmount > 10000000) throw new ApiFault('BAD_REQUEST', 'Enter a valid discount amount.')
+      const [{ data: assignment }, { data: yearSetting }] = await Promise.all([
+        admin.from('student_subjects').select('subject_id,fee_override,academic_year').eq('student_id', studentId).eq('subject_id', subjectId).eq('status', 'ACTIVE').maybeSingle(),
+        admin.from('settings').select('value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle(),
+      ])
+      if (!assignment) throw new ApiFault('NOT_FOUND', 'The student does not currently take this subject.')
+      const academicYear = yearSetting?.value || '2026-27'
+      let standardAmount = assignment.fee_override === null ? null : Number(assignment.fee_override)
+      if (standardAmount === null) {
+        const { data: fee } = await admin.from('fee_structure').select('amount').eq('item_type', 'SUBJECT').eq('subject_id', subjectId)
+          .eq('academic_year', academicYear).eq('status', 'Active').maybeSingle()
+        standardAmount = fee ? Number(fee.amount) : 0
+      }
+      if (discountAmount > standardAmount) throw new ApiFault('BAD_REQUEST', 'Discount cannot exceed the standard fee.')
+      const reason = requireText(payload.reason, 'Reason', 200)
+      const today = new Date().toISOString().slice(0, 10)
+      const { data: current, error: currentError } = await admin.from('student_fees').select('id').eq('student_id', studentId)
+        .eq('subject_id', subjectId).eq('status', 'Active').is('effective_to', null)
+      if (currentError) throw currentError
+      if (current?.length) await admin.from('student_fees').update({ status: 'Inactive', effective_to: today }).in('id', current.map((r) => r.id))
+      const id = await newId(admin, 'student_fees', 'SF-', 4)
+      const { error } = await admin.from('student_fees').insert({ id, student_id: studentId, subject_id: subjectId,
+        standard_amount: standardAmount, discount_amount: discountAmount, final_amount: Math.max(0, standardAmount - discountAmount),
+        effective_from: today, effective_to: null, academic_year: academicYear, status: 'Active', reason })
+      if (error) throw error
+      await logAction(admin, user, 'SET_STUDENT_DISCOUNT', 'STUDENT_FEE', id, { studentId, subjectId, discountAmount, reason })
+      return response({ ok: true, data: { feeId: id } })
+    }
+
+    if (action === 'finance.studentFee.remove') {
+      const studentId = requireText(payload.studentId, 'Student ID', 40, true)
+      const subjectId = requireText(payload.subjectId, 'Subject', 40, true)
+      const today = new Date().toISOString().slice(0, 10)
+      const { data, error } = await admin.from('student_fees').update({ status: 'Inactive', effective_to: today })
+        .eq('student_id', studentId).eq('subject_id', subjectId).eq('status', 'Active').is('effective_to', null).select('id')
+      if (error) throw error
+      if (!data?.length) throw new ApiFault('NOT_FOUND', 'No active fee discount was found.')
+      await logAction(admin, user, 'REMOVE_STUDENT_DISCOUNT', 'STUDENT_FEE', data[0].id, { studentId, subjectId })
+      return response({ ok: true, data: { removed: true } })
     }
 
     if (action === 'students.get') {
