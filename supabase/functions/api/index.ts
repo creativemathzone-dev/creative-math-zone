@@ -12,6 +12,14 @@ type AppUser = {
   extra_permissions: string[]
 }
 
+class ApiFault extends Error {
+  code: string
+  constructor(code: string, message: string) {
+    super(message)
+    this.code = code
+  }
+}
+
 const ROLE_PERMISSIONS: Record<string, string[]> = {
   SUPER_ADMIN: ['*'],
   ACCOUNTS_ADMIN: ['STUDENT_VIEW', 'TEACHER_VIEW', 'MASTER_VIEW', 'SETTINGS_VIEW', 'FINANCE_VIEW', 'FINANCE_EDIT', 'TEACHER_INCOME_MANAGE', 'REPORT_VIEW', 'NOTICE_VIEW', 'SELF_VIEW'],
@@ -61,6 +69,34 @@ function response(body: unknown) {
 
 function fail(code: string, error: string) {
   return { ok: false, code, error }
+}
+
+function requireText(value: unknown, label: string, max = 200, required = false) {
+  const text = value == null ? '' : String(value).trim()
+  if (required && !text) throw new ApiFault('BAD_REQUEST', `${label} is required.`)
+  if (text.length > max) throw new ApiFault('BAD_REQUEST', `${label} is too long.`)
+  return text
+}
+
+function mapMaster(table: string, row: Record<string, unknown>) {
+  if (table === 'subjects') return { SubjectID: row.id, SubjectName: row.name, Status: row.status }
+  if (table === 'batches') return { BatchID: row.id, BatchName: row.name, Class: row.class,
+    Section: row.section, AcademicYear: row.academic_year, Status: row.status }
+  return { RoomID: row.id, RoomName: row.name, Capacity: row.capacity, Status: row.status }
+}
+
+async function newId(admin: ReturnType<typeof clients>['admin'], counter: string, prefix: string) {
+  const { data, error } = await admin.rpc('next_id', { p_counter_name: counter, p_prefix: prefix, p_width: 3 })
+  if (error) throw error
+  return String(data)
+}
+
+async function logAction(admin: ReturnType<typeof clients>['admin'], user: AppUser,
+  action: string, entityType: string, entityId: string, details: unknown) {
+  await admin.from('admin_logs').insert({
+    id: `LOG-${crypto.randomUUID()}`, user_id: user.id, username: user.username, role: user.role,
+    action, entity_type: entityType, entity_id: entityId, details: JSON.stringify(details), result: 'OK',
+  })
 }
 
 function permissionsFor(user: AppUser) {
@@ -184,6 +220,9 @@ Deno.serve(async (request) => {
     const needed: Record<string, string> = {
       'settings.get': 'SETTINGS_VIEW', 'subjects.list': 'MASTER_VIEW', 'batches.list': 'MASTER_VIEW',
       'rooms.list': 'MASTER_VIEW', 'teachers.list': 'TEACHER_VIEW', 'users.list': 'USER_MANAGE',
+      'subjects.add': 'MASTER_EDIT', 'subjects.update': 'MASTER_EDIT',
+      'batches.add': 'MASTER_EDIT', 'batches.update': 'MASTER_EDIT',
+      'rooms.add': 'MASTER_EDIT', 'rooms.update': 'MASTER_EDIT',
       'students.list': 'STUDENT_VIEW', 'students.get': 'STUDENT_VIEW',
     }
     const permission = needed[action]
@@ -237,6 +276,72 @@ Deno.serve(async (request) => {
         LastLogin: r.last_login, LastLogout: r.last_logout, CreatedDate: r.created_at })) })
     }
 
+    const masterActions: Record<string, { table: string; idName: string; nameName: string; dbName: string; prefix: string }> = {
+      'subjects.add': { table: 'subjects', idName: 'SubjectID', nameName: 'SubjectName', dbName: 'name', prefix: 'SUB' },
+      'subjects.update': { table: 'subjects', idName: 'SubjectID', nameName: 'SubjectName', dbName: 'name', prefix: 'SUB' },
+      'batches.add': { table: 'batches', idName: 'BatchID', nameName: 'BatchName', dbName: 'name', prefix: 'B' },
+      'batches.update': { table: 'batches', idName: 'BatchID', nameName: 'BatchName', dbName: 'name', prefix: 'B' },
+      'rooms.add': { table: 'rooms', idName: 'RoomID', nameName: 'RoomName', dbName: 'name', prefix: 'R' },
+      'rooms.update': { table: 'rooms', idName: 'RoomID', nameName: 'RoomName', dbName: 'name', prefix: 'R' },
+    }
+    if (masterActions[action]) {
+      const config = masterActions[action]
+      const isUpdate = action.endsWith('.update')
+      const input = (isUpdate ? payload.changes : payload.item) || {}
+      if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault('BAD_REQUEST', 'Provide the master record fields.')
+      const row: Record<string, unknown> = {}
+      const allowed: Record<string, string> = {
+        [config.nameName]: 'name', Status: 'status', Class: 'class', Section: 'section',
+        AcademicYear: 'academic_year', Capacity: 'capacity',
+      }
+      for (const key of Object.keys(input)) {
+        if (!allowed[key] || (config.table === 'subjects' && !['SubjectName', 'Status'].includes(key)) ||
+          (config.table === 'batches' && !['BatchName', 'Class', 'Section', 'AcademicYear', 'Status'].includes(key)) ||
+          (config.table === 'rooms' && !['RoomName', 'Capacity', 'Status'].includes(key))) {
+          throw new ApiFault('BAD_REQUEST', `Unknown field: ${key}`)
+        }
+        const column = allowed[key]
+        if (key === 'Capacity') {
+          const capacity = Number(input[key])
+          if (!Number.isInteger(capacity) || capacity < 1 || capacity > 500) throw new ApiFault('BAD_REQUEST', 'Capacity must be a whole number from 1 to 500.')
+          row[column] = capacity
+        } else {
+          const max = key === 'Class' ? 10 : key === 'Section' ? 5 : key === 'AcademicYear' ? 10 : 60
+          row[column] = requireText(input[key], key, max, !isUpdate && [config.nameName, 'Class'].includes(key))
+          if (key === 'Status') {
+            const status = String(row[column]).toLowerCase()
+            if (!['active', 'inactive'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Status must be Active or Inactive.')
+            row[column] = status === 'active' ? 'Active' : 'Inactive'
+          }
+          if (key === 'Class' || key === 'Section') row[column] = String(row[column]).toUpperCase()
+        }
+      }
+      if (!isUpdate) {
+        const name = requireText(input[config.nameName], config.nameName, config.table === 'rooms' ? 40 : 60, true)
+        row.name = name
+        if (row.status === undefined) row.status = 'Active'
+        if (config.table === 'batches') {
+          row.academic_year ||= requireText(input.AcademicYear || '2026-27', 'AcademicYear', 10, true)
+          if (!row.class) throw new ApiFault('BAD_REQUEST', 'Class is required.')
+        }
+        if (config.table === 'rooms' && row.capacity === undefined) throw new ApiFault('BAD_REQUEST', 'Capacity is required.')
+        const id = await newId(admin, config.table, config.prefix)
+        const { data, error } = await admin.from(config.table).insert({ id, ...row }).select('*').single()
+        if (error?.code === '23505') throw new ApiFault('DUPLICATE', `${config.nameName} already exists.`)
+        if (error) throw error
+        await logAction(admin, user, `ADD_${config.table.toUpperCase()}`, config.table.toUpperCase(), id, row)
+        return response({ ok: true, data: mapMaster(config.table, data) })
+      }
+      const id = requireText(payload.id, config.idName, 40, true)
+      if (!Object.keys(row).length) throw new ApiFault('BAD_REQUEST', 'Nothing to update.')
+      const { data, error } = await admin.from(config.table).update(row).eq('id', id).select('*').maybeSingle()
+      if (error?.code === '23505') throw new ApiFault('DUPLICATE', `${config.nameName} already exists.`)
+      if (error) throw error
+      if (!data) throw new ApiFault('NOT_FOUND', 'Record not found.')
+      await logAction(admin, user, `EDIT_${config.table.toUpperCase()}`, config.table.toUpperCase(), id, row)
+      return response({ ok: true, data: { changed: Object.keys(row).map((k) => Object.keys(allowed).find((key) => allowed[key] === k) || k) } })
+    }
+
     if (action === 'students.list') {
       const limit = Math.min(Math.max(Number.parseInt(payload.limit, 10) || 200, 1), 1000)
       let query = admin.from('students').select('*', { count: 'exact' }).order('name').limit(limit)
@@ -273,6 +378,7 @@ Deno.serve(async (request) => {
     return response(fail('UNKNOWN_ACTION', 'This action has not been migrated yet.'))
   } catch (error) {
     console.error('API action failed:', action, error)
+    if (error instanceof ApiFault) return response(fail(error.code, error.message))
     return response(fail('SERVER_ERROR', 'Something went wrong. Please try again.'))
   }
 })

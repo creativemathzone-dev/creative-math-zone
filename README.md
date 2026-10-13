@@ -14,7 +14,7 @@ The supplied Apps Script has 24 logical data tables and a single action-based AP
 
 ## Database foundation
 
-The initial schema is in [`supabase/migrations/20261013000000_initial_schema.sql`](supabase/migrations/20261013000000_initial_schema.sql). It defines the core relational model and enables row-level security on application data. The first server-side action router is in `supabase/functions/api/`; it currently covers configuration, login/session identity, password changes, subject listing, and read-only student lookup. Other workflows still need to be migrated before this can replace Apps Script.
+The initial schema is in [`supabase/migrations/20261013000000_initial_schema.sql`](supabase/migrations/20261013000000_initial_schema.sql). It defines the core relational model and enables row-level security on application data. The first server-side action router is in `supabase/functions/api/`; it currently covers configuration, login/session identity, password changes, settings and master-data lookups, master-data add/edit, and read-only student lookup. Student/teacher account creation, attendance, finance, registrations, notices, and reports still need to be migrated before this can replace Apps Script. The ID-counter migration must be applied before using master-data add actions.
 
 ## Legacy reference
 

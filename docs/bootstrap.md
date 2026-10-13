@@ -3,7 +3,7 @@
 These steps are for a new, empty Supabase project. They do not copy or modify the live Apps Script spreadsheet.
 
 1. Create a Supabase project and keep its database password and secret keys out of source control.
-2. Apply `supabase/migrations/20261013000000_initial_schema.sql` in the Supabase SQL editor or with the Supabase CLI.
+2. Apply migrations in filename order. The initial schema (`20261013000000_initial_schema.sql`) has already been applied by the project owner. Apply `20261013010000_id_counters.sql` before enabling API actions that create master records.
 3. In Supabase Auth, create the first admin's account using the email address they will use for recovery.
 4. Link that Auth user to an application account in the SQL editor, substituting the new Auth user UUID and chosen username:
 
