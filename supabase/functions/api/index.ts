@@ -342,6 +342,8 @@ Deno.serve(async (request) => {
     const needed: Record<string, string> = {
       'settings.get': 'SETTINGS_VIEW', 'subjects.list': 'MASTER_VIEW', 'batches.list': 'MASTER_VIEW',
       'rooms.list': 'MASTER_VIEW', 'teachers.list': 'TEACHER_VIEW', 'users.list': 'USER_MANAGE',
+      'users.createAdmin': 'USER_MANAGE', 'users.setStatus': 'USER_MANAGE', 'users.resetPassword': 'USER_MANAGE',
+      'users.setPermissions': 'USER_MANAGE', 'logs.list': 'LOG_VIEW',
       'subjects.add': 'MASTER_EDIT', 'subjects.update': 'MASTER_EDIT',
       'batches.add': 'MASTER_EDIT', 'batches.update': 'MASTER_EDIT',
       'rooms.add': 'MASTER_EDIT', 'rooms.update': 'MASTER_EDIT',
@@ -451,6 +453,84 @@ Deno.serve(async (request) => {
         UserType: r.user_type, Role: r.role, LinkedID: r.linked_id, Status: r.status,
         MustChangePassword: r.must_change_password, ExtraPermissions: r.extra_permissions,
         LastLogin: r.last_login, LastLogout: r.last_logout, CreatedDate: r.created_at })) })
+    }
+
+    if (action === 'users.createAdmin') {
+      const username = requireText(payload.username, 'Username', 30, true)
+      if (!/^[A-Za-z0-9._-]{3,30}$/.test(username)) throw new ApiFault('BAD_REQUEST', 'Username must be 3–30 letters, numbers, dots, dashes or underscores.')
+      const { data: duplicate } = await admin.from('app_users').select('id').ilike('username', username).maybeSingle()
+      if (duplicate) throw new ApiFault('DUPLICATE', `Username "${username}" is already taken.`)
+      const tempPassword = payload.password ? String(payload.password) : passwordTemp()
+      if (tempPassword.length < 8 || tempPassword.length > 200) throw new ApiFault('BAD_PASSWORD', 'Password must be at least 8 characters.')
+      const { data: created, error: authCreateError } = await admin.auth.admin.createUser({ email: authEmailForUsername(username), password: tempPassword, email_confirm: true })
+      if (authCreateError || !created.user) throw new ApiFault('ACCOUNT_CREATE_FAILED', 'Could not create the admin login account.')
+      const { data: appUser, error } = await admin.from('app_users').insert({ auth_user_id: created.user.id, username,
+        user_type: 'ADMIN', role: 'ACCOUNTS_ADMIN', status: 'Active', must_change_password: !payload.password }).select('id').single()
+      if (error) {
+        await admin.auth.admin.deleteUser(created.user.id)
+        if (error.code === '23505') throw new ApiFault('DUPLICATE', `Username "${username}" is already taken.`)
+        throw error
+      }
+      await logAction(admin, user, 'CREATE_ADMIN', 'USER', appUser.id, { username, role: 'ACCOUNTS_ADMIN' })
+      return response({ ok: true, data: { userId: appUser.id, username, role: 'ACCOUNTS_ADMIN', tempPassword: !payload.password ? tempPassword : undefined } })
+    }
+
+    if (action === 'users.setStatus') {
+      const id = requireText(payload.userId, 'User ID', 60, true)
+      if (id === user.id) throw new ApiFault('BAD_REQUEST', 'You cannot change your own status.')
+      const status = requireText(payload.status, 'Status', 20, true)
+      if (!['Active', 'Inactive'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Status must be Active or Inactive.')
+      const { data: target, error: targetError } = await admin.from('app_users').select('id,username,user_type,role').eq('id', id).maybeSingle()
+      if (targetError) throw targetError
+      if (!target) throw new ApiFault('NOT_FOUND', 'User not found.')
+      if (target.role === 'SUPER_ADMIN') throw new ApiFault('BAD_REQUEST', 'The Super Admin account cannot be changed here.')
+      const { error } = await admin.from('app_users').update({ status }).eq('id', id)
+      if (error) throw error
+      await logAction(admin, user, status === 'Inactive' && target.user_type === 'ADMIN' ? 'DISABLE_ADMIN' : 'SET_USER_STATUS', 'USER', id, { username: target.username, status })
+      return response({ ok: true, data: { userId: id, status } })
+    }
+
+    if (action === 'users.resetPassword') {
+      const id = requireText(payload.userId, 'User ID', 60, true)
+      const { data: target, error: lookupError } = await admin.from('app_users').select('id,auth_user_id,username').eq('id', id).maybeSingle()
+      if (lookupError) throw lookupError
+      if (!target?.auth_user_id) throw new ApiFault('NOT_FOUND', 'User login account was not found.')
+      const tempPassword = payload.password ? String(payload.password) : passwordTemp()
+      if (tempPassword.length < 8 || tempPassword.length > 200) throw new ApiFault('BAD_PASSWORD', 'Password must be at least 8 characters.')
+      const { error } = await admin.auth.admin.updateUserById(target.auth_user_id, { password: tempPassword })
+      if (error) throw new ApiFault('PASSWORD_UPDATE_FAILED', 'Could not reset this password.')
+      await admin.from('app_users').update({ must_change_password: true, password_changed_at: new Date().toISOString() }).eq('id', id)
+      await logAction(admin, user, 'RESET_PASSWORD', 'USER', id, { username: target.username })
+      return response({ ok: true, data: { username: target.username, tempPassword } })
+    }
+
+    if (action === 'users.setPermissions') {
+      const id = requireText(payload.userId, 'User ID', 60, true)
+      if (!Array.isArray(payload.extraPermissions)) throw new ApiFault('BAD_REQUEST', 'extraPermissions must be a list.')
+      const allowedPermissions = new Set(Object.keys(PERMISSION_LABELS))
+      const extra = [...new Set(payload.extraPermissions.map((x: unknown) => String(x)))]
+      const invalid = extra.find((x) => !allowedPermissions.has(x))
+      if (invalid) throw new ApiFault('BAD_REQUEST', `Unknown permission: ${invalid}`)
+      const { data: target, error: lookupError } = await admin.from('app_users').select('id,username,role').eq('id', id).maybeSingle()
+      if (lookupError) throw lookupError
+      if (!target) throw new ApiFault('NOT_FOUND', 'User not found.')
+      if (target.role === 'SUPER_ADMIN') throw new ApiFault('BAD_REQUEST', 'Super Admin already has every permission.')
+      const { error } = await admin.from('app_users').update({ extra_permissions: extra }).eq('id', id)
+      if (error) throw error
+      await logAction(admin, user, 'CHANGE_PERMISSIONS', 'USER', id, { username: target.username, extra })
+      return response({ ok: true, data: { userId: id, extraPermissions: extra } })
+    }
+
+    if (action === 'logs.list') {
+      const limit = Math.min(Math.max(Number.parseInt(payload.limit, 10) || 100, 1), 500)
+      let query = admin.from('admin_logs').select('*').order('logged_at', { ascending: false }).limit(limit)
+      if (payload.action) query = query.ilike('action', String(payload.action))
+      if (payload.username) query = query.ilike('username', String(payload.username))
+      const { data, error } = await query
+      if (error) throw error
+      return response({ ok: true, data: (data || []).map((r) => ({ LogID: r.id, Timestamp: r.logged_at, UserID: r.user_id,
+        Username: r.username, Role: r.role, Action: r.action, EntityType: r.entity_type, EntityID: r.entity_id,
+        Details: r.details, Result: r.result })) })
     }
 
     const masterActions: Record<string, { table: string; idName: string; nameName: string; dbName: string; prefix: string }> = {
