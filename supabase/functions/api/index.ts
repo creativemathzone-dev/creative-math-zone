@@ -355,6 +355,10 @@ Deno.serve(async (request) => {
       'teachers.add': 'TEACHER_EDIT', 'teachers.update': 'TEACHER_EDIT',
       'teachers.resetPassword': 'TEACHER_EDIT',
       'settings.update': 'SETTINGS_EDIT',
+      'timetable.list': 'MASTER_VIEW', 'timetable.add': 'MASTER_EDIT', 'timetable.update': 'MASTER_EDIT',
+      'timetable.setStatus': 'MASTER_EDIT', 'notices.adminList': 'NOTICE_VIEW',
+      'notices.add': 'NOTICE_EDIT', 'notices.update': 'NOTICE_EDIT', 'notices.setStatus': 'NOTICE_EDIT',
+      'notices.list': 'NOTICE_VIEW',
     }
     const permission = needed[action]
     const granted = permissionsFor(user)
@@ -386,6 +390,205 @@ Deno.serve(async (request) => {
       if (error) throw error
       return response({ ok: true, data: (data || []).map((r) => ({ RoomID: r.id, RoomName: r.name,
         Capacity: r.capacity, Status: r.status })) })
+    }
+
+    if (action === 'timetable.list') {
+      let query = admin.from('timetable').select('*').order('day').order('start_time')
+      if (payload.day) query = query.eq('day', String(payload.day).toUpperCase())
+      if (payload.batchId) query = query.eq('batch_id', String(payload.batchId))
+      if (payload.teacherId) query = query.eq('teacher_id', String(payload.teacherId))
+      const { data, error } = await query
+      if (error) throw error
+      const [{ data: batches }, { data: subjects }, { data: teachers }, { data: rooms }] = await Promise.all([
+        admin.from('batches').select('id,name'), admin.from('subjects').select('id,name'),
+        admin.from('teachers').select('id,name'), admin.from('rooms').select('id,name'),
+      ])
+      const names = (rows: Array<Record<string, string>> | null) => new Map((rows || []).map((r) => [r.id, r.name]))
+      const batchNames = names(batches), subjectNames = names(subjects), teacherNames = names(teachers), roomNames = names(rooms)
+      return response({ ok: true, data: (data || []).map((r) => ({ TimetableID: r.id, Day: r.day,
+        StartTime: String(r.start_time).slice(0, 5), EndTime: String(r.end_time).slice(0, 5), BatchID: r.batch_id,
+        BatchName: batchNames.get(r.batch_id) || r.batch_id, SubjectID: r.subject_id,
+        SubjectName: subjectNames.get(r.subject_id) || r.subject_id, TeacherID: r.teacher_id,
+        TeacherName: teacherNames.get(r.teacher_id) || r.teacher_id, RoomID: r.room_id || '',
+        RoomName: r.room_id ? roomNames.get(r.room_id) || r.room_id : '', Status: r.status })) })
+    }
+
+    if (action === 'timetable.add' || action === 'timetable.update') {
+      const isUpdate = action.endsWith('.update')
+      const input = isUpdate ? payload.changes : payload.item
+      if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault('BAD_REQUEST', 'Provide the timetable fields.')
+      const map: Record<string, string> = { Day: 'day', StartTime: 'start_time', EndTime: 'end_time', BatchID: 'batch_id',
+        SubjectID: 'subject_id', TeacherID: 'teacher_id', RoomID: 'room_id', Status: 'status' }
+      const allowed = isUpdate ? Object.keys(map) : Object.keys(map).filter((x) => x !== 'Status')
+      const row: Record<string, unknown> = {}
+      for (const [key, raw] of Object.entries(input)) {
+        if (!allowed.includes(key)) throw new ApiFault('BAD_REQUEST', `Unknown timetable field: ${key}`)
+        const column = map[key]
+        if (key === 'Day') {
+          const day = requireText(raw, key, 12, true).toUpperCase()
+          if (!['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'].includes(day)) throw new ApiFault('BAD_REQUEST', 'Choose a valid day.')
+          row[column] = day
+        } else if (key === 'StartTime' || key === 'EndTime') {
+          const time = requireText(raw, key, 8, true)
+          if (!/^\d{2}:\d{2}(:\d{2})?$/.test(time)) throw new ApiFault('BAD_REQUEST', `${key} must be a valid time.`)
+          row[column] = time.length === 5 ? `${time}:00` : time
+        } else if (key === 'Status') {
+          const status = requireText(raw, key, 10, true)
+          if (!['Active', 'Inactive'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Status must be Active or Inactive.')
+          row[column] = status
+        } else {
+          const value = requireText(raw, key, 50, key !== 'RoomID')
+          row[column] = key === 'RoomID' && !value ? null : value
+        }
+      }
+      const id = isUpdate ? requireText(payload.id, 'Timetable ID', 40, true) : await newId(admin, 'timetable', 'TT-', 4)
+      let before: Record<string, unknown> = {}
+      if (isUpdate) {
+        const { data: existing, error } = await admin.from('timetable').select('*').eq('id', id).maybeSingle()
+        if (error) throw error
+        if (!existing) throw new ApiFault('NOT_FOUND', 'Timetable entry not found.')
+        before = existing
+      }
+      const merged = { ...before, ...row }
+      for (const key of ['day','start_time','end_time','batch_id','subject_id','teacher_id']) if (!merged[key]) throw new ApiFault('BAD_REQUEST', `${key} is required.`)
+      if (String(merged.end_time) <= String(merged.start_time)) throw new ApiFault('BAD_REQUEST', 'End time must be after start time.')
+      const [{ data: batch }, { data: subject }, { data: teacherRow }, { data: room }] = await Promise.all([
+        admin.from('batches').select('id,status').eq('id', merged.batch_id).maybeSingle(),
+        admin.from('subjects').select('id,status').eq('id', merged.subject_id).maybeSingle(),
+        admin.from('teachers').select('id,status').eq('id', merged.teacher_id).maybeSingle(),
+        merged.room_id ? admin.from('rooms').select('id,status').eq('id', merged.room_id).maybeSingle() : Promise.resolve({ data: null }),
+      ])
+      if (!batch || batch.status !== 'Active' || !subject || subject.status !== 'Active' || !teacherRow || teacherRow.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Choose active batch, subject and teacher records.')
+      if (merged.room_id && (!room || room.status !== 'Active')) throw new ApiFault('BAD_REQUEST', 'Choose an active room.')
+      if (String(merged.status || 'Active') === 'Active') {
+        const { data: peers, error } = await admin.from('timetable').select('id,day,start_time,end_time,batch_id,teacher_id,room_id,status').eq('day', merged.day).eq('status', 'Active')
+        if (error) throw error
+        const conflict = (peers || []).find((p) => p.id !== id && String(merged.start_time) < String(p.end_time) && String(merged.end_time) > String(p.start_time) &&
+          (p.teacher_id === merged.teacher_id || p.batch_id === merged.batch_id || (!!merged.room_id && p.room_id === merged.room_id)))
+        if (conflict) throw new ApiFault('CONFLICT', 'This time overlaps another class for the same teacher, batch or room.')
+      }
+      if (!isUpdate) {
+        const { data: setting } = await admin.from('settings').select('value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle()
+        row.id = id; row.academic_year = setting?.value || '2026-27'; row.status = 'Active'
+      }
+      const { data: saved, error } = isUpdate
+        ? await admin.from('timetable').update(row).eq('id', id).select('*').single()
+        : await admin.from('timetable').insert(row).select('*').single()
+      if (error) throw error
+      await logAction(admin, user, isUpdate ? 'EDIT_TIMETABLE' : 'ADD_TIMETABLE', 'TIMETABLE', id, row)
+      return response({ ok: true, data: { TimetableID: saved.id, Day: saved.day, StartTime: String(saved.start_time).slice(0, 5),
+        EndTime: String(saved.end_time).slice(0, 5), BatchID: saved.batch_id, SubjectID: saved.subject_id,
+        TeacherID: saved.teacher_id, RoomID: saved.room_id || '', Status: saved.status } })
+    }
+
+    if (action === 'timetable.setStatus') {
+      const id = requireText(payload.id, 'Timetable ID', 40, true)
+      const status = requireText(payload.status, 'Status', 10, true)
+      if (!['Active', 'Inactive'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Status must be Active or Inactive.')
+      const { data, error } = await admin.from('timetable').update({ status }).eq('id', id).select('id').maybeSingle()
+      if (error) throw error
+      if (!data) throw new ApiFault('NOT_FOUND', 'Timetable entry not found.')
+      await logAction(admin, user, 'SET_TIMETABLE_STATUS', 'TIMETABLE', id, { status })
+      return response({ ok: true, data: { id, status } })
+    }
+
+    if (action === 'notices.adminList') {
+      const { data, error } = await admin.from('notices').select('*').order('posted_at', { ascending: false }).limit(500)
+      if (error) throw error
+      const { data: batches } = await admin.from('batches').select('id,name')
+      const batchNames = new Map((batches || []).map((b) => [b.id, b.name]))
+      return response({ ok: true, data: (data || []).map((r) => ({ NoticeID: r.id, Title: r.title, Body: r.body,
+        Audience: r.audience, BatchID: r.batch_id || '', BatchName: r.batch_id ? batchNames.get(r.batch_id) || '' : '',
+        PostedBy: r.posted_by, PostedAt: r.posted_at, ExpiresAt: r.expires_at || '', Status: r.status })) })
+    }
+
+    if (action === 'notices.add' || action === 'notices.update') {
+      const isUpdate = action.endsWith('.update')
+      const input = isUpdate ? payload.changes : payload.item
+      if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault('BAD_REQUEST', 'Provide the notice fields.')
+      const map: Record<string, string> = { Title: 'title', Body: 'body', Audience: 'audience', BatchID: 'batch_id', ExpiresAt: 'expires_at', Status: 'status' }
+      const allowed = isUpdate ? Object.keys(map) : Object.keys(map).filter((x) => x !== 'Status')
+      const row: Record<string, unknown> = {}
+      for (const [key, raw] of Object.entries(input)) {
+        if (!allowed.includes(key)) throw new ApiFault('BAD_REQUEST', `Unknown notice field: ${key}`)
+        if (key === 'Audience') {
+          const audience = requireText(raw, key, 20, true).toUpperCase()
+          if (!['STUDENTS','TEACHERS','BATCH','ALL'].includes(audience)) throw new ApiFault('BAD_REQUEST', 'Choose a valid audience.')
+          row.audience = audience
+        } else if (key === 'Status') {
+          const status = requireText(raw, key, 10, true)
+          if (!['Active','Inactive'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Status must be Active or Inactive.')
+          row.status = status
+        } else if (key === 'ExpiresAt') {
+          const date = requireText(raw, key, 10)
+          if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ApiFault('BAD_REQUEST', 'ExpiresAt must use yyyy-mm-dd.')
+          row.expires_at = date || null
+        } else if (key === 'BatchID') {
+          const id = requireText(raw, key, 40)
+          row.batch_id = id || null
+        } else row[map[key]] = requireText(raw, key, key === 'Title' ? 150 : 10000, true)
+      }
+      const id = isUpdate ? requireText(payload.id, 'Notice ID', 40, true) : await newId(admin, 'notices', 'N-', 4)
+      const merged = { audience: 'ALL', batch_id: null, ...row }
+      if (isUpdate) {
+        const { data: old, error } = await admin.from('notices').select('id,audience,batch_id').eq('id', id).maybeSingle()
+        if (error) throw error
+        if (!old) throw new ApiFault('NOT_FOUND', 'Notice not found.')
+        Object.assign(merged, old, row)
+      }
+      if (merged.audience === 'BATCH' && !merged.batch_id) throw new ApiFault('BAD_REQUEST', 'Choose a batch for a batch notice.')
+      if (merged.audience === 'BATCH') {
+        const { data: batch } = await admin.from('batches').select('id,status').eq('id', merged.batch_id).maybeSingle()
+        if (!batch || batch.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Choose an active batch for this notice.')
+      }
+      if (merged.audience !== 'BATCH' && 'audience' in row && !('batch_id' in row)) row.batch_id = null
+      if (!isUpdate) {
+        const { data: setting } = await admin.from('settings').select('value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle()
+        row.id = id; row.posted_by = user.id; row.academic_year = setting?.value || '2026-27'; row.status = 'Active'
+      }
+      const { data: saved, error } = isUpdate
+        ? await admin.from('notices').update(row).eq('id', id).select('*').single()
+        : await admin.from('notices').insert(row).select('*').single()
+      if (error) throw error
+      await logAction(admin, user, isUpdate ? 'EDIT_NOTICE' : 'ADD_NOTICE', 'NOTICE', id, row)
+      return response({ ok: true, data: { NoticeID: saved.id, Title: saved.title, Body: saved.body, Audience: saved.audience,
+        BatchID: saved.batch_id || '', PostedAt: saved.posted_at, ExpiresAt: saved.expires_at || '', Status: saved.status } })
+    }
+
+    if (action === 'notices.setStatus') {
+      const id = requireText(payload.id, 'Notice ID', 40, true)
+      const status = requireText(payload.status, 'Status', 10, true)
+      if (!['Active','Inactive'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Status must be Active or Inactive.')
+      const { data, error } = await admin.from('notices').update({ status }).eq('id', id).select('id').maybeSingle()
+      if (error) throw error
+      if (!data) throw new ApiFault('NOT_FOUND', 'Notice not found.')
+      await logAction(admin, user, 'SET_NOTICE_STATUS', 'NOTICE', id, { status })
+      return response({ ok: true, data: { id, status } })
+    }
+
+    if (action === 'notices.list' || action === 'teacher.notices') {
+      const today = new Date().toISOString().slice(0, 10)
+      const { data: all, error } = await admin.from('notices').select('*').eq('status', 'Active').order('posted_at', { ascending: false }).limit(300)
+      if (error) throw error
+      let linkedBatches = new Set<string>()
+      if (user.user_type === 'STUDENT' && user.linked_id) {
+        const { data: student } = await admin.from('students').select('current_batch_id').eq('id', user.linked_id).maybeSingle()
+        if (student?.current_batch_id) linkedBatches.add(student.current_batch_id)
+      } else if (user.user_type === 'TEACHER' && user.linked_id) {
+        const [{ data: timetableRows }, { data: assignedRows }] = await Promise.all([
+          admin.from('timetable').select('batch_id').eq('teacher_id', user.linked_id).eq('status', 'Active'),
+          admin.from('student_subjects').select('batch_id').eq('teacher_id', user.linked_id).eq('status', 'ACTIVE'),
+        ])
+        for (const row of [...(timetableRows || []), ...(assignedRows || [])]) if (row.batch_id) linkedBatches.add(row.batch_id)
+      }
+      const eligible = (all || []).filter((n) => (!n.expires_at || n.expires_at >= today) &&
+        (n.audience === 'ALL' || (user.user_type === 'STUDENT' && n.audience === 'STUDENTS') ||
+          (user.user_type === 'TEACHER' && n.audience === 'TEACHERS') || (n.audience === 'BATCH' && linkedBatches.has(n.batch_id))))
+      const { data: batches } = await admin.from('batches').select('id,name')
+      const batchNames = new Map((batches || []).map((b) => [b.id, b.name]))
+      return response({ ok: true, data: eligible.slice(0, 100).map((r) => ({ NoticeID: r.id, Title: r.title, Body: r.body,
+        Audience: r.audience, BatchID: r.batch_id || '', BatchName: r.batch_id ? batchNames.get(r.batch_id) || '' : '',
+        PostedAt: r.posted_at, ExpiresAt: r.expires_at || '' })) })
     }
 
     if (action === 'teachers.list') {
