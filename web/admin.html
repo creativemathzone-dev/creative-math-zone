@@ -1223,6 +1223,7 @@ function ttFields(isEdit) {
     { n: 'EndTime',   l: 'End time',   type: 'time', req: 1 },
     { n: 'BatchID',   l: 'Batch',   type: 'select', req: 1, options: () => activeOnly('batches').map(b => [b.BatchID, b.BatchName + ' (' + b.Class + ')']) },
     { n: 'SubjectID', l: 'Subject', type: 'select', req: 1, options: () => activeOnly('subjects').map(s => [s.SubjectID, s.SubjectName]) },
+    { n: 'CoSubjectID', l: 'Also teaching (optional)', type: 'select', req: 0, blank: 'No combined subject', options: () => activeOnly('subjects').map(s => [s.SubjectID, s.SubjectName]), hint: 'Only Computer Science + Computer Application or Math + WBJEE Math (Math_) can be combined.' },
     { n: 'TeacherID', l: 'Teacher', type: 'select', req: 1, options: () => activeOnly('teachers').map(t => [t.TeacherID, t.Name]) },
     { n: 'RoomID',    l: 'Room',    type: 'select', req: 1, options: () => activeOnly('rooms').map(r => [r.RoomID, r.RoomName]) }
   ];
@@ -1256,7 +1257,7 @@ VIEWS.timetable = async (main) => {
         rows.map(r =>
           '<tr><td data-l="Day"><b>' + dayLabel_(r.Day) + '</b></td>' +
           '<td data-l="Time">' + esc(fmtHM(r.StartTime)) + ' – ' + esc(fmtHM(r.EndTime)) + '</td>' +
-          '<td data-l="Subject">' + esc(r.SubjectName) + '</td>' +
+          '<td data-l="Subject">' + esc(r.SubjectName) + (r.CoSubjectName ? ' + ' + esc(r.CoSubjectName) : '') + '</td>' +
           '<td data-l="Teacher">' + esc(r.TeacherName) + '</td>' +
           '<td data-l="Batch">' + esc(r.BatchName) + '</td>' +
           '<td data-l="Room">' + esc(r.RoomName) + '</td>' +

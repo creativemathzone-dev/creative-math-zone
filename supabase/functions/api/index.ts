@@ -656,7 +656,8 @@ Deno.serve(async (request) => {
       return response({ ok: true, data: (data || []).map((r) => ({ TimetableID: r.id, Day: r.day,
         StartTime: String(r.start_time).slice(0, 5), EndTime: String(r.end_time).slice(0, 5), BatchID: r.batch_id,
         BatchName: batchNames.get(r.batch_id) || r.batch_id, SubjectID: r.subject_id,
-        SubjectName: subjectNames.get(r.subject_id) || r.subject_id, TeacherID: r.teacher_id,
+        SubjectName: subjectNames.get(r.subject_id) || r.subject_id,
+        CoSubjectID: r.co_subject_id || '', CoSubjectName: r.co_subject_id ? subjectNames.get(r.co_subject_id) || r.co_subject_id : '', TeacherID: r.teacher_id,
         TeacherName: teacherNames.get(r.teacher_id) || r.teacher_id, RoomID: r.room_id || '',
         RoomName: r.room_id ? roomNames.get(r.room_id) || r.room_id : '', Status: r.status })) })
     }
@@ -666,7 +667,7 @@ Deno.serve(async (request) => {
       const input = isUpdate ? payload.changes : payload.item
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault('BAD_REQUEST', 'Provide the timetable fields.')
       const map: Record<string, string> = { Day: 'day', StartTime: 'start_time', EndTime: 'end_time', BatchID: 'batch_id',
-        SubjectID: 'subject_id', TeacherID: 'teacher_id', RoomID: 'room_id', Status: 'status' }
+        SubjectID: 'subject_id', CoSubjectID: 'co_subject_id', TeacherID: 'teacher_id', RoomID: 'room_id', Status: 'status' }
       const allowed = isUpdate ? Object.keys(map) : Object.keys(map).filter((x) => x !== 'Status')
       const row: Record<string, unknown> = {}
       for (const [key, raw] of Object.entries(input)) {
@@ -685,8 +686,8 @@ Deno.serve(async (request) => {
           if (!['Active', 'Inactive'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Status must be Active or Inactive.')
           row[column] = status
         } else {
-          const value = requireText(raw, key, 50, key !== 'RoomID')
-          row[column] = key === 'RoomID' && !value ? null : value
+          const value = requireText(raw, key, 50, !['RoomID', 'CoSubjectID'].includes(key))
+          row[column] = ['RoomID', 'CoSubjectID'].includes(key) && !value ? null : value
         }
       }
       const id = isUpdate ? requireText(payload.id, 'Timetable ID', 40, true) : await newId(admin, 'timetable', 'TT-', 4)
@@ -700,14 +701,25 @@ Deno.serve(async (request) => {
       const merged = { ...before, ...row }
       for (const key of ['day','start_time','end_time','batch_id','subject_id','teacher_id']) if (!merged[key]) throw new ApiFault('BAD_REQUEST', `${key} is required.`)
       if (String(merged.end_time) <= String(merged.start_time)) throw new ApiFault('BAD_REQUEST', 'End time must be after start time.')
-      const [{ data: batch }, { data: subject }, { data: teacherRow }, { data: room }] = await Promise.all([
+      const [{ data: batch }, { data: subject }, { data: teacherRow }, { data: room }, { data: coSubject }] = await Promise.all([
         admin.from('batches').select('id,status').eq('id', merged.batch_id).maybeSingle(),
-        admin.from('subjects').select('id,status').eq('id', merged.subject_id).maybeSingle(),
+        admin.from('subjects').select('id,name,status').eq('id', merged.subject_id).maybeSingle(),
         admin.from('teachers').select('id,status').eq('id', merged.teacher_id).maybeSingle(),
         merged.room_id ? admin.from('rooms').select('id,status').eq('id', merged.room_id).maybeSingle() : Promise.resolve({ data: null }),
+        merged.co_subject_id ? admin.from('subjects').select('id,name,status').eq('id', merged.co_subject_id).maybeSingle() : Promise.resolve({ data: null }),
       ])
       if (!batch || batch.status !== 'Active' || !subject || subject.status !== 'Active' || !teacherRow || teacherRow.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Choose active batch, subject and teacher records.')
       if (merged.room_id && (!room || room.status !== 'Active')) throw new ApiFault('BAD_REQUEST', 'Choose an active room.')
+      if (merged.co_subject_id) {
+        if (!coSubject || coSubject.status !== 'Active' || coSubject.id === subject.id) throw new ApiFault('BAD_REQUEST', 'Choose a different active second subject.')
+        const rawNames = [String(subject.name), String(coSubject.name)]
+        const pair = rawNames.map((n) => n.toLowerCase().replace(/[^a-z0-9]+/g, ''))
+        const computerPair = pair.some((n) => n.includes('computerscience')) && pair.some((n) => n.includes('computerapplication'))
+        const hasStandaloneMath = pair.some((n) => n === 'math' || n === 'mathematics')
+        const hasWbjeeMath = rawNames.some((n) => /wbjee|math_/i.test(n))
+        const wbjeePair = hasStandaloneMath && hasWbjeeMath
+        if (!computerPair && !wbjeePair) throw new ApiFault('BAD_REQUEST', 'Combined classes are limited to Computer Science + Computer Application or Math + WBJEE Math.')
+      }
       if (String(merged.status || 'Active') === 'Active') {
         const { data: peers, error } = await admin.from('timetable').select('id,day,start_time,end_time,batch_id,teacher_id,room_id,status').eq('day', merged.day).eq('status', 'Active')
         if (error) throw error
@@ -725,7 +737,7 @@ Deno.serve(async (request) => {
       if (error) throw error
       await logAction(admin, user, isUpdate ? 'EDIT_TIMETABLE' : 'ADD_TIMETABLE', 'TIMETABLE', id, row)
       return response({ ok: true, data: { TimetableID: saved.id, Day: saved.day, StartTime: String(saved.start_time).slice(0, 5),
-        EndTime: String(saved.end_time).slice(0, 5), BatchID: saved.batch_id, SubjectID: saved.subject_id,
+        EndTime: String(saved.end_time).slice(0, 5), BatchID: saved.batch_id, SubjectID: saved.subject_id, CoSubjectID: saved.co_subject_id || '',
         TeacherID: saved.teacher_id, RoomID: saved.room_id || '', Status: saved.status } })
     }
 
@@ -1899,13 +1911,14 @@ Deno.serve(async (request) => {
       if (action === 'student.timetable') {
         if (!(timetable || []).length) return response({ ok: true, data: [] })
         const [sub, teachers, rooms] = await Promise.all([
-          admin.from('subjects').select('id,name').in('id', (timetable || []).map((r) => r.subject_id)),
+          admin.from('subjects').select('id,name').in('id', [...new Set((timetable || []).flatMap((r) => [r.subject_id, r.co_subject_id].filter(Boolean)))]),
           admin.from('teachers').select('id,name').in('id', (timetable || []).map((r) => r.teacher_id)),
           admin.from('rooms').select('id,name').in('id', (timetable || []).map((r) => r.room_id).filter(Boolean)),
         ])
         const sm = new Map((sub.data || []).map((x) => [x.id, x.name])), tm = new Map((teachers.data || []).map((x) => [x.id, x.name])), rm = new Map((rooms.data || []).map((x) => [x.id, x.name]))
         return response({ ok: true, data: (timetable || []).map((r) => ({ TimetableID: r.id, Day: r.day, StartTime: r.start_time, EndTime: r.end_time,
-          SubjectName: sm.get(r.subject_id) || r.subject_id, TeacherName: tm.get(r.teacher_id) || r.teacher_id, RoomName: rm.get(r.room_id) || r.room_id })) })
+          SubjectName: [sm.get(r.subject_id) || r.subject_id, r.co_subject_id ? sm.get(r.co_subject_id) || r.co_subject_id : ''].filter(Boolean).join(' + '),
+          TeacherName: tm.get(r.teacher_id) || r.teacher_id, RoomName: rm.get(r.room_id) || r.room_id })) })
       }
       const days = action === 'student.dashboard' ? 30 : Math.min(Math.max(Number(payload.days) || 60, 1), 400)
       const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
@@ -1924,7 +1937,7 @@ Deno.serve(async (request) => {
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()).toUpperCase()
       const dayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(new Date()).toUpperCase()
       const [{ data: sub }, { data: teachers }, { data: rooms }, { data: sessions }, { data: notices }] = await Promise.all([
-        admin.from('subjects').select('id,name').in('id', (timetable || []).map((r) => r.subject_id)),
+        admin.from('subjects').select('id,name').in('id', [...new Set((timetable || []).flatMap((r) => [r.subject_id, r.co_subject_id].filter(Boolean)))]),
         admin.from('teachers').select('id,name').in('id', (timetable || []).map((r) => r.teacher_id)),
         admin.from('rooms').select('id,name').in('id', (timetable || []).map((r) => r.room_id).filter(Boolean)),
         admin.from('class_sessions').select('id,timetable_id,status').eq('session_date', today),
@@ -1934,7 +1947,8 @@ Deno.serve(async (request) => {
       const activeSubjects = subjectRows.filter((r) => r.status.toUpperCase() === 'ACTIVE').length
       const todayClasses = (timetable || []).filter((r) => r.day.toUpperCase() === dayName).map((r) => {
         const ses = (sessions || []).find((s) => s.timetable_id === r.id && s.status === 'OPEN')
-        return { TimetableID: r.id, StartTime: r.start_time, EndTime: r.end_time, SubjectName: sm.get(r.subject_id) || r.subject_id,
+        return { TimetableID: r.id, StartTime: r.start_time, EndTime: r.end_time,
+          SubjectName: [sm.get(r.subject_id) || r.subject_id, r.co_subject_id ? sm.get(r.co_subject_id) || r.co_subject_id : ''].filter(Boolean).join(' + '),
           TeacherName: tm.get(r.teacher_id) || r.teacher_id, RoomName: rm.get(r.room_id) || r.room_id, ActiveSessionID: ses?.id || null }
       })
       const recentNotices = (notices || []).filter((n) => !n.expires_at || n.expires_at >= today).filter((n) =>
@@ -1953,11 +1967,12 @@ Deno.serve(async (request) => {
       if (ttError) throw ttError
       const tt = timetable || []
       if (action === 'teacher.timetable') {
-        const [sub, batches, rooms] = await Promise.all([admin.from('subjects').select('id,name').in('id', tt.map((r) => r.subject_id)),
+        const [sub, batches, rooms] = await Promise.all([admin.from('subjects').select('id,name').in('id', [...new Set(tt.flatMap((r) => [r.subject_id, r.co_subject_id].filter(Boolean)))]),
           admin.from('batches').select('id,name').in('id', tt.map((r) => r.batch_id)), admin.from('rooms').select('id,name').in('id', tt.map((r) => r.room_id).filter(Boolean))])
         const sm = new Map((sub.data || []).map((x) => [x.id, x.name])), bm = new Map((batches.data || []).map((x) => [x.id, x.name])), rm = new Map((rooms.data || []).map((x) => [x.id, x.name]))
         return response({ ok: true, data: tt.map((r) => ({ TimetableID: r.id, Day: r.day, StartTime: r.start_time, EndTime: r.end_time,
-          BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id, SubjectID: r.subject_id, SubjectName: sm.get(r.subject_id) || r.subject_id,
+          BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id, SubjectID: r.subject_id, CoSubjectID: r.co_subject_id || '',
+          SubjectName: [sm.get(r.subject_id) || r.subject_id, r.co_subject_id ? sm.get(r.co_subject_id) || r.co_subject_id : ''].filter(Boolean).join(' + '),
           RoomID: r.room_id, RoomName: rm.get(r.room_id) || r.room_id })) })
       }
       if (action === 'teacher.students') {
@@ -1985,7 +2000,8 @@ Deno.serve(async (request) => {
         const [subjects, batches] = await Promise.all([admin.from('subjects').select('id,name'), admin.from('batches').select('id,name')])
         const sm = new Map((subjects.data || []).map((x) => [x.id, x.name])), bm = new Map((batches.data || []).map((x) => [x.id, x.name]))
         return response({ ok: true, data: (sessions || []).map((s) => { const m = (marks || []).filter((x) => x.session_id === s.id); return { SessionID: s.id,
-          Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time, BatchName: bm.get(s.batch_id) || s.batch_id, SubjectName: sm.get(s.subject_id) || s.subject_id,
+          Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time, BatchName: bm.get(s.batch_id) || s.batch_id,
+          SubjectName: [sm.get(s.subject_id) || s.subject_id, s.co_subject_id ? sm.get(s.co_subject_id) || s.co_subject_id : ''].filter(Boolean).join(' + '),
           Status: s.status, Present: m.filter((x) => x.status === 'PRESENT').length, Late: m.filter((x) => x.status === 'LATE').length,
           Absent: m.filter((x) => x.status === 'ABSENT').length, Total: m.length } }) })
       }
@@ -2005,7 +2021,9 @@ Deno.serve(async (request) => {
         stats: { students: new Set(activeAssignments.map((r) => r.student_id)).size, subjects: new Set(activeAssignments.map((r) => r.subject_id)).size, todayClasses: todays.length },
         todayClasses: todays.map((r) => { const ses = sessionRows.find((x) => x.timetable_id === r.id && x.status === 'OPEN'); return { TimetableID: r.id,
           StartTime: r.start_time, EndTime: r.end_time, BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id,
-          SubjectID: r.subject_id, SubjectName: sm.get(r.subject_id) || r.subject_id, RoomID: r.room_id, RoomName: rm.get(r.room_id) || r.room_id, ActiveSessionID: ses?.id || null } }) } })
+          SubjectID: r.subject_id, CoSubjectID: r.co_subject_id || '',
+          SubjectName: [sm.get(r.subject_id) || r.subject_id, r.co_subject_id ? sm.get(r.co_subject_id) || r.co_subject_id : ''].filter(Boolean).join(' + '),
+          RoomID: r.room_id, RoomName: rm.get(r.room_id) || r.room_id, ActiveSessionID: ses?.id || null } }) } })
     }
 
     if (action === 'teacher.startClass' || action === 'teacher.regenerateCode' || action === 'student.enterCode') {
@@ -2029,7 +2047,7 @@ Deno.serve(async (request) => {
         const sessionId = await newId(admin, 'class_sessions', `SESSION-${today.replaceAll('-', '')}-`, 3)
         const { error: insertError } = await admin.from('class_sessions').insert({ id: sessionId, timetable_id: slot.id, session_date: today,
           start_time: slot.start_time, end_time: slot.end_time, teacher_id: slot.teacher_id, batch_id: slot.batch_id, subject_id: slot.subject_id,
-          room_id: slot.room_id, attendance_code: code, code_created_at: now.toISOString(), code_expires_at: expires, status: 'OPEN',
+          room_id: slot.room_id, co_subject_id: slot.co_subject_id || null, attendance_code: code, code_created_at: now.toISOString(), code_expires_at: expires, status: 'OPEN',
           started_at: now.toISOString(), academic_year: slot.academic_year })
         if (insertError) {
           if (insertError.code === '23505') return response(fail('CLASS_ALREADY_OPEN', 'A class session is already open for this timetable slot. Refresh the page.'))
@@ -2059,25 +2077,27 @@ Deno.serve(async (request) => {
       if (matchError) throw matchError
       let chosen: any = null
       for (const s of matches || []) {
-        const { data: roster, error: rosterError } = await admin.from('student_subjects').select('id').eq('student_id', user.linked_id).eq('subject_id', s.subject_id).eq('batch_id', s.batch_id).ilike('status', 'active').maybeSingle()
+        const subjectIds = [s.subject_id, s.co_subject_id].filter(Boolean)
+        const { data: roster, error: rosterError } = await admin.from('student_subjects').select('id,subject_id').eq('student_id', user.linked_id).in('subject_id', subjectIds).eq('batch_id', s.batch_id).ilike('status', 'active')
         if (rosterError && rosterError.code !== 'PGRST116') throw rosterError
-        if (roster) { chosen = s; break }
+        const enrollment = (roster || []).find((r) => r.subject_id === s.subject_id) || (roster || [])[0]
+        if (enrollment) { chosen = { ...s, attendance_subject_id: enrollment.subject_id }; break }
       }
       if (!chosen) throw new ApiFault(matches?.length ? 'NOT_IN_CLASS' : 'BAD_CODE', matches?.length ? 'That class is not one of your subjects.' : 'That code is wrong or has expired. Ask your teacher for the current code.')
-      const { data: existing, error: existingError } = await admin.from('attendance').select('status,marked_at').eq('session_id', chosen.id).eq('student_id', user.linked_id).maybeSingle()
+      const { data: existing, error: existingError } = await admin.from('attendance').select('status,marked_at,subject_id').eq('session_id', chosen.id).eq('student_id', user.linked_id).maybeSingle()
       if (existingError) throw existingError
       if (existing) return response({ ok: true, data: { ok: true, alreadyMarked: true, status: existing.status,
-        subjectName: (await admin.from('subjects').select('name').eq('id', chosen.subject_id).maybeSingle()).data?.name || chosen.subject_id, markedAt: existing.marked_at } })
+        subjectName: (await admin.from('subjects').select('name').eq('id', existing.subject_id).maybeSingle()).data?.name || existing.subject_id, markedAt: existing.marked_at } })
       const late = now.getTime() - new Date(chosen.code_created_at || now).getTime() > 120000
       const attendanceId = await newId(admin, 'attendance', 'ATT-', 5)
       const { error: markError } = await admin.from('attendance').insert({ id: attendanceId, session_id: chosen.id, student_id: user.linked_id,
-        subject_id: chosen.subject_id, batch_id: chosen.batch_id, session_date: chosen.session_date, status: late ? 'LATE' : 'PRESENT', marked_by: user.id,
+        subject_id: chosen.attendance_subject_id, batch_id: chosen.batch_id, session_date: chosen.session_date, status: late ? 'LATE' : 'PRESENT', marked_by: user.id,
         method: 'CODE', academic_year: chosen.academic_year })
       if (markError && markError.code !== '23505') throw markError
-      const subject = await admin.from('subjects').select('name').eq('id', chosen.subject_id).maybeSingle()
+      const subject = await admin.from('subjects').select('name').eq('id', chosen.attendance_subject_id).maybeSingle()
       const { data: saved } = await admin.from('attendance').select('status,marked_at').eq('session_id', chosen.id).eq('student_id', user.linked_id).single()
       if (!saved) throw new ApiFault('SERVER_ERROR', 'Attendance was saved but could not be read back. Refresh and check your attendance.')
-      return response({ ok: true, data: { ok: true, alreadyMarked: !!markError, status: saved.status, subjectName: subject.data?.name || chosen.subject_id, markedAt: saved.marked_at } })
+      return response({ ok: true, data: { ok: true, alreadyMarked: !!markError, status: saved.status, subjectName: subject.data?.name || chosen.attendance_subject_id, markedAt: saved.marked_at } })
     }
 
     if (action === 'attendance.sessions') {
@@ -2099,7 +2119,8 @@ Deno.serve(async (request) => {
       const tm = new Map((teachers.data || []).map((x) => [x.id, x.name])), rm = new Map((rooms.data || []).map((x) => [x.id, x.name]))
       return response({ ok: true, data: (sessions || []).map((s) => { const m = (marks.data || []).filter((x) => x.session_id === s.id); return {
         SessionID: s.id, Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time, BatchName: bm.get(s.batch_id) || s.batch_id,
-        SubjectName: sm.get(s.subject_id) || s.subject_id, TeacherName: tm.get(s.teacher_id) || s.teacher_id, RoomName: rm.get(s.room_id) || '', Status: s.status,
+        SubjectName: [sm.get(s.subject_id) || s.subject_id, s.co_subject_id ? sm.get(s.co_subject_id) || s.co_subject_id : ''].filter(Boolean).join(' + '),
+        TeacherName: tm.get(s.teacher_id) || s.teacher_id, RoomName: rm.get(s.room_id) || '', Status: s.status,
         Present: m.filter((x) => x.status === 'PRESENT').length, Late: m.filter((x) => x.status === 'LATE').length, Absent: m.filter((x) => x.status === 'ABSENT').length,
       } }) })
     }
@@ -2114,22 +2135,26 @@ Deno.serve(async (request) => {
       if (action === 'attendance.detail' && !permissionsFor(user).includes('*') && !permissionsFor(user).includes('STUDENT_VIEW')) throw new ApiFault('FORBIDDEN', 'You do not have permission to view attendance.')
       if (action === 'teacher.manualAttendance' || action === 'attendance.correct') {
         const studentId = requireText(payload.studentId, 'Student ID', 60, true)
+        let attendanceSubjectId = s.subject_id
         const status = requireText(payload.status, 'Status', 10, true).toUpperCase()
         if (!['PRESENT', 'LATE', 'ABSENT'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Status must be PRESENT, LATE, or ABSENT.')
         const reason = String(payload.reason || '').trim().slice(0, 200)
         if (action === 'attendance.correct' && !reason) throw new ApiFault('BAD_REQUEST', 'Please give a reason for the correction.')
         if (action === 'teacher.manualAttendance' && s.status !== 'OPEN') throw new ApiFault('BAD_REQUEST', 'This class is closed.')
         if (action === 'teacher.manualAttendance') {
-          const { data: roster, error: rosterError } = await admin.from('student_subjects').select('id').eq('student_id', studentId)
-            .eq('subject_id', s.subject_id).eq('batch_id', s.batch_id).eq('teacher_id', s.teacher_id).ilike('status', 'active').maybeSingle()
+          const classSubjectIds = [s.subject_id, s.co_subject_id].filter(Boolean)
+          const { data: roster, error: rosterError } = await admin.from('student_subjects').select('id,subject_id').eq('student_id', studentId)
+            .in('subject_id', classSubjectIds).eq('batch_id', s.batch_id).eq('teacher_id', s.teacher_id).ilike('status', 'active')
           if (rosterError) throw rosterError
-          if (!roster) throw new ApiFault('BAD_REQUEST', 'This student is not on the class roster.')
+          if (!roster?.length) throw new ApiFault('BAD_REQUEST', 'This student is not on the class roster.')
+          attendanceSubjectId = roster.find((r) => r.subject_id === s.subject_id)?.subject_id || roster[0].subject_id
         }
         const { data: old, error: oldError } = await admin.from('attendance').select('*').eq('session_id', sid).eq('student_id', studentId).maybeSingle()
         if (oldError) throw oldError
+        if (action === 'attendance.correct' && old?.subject_id) attendanceSubjectId = old.subject_id
         if (old?.status === status) return response({ ok: true, data: { ok: true, unchanged: true } })
         const attendanceId = old?.id || await newId(admin, 'attendance', 'ATT-', 5)
-        const { error: saveError } = await admin.from('attendance').upsert({ id: attendanceId, session_id: sid, student_id: studentId, subject_id: s.subject_id,
+        const { error: saveError } = await admin.from('attendance').upsert({ id: attendanceId, session_id: sid, student_id: studentId, subject_id: attendanceSubjectId,
           batch_id: s.batch_id, session_date: s.session_date, status, marked_by: user.id, marked_at: new Date().toISOString(),
           method: action === 'attendance.correct' ? 'ADMIN_CORRECTION' : 'TEACHER_MANUAL', academic_year: s.academic_year }, { onConflict: 'session_id,student_id' })
         if (saveError) throw saveError
@@ -2140,7 +2165,8 @@ Deno.serve(async (request) => {
       }
       if (action === 'teacher.markAll' || action === 'teacher.closeClass') {
         if (s.status !== 'OPEN') return response({ ok: true, data: { ok: true, alreadyClosed: true } })
-        const { data: rosterRows, error: rosterError } = await admin.from('student_subjects').select('student_id').eq('teacher_id', s.teacher_id).eq('batch_id', s.batch_id).eq('subject_id', s.subject_id).ilike('status', 'active')
+        const classSubjectIds = [s.subject_id, s.co_subject_id].filter(Boolean)
+        const { data: rosterRows, error: rosterError } = await admin.from('student_subjects').select('student_id,subject_id').eq('teacher_id', s.teacher_id).eq('batch_id', s.batch_id).in('subject_id', classSubjectIds).ilike('status', 'active')
         if (rosterError) throw rosterError
         const { data: activeStudents, error: activeError } = await admin.from('students').select('id').in('id', [...new Set((rosterRows || []).map((r) => r.student_id))]).ilike('status', 'active')
         if (activeError) throw activeError
@@ -2151,8 +2177,12 @@ Deno.serve(async (request) => {
         const status = action === 'teacher.markAll' ? (String(payload.status || 'PRESENT').toUpperCase()) : 'ABSENT'
         if (!['PRESENT', 'LATE', 'ABSENT'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Invalid attendance status.')
         const remaining = (activeStudents || []).filter((r) => !have.has(r.id))
+        const assignedSubject = new Map<string, string>()
+        for (const r of rosterRows || []) {
+          if (!assignedSubject.has(r.student_id) || r.subject_id === s.subject_id) assignedSubject.set(r.student_id, r.subject_id)
+        }
         const rows = (action === 'teacher.markAll' || markAbsent) ? remaining.map((r) => ({ id: `ATT-${crypto.randomUUID()}`, session_id: sid, student_id: r.id,
-          subject_id: s.subject_id, batch_id: s.batch_id, session_date: s.session_date, status, marked_by: user.id, method: 'TEACHER_MANUAL', academic_year: s.academic_year })) : []
+          subject_id: assignedSubject.get(r.id) || s.subject_id, batch_id: s.batch_id, session_date: s.session_date, status, marked_by: user.id, method: 'TEACHER_MANUAL', academic_year: s.academic_year })) : []
         for (let i = 0; i < rows.length; i += 200) {
           const { error } = await admin.from('attendance').upsert(rows.slice(i, i + 200), { onConflict: 'session_id,student_id', ignoreDuplicates: true })
           if (error) throw error
@@ -2167,8 +2197,8 @@ Deno.serve(async (request) => {
       const { data: marks, error: marksError } = await admin.from('attendance').select('*').eq('session_id', sid)
       if (marksError) throw marksError
       const [{ data: rosterRows }, { data: students }, { data: subjects }, { data: batches }, { data: teachers }, { data: rooms }] = await Promise.all([
-        admin.from('student_subjects').select('student_id').eq('teacher_id', s.teacher_id).eq('batch_id', s.batch_id).eq('subject_id', s.subject_id).ilike('status', 'active'),
-        admin.from('students').select('id,name,roll_no'), admin.from('subjects').select('id,name').eq('id', s.subject_id),
+        admin.from('student_subjects').select('student_id').eq('teacher_id', s.teacher_id).eq('batch_id', s.batch_id).in('subject_id', [s.subject_id, s.co_subject_id].filter(Boolean)).ilike('status', 'active'),
+        admin.from('students').select('id,name,roll_no'), admin.from('subjects').select('id,name').in('id', [s.subject_id, s.co_subject_id].filter(Boolean)),
         admin.from('batches').select('id,name').eq('id', s.batch_id), admin.from('teachers').select('id,name').eq('id', s.teacher_id), admin.from('rooms').select('id,name').eq('id', s.room_id || ''),
       ])
       const rosterIds = new Set((rosterRows || []).map((r) => r.student_id)), marked = new Map((marks || []).map((r) => [r.student_id, r]))
@@ -2176,11 +2206,12 @@ Deno.serve(async (request) => {
       const byStatus = { PRESENT: 0, LATE: 0, ABSENT: 0 }; for (const r of marks || []) if (r.status in byStatus) byStatus[r.status as keyof typeof byStatus]++
       const studentData = roster.map((r) => { const a = marked.get(r.id); return { StudentID: r.id, Name: r.name, RollNo: r.roll_no || '', Status: a?.status || null, Method: a?.method || null, MarkedAt: a?.marked_at || null } })
       if (action === 'teacher.classStatus') return response({ ok: true, data: { session: { SessionID: sid, Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time,
-        BatchName: batches?.[0]?.name || s.batch_id, SubjectName: subjects?.[0]?.name || s.subject_id, RoomName: rooms?.[0]?.name || '', Status: s.status,
-        AttendanceCode: s.attendance_code, CodeExpiresAt: s.code_expires_at, StartedAt: s.started_at, ClosedAt: s.closed_at }, students: studentData,
+        BatchName: batches?.[0]?.name || s.batch_id, SubjectName: [s.subject_id, s.co_subject_id].filter(Boolean).map((id) => (subjects || []).find((x) => x.id === id)?.name || id).join(' + '), RoomName: rooms?.[0]?.name || '', Status: s.status,
+        AttendanceCode: s.attendance_code, CodeExpiresAt: s.code_expires_at, CodeSecondsLeft: Math.max(0, Math.ceil((new Date(s.code_expires_at || 0).getTime() - Date.now()) / 1000)), StartedAt: s.started_at, ClosedAt: s.closed_at }, students: studentData,
         counts: { total: roster.length, present: byStatus.PRESENT, late: byStatus.LATE, absent: byStatus.ABSENT, unmarked: Math.max(0, roster.length - (byStatus.PRESENT + byStatus.LATE + byStatus.ABSENT)) } } })
       if (action === 'attendance.detail') return response({ ok: true, data: { session: { SessionID: sid, Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time,
-        BatchName: batches?.[0]?.name || s.batch_id, SubjectName: subjects?.[0]?.name || s.subject_id, TeacherName: teachers?.[0]?.name || s.teacher_id, RoomName: rooms?.[0]?.name || '', Status: s.status }, students: studentData } })
+        BatchName: batches?.[0]?.name || s.batch_id, SubjectName: [s.subject_id, s.co_subject_id].filter(Boolean).map((id) => (subjects || []).find((x) => x.id === id)?.name || id).join(' + '),
+        TeacherName: teachers?.[0]?.name || s.teacher_id, RoomName: rooms?.[0]?.name || '', Status: s.status }, students: studentData } })
       throw new ApiFault('BAD_REQUEST', 'Unsupported attendance action.')
     }
 

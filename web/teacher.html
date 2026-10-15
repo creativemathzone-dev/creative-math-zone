@@ -536,7 +536,8 @@ VIEWS.live = async (main, sessionId) => {
   const render = st => {
     const s = st.session, c = st.counts;
     lastTotal = c.total;
-    const secLeft = st.codeSecondsLeft;
+    const parsedSeconds = Number(s.CodeSecondsLeft);
+    const secLeft = Number.isFinite(parsedSeconds) ? Math.max(0, parsedSeconds) : 0;
     const mm = Math.floor(secLeft / 60), ss = secLeft % 60;
     const timerCls = secLeft <= 0 ? 'bad' : (secLeft <= 60 ? 'warn' : '');
     const timerText = secLeft <= 0 ? 'Expired — tap “New code”' : 'Expires in '+mm+':'+String(ss).padStart(2,'0');
