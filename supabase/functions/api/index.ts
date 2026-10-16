@@ -588,6 +588,8 @@ Deno.serve(async (request) => {
       'payments.record': 'FINANCE_EDIT', 'receipts.list': 'FINANCE_VIEW',
       'receipts.get': 'FINANCE_VIEW', 'receipts.void': 'FINANCE_EDIT',
       'student.invoices': 'SELF_VIEW', 'student.receipt': 'SELF_VIEW', 'student.invoiceDoc': 'SELF_VIEW',
+      'teacher.homework.list': 'SELF_VIEW', 'teacher.homework.create': 'CLASS_RUN', 'teacher.homework.review': 'CLASS_RUN',
+      'student.homework.list': 'SELF_VIEW', 'student.homework.submit': 'SELF_VIEW',
       'teacher.dashboard': 'SELF_VIEW', 'teacher.timetable': 'SELF_VIEW', 'teacher.students': 'SELF_VIEW',
       'teacher.startClass': 'CLASS_RUN', 'teacher.regenerateCode': 'CLASS_RUN', 'teacher.classStatus': 'CLASS_RUN',
       'teacher.manualAttendance': 'ATTENDANCE_MARK', 'teacher.markAll': 'ATTENDANCE_MARK',
@@ -611,6 +613,122 @@ Deno.serve(async (request) => {
       if (error) throw error
       const stamp = data?.logged_at || '0'
       return response({ ok: true, data: { v: stamp, l: stamp } })
+    }
+
+    if (action === 'teacher.homework.list' || action === 'teacher.homework.create' || action === 'teacher.homework.review') {
+      if (user.user_type !== 'TEACHER' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only available to a linked teacher account.')
+      if (action === 'teacher.homework.create') {
+        const title = requireText(payload.title, 'Title', 150, true)
+        const instructions = requireText(payload.instructions, 'Instructions', 5000)
+        const batchId = requireText(payload.batchId, 'Batch', 60, true)
+        const subjectId = requireText(payload.subjectId, 'Subject', 60)
+        const dueText = requireText(payload.dueAt, 'Due date and time', 50, true)
+        const dueAt = new Date(dueText)
+        if (!Number.isFinite(dueAt.getTime())) throw new ApiFault('BAD_REQUEST', 'Enter a valid due date and time.')
+        if (dueAt.getTime() <= Date.now()) throw new ApiFault('BAD_REQUEST', 'The due time must be in the future.')
+        const materials = Array.isArray(payload.materials) ? payload.materials.slice(0, 5).map((v: unknown) => {
+          const url = requireText(v, 'Material link', 500, true)
+          let parsed: URL
+          try { parsed = new URL(url) } catch { throw new ApiFault('BAD_REQUEST', 'Material links must be valid http or https URLs.') }
+          if (!['http:', 'https:'].includes(parsed.protocol)) throw new ApiFault('BAD_REQUEST', 'Material links must use http or https.')
+          return url
+        }) : []
+        const [{ data: teacher }, { data: slots }, { data: assigned }] = await Promise.all([
+          admin.from('teachers').select('id').eq('id', user.linked_id).maybeSingle(),
+          admin.from('timetable').select('id,subject_id,co_subject_id').eq('teacher_id', user.linked_id).eq('batch_id', batchId).ilike('status', 'active'),
+          admin.from('student_subjects').select('subject_id').eq('teacher_id', user.linked_id).eq('batch_id', batchId).ilike('status', 'active'),
+        ])
+        if (!teacher) throw new ApiFault('NOT_FOUND', 'Teacher record not found.')
+        const allowedSubjects = new Set([...(slots || []).flatMap((s) => [s.subject_id, s.co_subject_id]), ...(assigned || []).map((s) => s.subject_id)])
+        if (!(slots || []).length && !(assigned || []).length) throw new ApiFault('FORBIDDEN', 'You are not assigned to this batch.')
+        if (subjectId && !allowedSubjects.has(subjectId)) throw new ApiFault('FORBIDDEN', 'You are not assigned to this subject in the selected batch.')
+        const id = await newId(admin, 'homework', 'HW-', 5)
+        const { error } = await admin.from('homework').insert({ id, teacher_id: user.linked_id, batch_id: batchId,
+          subject_id: subjectId || null, title, instructions, materials, due_at: dueAt?.toISOString() || null })
+        if (error) throw error
+        await logAction(admin, user, 'CREATE_HOMEWORK', 'HOMEWORK', id, { batchId, subjectId, dueAt: dueAt?.toISOString() || null })
+        return response({ ok: true, data: { id } })
+      }
+      if (action === 'teacher.homework.review') {
+        const homeworkId = requireText(payload.homeworkId, 'Homework', 60, true)
+        const submissionId = requireText(payload.submissionId, 'Submission', 60, true)
+        const feedback = requireText(payload.feedback, 'Feedback', 2000)
+        const { data: hw, error: hwError } = await admin.from('homework').select('id').eq('id', homeworkId).eq('teacher_id', user.linked_id).maybeSingle()
+        if (hwError) throw hwError
+        if (!hw) throw new ApiFault('NOT_FOUND', 'Homework not found.')
+        const { data: submission, error } = await admin.from('homework_submissions').update({ feedback, status: 'REVIEWED', reviewed_at: new Date().toISOString() })
+          .eq('id', submissionId).eq('homework_id', homeworkId).select('id').maybeSingle()
+        if (error) throw error
+        if (!submission) throw new ApiFault('NOT_FOUND', 'Submission not found.')
+        return response({ ok: true, data: { reviewed: true } })
+      }
+      const { data: rows, error } = await admin.from('homework').select('*').eq('teacher_id', user.linked_id).order('created_at', { ascending: false }).limit(300)
+      if (error) throw error
+      const list = rows || []
+      const batchIds = [...new Set(list.map((x) => x.batch_id))], subjectIds = [...new Set(list.map((x) => x.subject_id).filter(Boolean))]
+      const ids = list.map((x) => x.id)
+      const [{ data: batches }, { data: subjects }, { data: submissions }] = await Promise.all([
+        batchIds.length ? admin.from('batches').select('id,name').in('id', batchIds) : Promise.resolve({ data: [] }),
+        subjectIds.length ? admin.from('subjects').select('id,name').in('id', subjectIds) : Promise.resolve({ data: [] }),
+        ids.length ? admin.from('homework_submissions').select('*').in('homework_id', ids).order('submitted_at', { ascending: false }) : Promise.resolve({ data: [] }),
+      ])
+      const studentIds = [...new Set((submissions || []).map((x) => x.student_id))]
+      const { data: students } = studentIds.length ? await admin.from('students').select('id,name').in('id', studentIds) : { data: [] }
+      const bm = new Map((batches || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name])), stm = new Map((students || []).map((x) => [x.id, x.name]))
+      const subMap = new Map<string, any[]>()
+      for (const row of submissions || []) subMap.set(row.homework_id, [...(subMap.get(row.homework_id) || []), {
+        SubmissionID: row.id, StudentID: row.student_id, StudentName: stm.get(row.student_id) || row.student_id,
+        Answer: row.answer, AttachmentURL: row.attachment_url, Status: row.status, Feedback: row.feedback, SubmittedAt: row.submitted_at }])
+      return response({ ok: true, data: list.map((r) => ({ HomeworkID: r.id, Title: r.title, Instructions: r.instructions,
+        BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id, SubjectID: r.subject_id || '', SubjectName: sm.get(r.subject_id) || '',
+        Materials: Array.isArray(r.materials) ? r.materials : [], DueAt: r.due_at || '', Status: r.status,
+        Expired: !!r.due_at && new Date(r.due_at).getTime() <= Date.now(), Submissions: subMap.get(r.id) || [] })) })
+    }
+
+    if (action === 'student.homework.list' || action === 'student.homework.submit') {
+      if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only available to a linked student account.')
+      const { data: student, error: studentError } = await admin.from('students').select('id,current_batch_id').eq('id', user.linked_id).maybeSingle()
+      if (studentError) throw studentError
+      if (!student) throw new ApiFault('NOT_FOUND', 'Student record not found.')
+      const { data: assigned } = await admin.from('student_subjects').select('batch_id').eq('student_id', student.id).ilike('status', 'active')
+      const batchIds = [...new Set([student.current_batch_id, ...(assigned || []).map((x) => x.batch_id)].filter(Boolean))]
+      if (action === 'student.homework.submit') {
+        const homeworkId = requireText(payload.homeworkId, 'Homework', 60, true)
+        const answer = requireText(payload.answer, 'Answer', 5000)
+        const attachmentUrl = requireText(payload.attachmentUrl, 'Attachment link', 500, false)
+        if (!answer && !attachmentUrl) throw new ApiFault('BAD_REQUEST', 'Write an answer or provide a submission link.')
+        if (attachmentUrl) { let url: URL; try { url = new URL(attachmentUrl) } catch { throw new ApiFault('BAD_REQUEST', 'Submission link must be a valid http or https URL.') }; if (!['http:', 'https:'].includes(url.protocol)) throw new ApiFault('BAD_REQUEST', 'Submission links must use http or https.') }
+        const { data: hw, error } = await admin.from('homework').select('id,due_at,batch_id,status').eq('id', homeworkId).eq('status', 'Active').maybeSingle()
+        if (error) throw error
+        if (!hw || !batchIds.includes(hw.batch_id)) throw new ApiFault('NOT_FOUND', 'Homework not found for your class.')
+        if (hw.due_at && new Date(hw.due_at).getTime() <= Date.now()) throw new ApiFault('EXPIRED', 'The homework deadline has passed; submissions are closed.')
+        const { data: prior } = await admin.from('homework_submissions').select('id').eq('homework_id', homeworkId).eq('student_id', student.id).maybeSingle()
+        const values = { answer, attachment_url: attachmentUrl, status: 'SUBMITTED', feedback: '', submitted_at: new Date().toISOString(), reviewed_at: null }
+        const result = prior
+          ? await admin.from('homework_submissions').update(values).eq('id', prior.id).select('id').single()
+          : await admin.from('homework_submissions').insert({ id: `HWS-${crypto.randomUUID()}`, homework_id: homeworkId, student_id: student.id, ...values }).select('id').single()
+        if (result.error) throw result.error
+        return response({ ok: true, data: { submitted: true } })
+      }
+      const { data: rows, error } = batchIds.length
+        ? await admin.from('homework').select('*').in('batch_id', batchIds).eq('status', 'Active').order('due_at', { ascending: true }).limit(500)
+        : { data: [], error: null }
+      if (error) throw error
+      const currentRows = (rows || []).filter((x) => !x.due_at || new Date(x.due_at).getTime() > Date.now())
+      const ids = currentRows.map((x) => x.id)
+      const { data: submissions } = ids.length ? await admin.from('homework_submissions').select('*').eq('student_id', student.id).in('homework_id', ids) : { data: [] }
+      const subMap = new Map((submissions || []).map((x) => [x.homework_id, x]))
+      const teacherIds = [...new Set(currentRows.map((x) => x.teacher_id))], subjectIds = [...new Set(currentRows.map((x) => x.subject_id).filter(Boolean))]
+      const [{ data: teachers }, { data: subjects }, { data: batches }] = await Promise.all([
+        teacherIds.length ? admin.from('teachers').select('id,name').in('id', teacherIds) : Promise.resolve({ data: [] }),
+        subjectIds.length ? admin.from('subjects').select('id,name').in('id', subjectIds) : Promise.resolve({ data: [] }),
+        batchIds.length ? admin.from('batches').select('id,name').in('id', batchIds) : Promise.resolve({ data: [] }),
+      ])
+      const tm = new Map((teachers || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name])), bm = new Map((batches || []).map((x) => [x.id, x.name]))
+      return response({ ok: true, data: currentRows.map((r) => { const sub = subMap.get(r.id); return { HomeworkID: r.id, Title: r.title,
+        Instructions: r.instructions, TeacherName: tm.get(r.teacher_id) || '', SubjectName: sm.get(r.subject_id) || '', BatchName: bm.get(r.batch_id) || '',
+        Materials: Array.isArray(r.materials) ? r.materials : [], DueAt: r.due_at || '', Submission: sub ? { Answer: sub.answer,
+          AttachmentURL: sub.attachment_url, Status: sub.status, Feedback: sub.feedback, SubmittedAt: sub.submitted_at } : null } }) })
     }
 
     if (action === 'subjects.list') {
@@ -1972,6 +2090,7 @@ Deno.serve(async (request) => {
         const sm = new Map((sub.data || []).map((x) => [x.id, x.name])), bm = new Map((batches.data || []).map((x) => [x.id, x.name])), rm = new Map((rooms.data || []).map((x) => [x.id, x.name]))
         return response({ ok: true, data: tt.map((r) => ({ TimetableID: r.id, Day: r.day, StartTime: r.start_time, EndTime: r.end_time,
           BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id, SubjectID: r.subject_id, CoSubjectID: r.co_subject_id || '',
+          SubjectOptions: [r.subject_id, r.co_subject_id].filter(Boolean).map((id) => ({ id, name: sm.get(id) || id })),
           SubjectName: [sm.get(r.subject_id) || r.subject_id, r.co_subject_id ? sm.get(r.co_subject_id) || r.co_subject_id : ''].filter(Boolean).join(' + '),
           RoomID: r.room_id, RoomName: rm.get(r.room_id) || r.room_id })) })
       }

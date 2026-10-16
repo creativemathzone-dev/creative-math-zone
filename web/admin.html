@@ -757,7 +757,7 @@ VIEWS.student = async (main, id) => {
 
   main.innerHTML = '<p><button class="link" data-go-back>← All students</button></p>' +
     '<div class="head"><div><h1>' + esc(s.Name) + '</h1><p>' + esc(s.StudentID) + ' · Class ' + esc(s.CurrentClass) + ' · ' + esc(nameOf('batches', 'BatchID', 'BatchName', s.CurrentBatch) || 'No batch') + ' · ' + pill(s.Status) + '</p></div>' +
-    (editable ? '<button class="btn" id="reset-pw">Reset password</button>' : '') + '</div>' +
+    '<div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn" id="student-id-print">Print ID card</button><button class="btn" id="student-cert-print">Print certificate</button>' + (editable ? '<button class="btn" id="reset-pw">Reset password</button>' : '') + '</div></div>' +
     '<div class="tabs" role="tablist">' +
       '<button role="tab" aria-selected="true" data-tab="p">Profile</button>' +
       '<button role="tab" aria-selected="false" data-tab="s">Subjects (' + activeSubjects + ')</button>' +
@@ -776,6 +776,8 @@ VIEWS.student = async (main, id) => {
 
   wireClassBatch($('#ef'), s.CurrentBatch);
   $('[data-go-back]', main).addEventListener('click', () => go('students'));
+  $('#student-id-print').addEventListener('click', () => printStudentDocument(s, 'id'));
+  $('#student-cert-print').addEventListener('click', () => printStudentDocument(s, 'certificate'));
 
   const tabKeys = canFinance && fees ? ['p', 's', 'f', 'h'] : ['p', 's', 'h'];
   $$('[data-tab]', main).forEach(b => b.addEventListener('click', () => {
@@ -800,6 +802,25 @@ VIEWS.student = async (main, id) => {
     wireFeeDiscounts(main, fees, id);
   }
 };
+
+function printStudentDocument(student, kind) {
+  const title = kind === 'certificate' ? (prompt('Certificate title', 'Certificate of Achievement') || '').trim() : '';
+  if (kind === 'certificate' && !title) return;
+  const safe = v => esc(v || '');
+  const centre = safe(S.cfg && (S.cfg.centreName || S.cfg.CENTRE_NAME) || 'Creative Math Zone');
+  const logoRaw = S.cfg && (S.cfg.logoUrl || S.cfg.LOGO_URL) || './icons/creative-math-zone-logo.png';
+  const logo = safe(/^(https?:\/\/)/i.test(logoRaw) ? logoRaw : new URL('./icons/creative-math-zone-logo.png', location.href).href);
+  const photoRaw = String(student.PhotoURL || '');
+  const photo = /^(https?:\/\/)/i.test(photoRaw) ? safe(photoRaw) : '';
+  const batch = nameOf('batches', 'BatchID', 'BatchName', student.CurrentBatch) || '—';
+  const body = kind === 'id'
+    ? '<article class="idcard"><header><img src="'+logo+'" alt="" onerror="this.style.display=\'none\'"><div><b>'+centre+'</b><small>STUDENT ID CARD</small></div></header><section>'+(photo?'<img class="photo" src="'+photo+'" alt="Student photo">':'<div class="photo blank">CMZ</div>')+'<div><h1>'+safe(student.Name)+'</h1><p><b>ID:</b> '+safe(student.StudentID)+'</p><p><b>Class:</b> '+safe(student.CurrentClass)+' · '+safe(batch)+'</p><p><b>Parent:</b> '+safe(student.ParentName||'—')+'</p><p><b>Contact:</b> '+safe(student.ParentMobile||student.Mobile||'—')+'</p></div></section><footer>Academic year '+safe(student.AcademicYear||'')+'</footer></article>'
+    : '<article class="certificate"><img src="'+logo+'" alt="" onerror="this.style.display=\'none\'"><div class="eyebrow">'+centre+'</div><h1>'+safe(title)+'</h1><p>This certificate is proudly presented to</p><h2>'+safe(student.Name)+'</h2><p>of Class '+safe(student.CurrentClass)+' for sincere effort and achievement.</p><div class="meta">Student ID: '+safe(student.StudentID)+' · '+safe(batch)+'</div><div class="sign"><span>Teacher</span><span>Centre Director</span></div><div class="date">Date: __________________</div></article>';
+  const w = window.open('', '_blank', 'width=900,height=700');
+  if (!w) { toast('Allow pop-ups to print this document.', true); return; }
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>'+safe(kind==='id'?'Student ID card':title)+'</title><style>body{font-family:Arial,sans-serif;color:#18263d;margin:0;padding:30px;background:#fff}.idcard{width:340px;border:2px solid #16243b;border-radius:16px;overflow:hidden}.idcard header{display:flex;align-items:center;gap:12px;padding:14px;background:#16243b;color:white}.idcard header img{width:48px;height:48px;border-radius:50%;object-fit:cover}.idcard header b{font-size:18px}.idcard small{display:block;letter-spacing:2px;margin-top:4px}.idcard section{display:flex;gap:14px;padding:18px 14px;align-items:center}.idcard .photo{width:86px;height:110px;object-fit:cover;border-radius:8px}.blank{display:grid;place-items:center;background:#e8eff8;font-weight:bold}.idcard h1{font-size:20px;margin:0 0 10px}.idcard p{font-size:13px;margin:5px 0}.idcard footer{padding:10px;background:#f3b11c;text-align:center;font-size:12px}.certificate{max-width:760px;margin:35px auto;text-align:center;border:10px double #f3b11c;padding:45px 55px;min-height:440px}.certificate img{width:72px;height:72px;object-fit:cover;border-radius:50%}.eyebrow{font-size:20px;font-weight:bold;letter-spacing:2px;margin:10px}.certificate h1{font-family:Georgia,serif;font-size:38px;color:#16243b;margin:36px 0}.certificate h2{font-family:Georgia,serif;font-size:32px;border-bottom:1px solid #c8d3e2;display:inline-block;padding:0 40px 8px}.certificate p{font-size:18px}.meta{margin:28px}.sign{display:flex;justify-content:space-between;margin:70px 30px 0}.sign span{border-top:1px solid #16243b;padding:8px 25px}.date{text-align:left;margin-top:35px}@media print{body{padding:0}.idcard,.certificate{break-inside:avoid}}</style></head><body>'+body+'<script>window.onload=()=>window.print()<\/script></body></html>');
+  w.document.close();
+}
 
 function renderFeesPanel(fees) {
   if (!fees.lines.length) {

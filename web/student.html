@@ -536,7 +536,7 @@ $('#logout').addEventListener('click', doLogout);
 $('#pw-out').addEventListener('click', doLogout);
 
 /* ---- nav ---- */
-const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['subjects','Subjects'],['attendance','Attendance'],['fees','Fees'],['notices','Notices'],['profile','Profile']];
+const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['subjects','Subjects'],['attendance','Attendance'],['fees','Fees'],['homework','Homework'],['notices','Notices'],['profile','Profile']];
 function buildNav(){ $('#nav-items').innerHTML = NAV.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join(''); }
 function go(view){ S.view=view; $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
@@ -550,7 +550,7 @@ const VIEWS = {};
 
 /* ---- dashboard ---- */
 VIEWS.dashboard = async main => {
-  const d = await api('student.dashboard');
+  const [d, homework] = await Promise.all([api('student.dashboard'), api('student.homework.list')]);
   const st = d.student, s = d.stats;
   const classesHtml = d.todayClasses.length ? '<ul class="schedule">' + d.todayClasses.map(c =>
     '<li><span class="t">'+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</span><div class="d"><b>'+esc(c.SubjectName)+'</b><span>'+esc(c.TeacherName)+(c.RoomName?' · '+esc(c.RoomName):'')+'</span></div></li>'
@@ -559,6 +559,10 @@ VIEWS.dashboard = async main => {
   const noticesHtml = d.recentNotices.length ? d.recentNotices.map(n =>
     '<div style="padding:.6rem 0;border-bottom:1px solid var(--line)"><b>'+esc(n.Title)+'</b><div class="muted" style="font-size:.85rem">'+esc(fmtTime(n.PostedAt))+'</div><div style="margin-top:.3rem">'+esc(String(n.Body||'').slice(0,180))+'</div></div>'
   ).join('') + '<p style="margin-top:.75rem"><button class="link" data-go="notices">See all notices →</button></p>' : '<div class="empty"><b>No notices yet</b>Announcements from the centre will appear here.</div>';
+  const homeworkAlerts = homework.filter(h => !h.Submission).slice(0, 3);
+  const homeworkHtml = homeworkAlerts.length ? '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Homework alerts</h2>' + homeworkAlerts.map(h =>
+    '<div style="padding:.6rem 0;border-bottom:1px solid var(--line)"><b>'+esc(h.Title)+'</b> · '+esc(h.SubjectName||'Class work')+'<div class="muted">Due '+esc(new Date(h.DueAt).toLocaleString())+'</div></div>'
+  ).join('') + '<p style="margin:.7rem 0 0"><button class="link" data-go="homework">Open homework →</button></p></div>' : '';
 
   main.innerHTML =
     '<div class="head"><h1>Welcome, '+esc(st.Name)+'</h1><p>'+esc(st.StudentID)+' · Class '+esc(st.CurrentClass)+' · '+esc(batchLabel(st.CurrentBatch))+'</p></div>' +
@@ -571,6 +575,7 @@ VIEWS.dashboard = async main => {
     '</div>' +
 
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Today\'s classes</h2>'+classesHtml+'</div>' +
+    homeworkHtml +
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Latest notices</h2>'+noticesHtml+'</div>';
   main.addEventListener('click', ev => { const b = ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
 };
@@ -715,6 +720,29 @@ VIEWS.notices = async main => {
     (rows.length ? '<div class="card">' + rows.map(n =>
       '<div style="padding:.8rem 0;border-bottom:1px solid var(--line)"><b>'+esc(n.Title)+'</b> '+pill(n.Audience||'ALL')+'<div class="muted" style="font-size:.85rem">'+esc(fmtTime(n.PostedAt))+(n.ExpiresAt?' · expires '+esc(fmtDate(n.ExpiresAt)):'')+'</div><div style="margin-top:.4rem;white-space:pre-wrap">'+esc(n.Body||'')+'</div></div>'
     ).join('') + '</div>' : '<div class="card empty"><b>No notices yet</b>Announcements will appear here.</div>');
+};
+
+/* ---- homework ---- */
+VIEWS.homework = async main => {
+  const rows = await api('student.homework.list');
+  const dueLabel = due => due ? new Date(due).toLocaleString() : 'No deadline';
+  main.innerHTML = '<div class="head"><h1>Homework</h1><p>Assignments, lesson materials, deadlines, and your submissions</p></div>' +
+    (rows.length ? rows.map(h => '<div class="card"><div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:center"><div><h2 style="font-size:1.15rem">'+esc(h.Title)+'</h2><div class="muted">'+esc(h.SubjectName||'Class work')+' · '+esc(h.TeacherName)+' · '+esc(h.BatchName)+'</div></div>'+
+      '<span class="pill '+(h.Submission?'ok':'warn')+'">'+(h.Submission?(h.Submission.Status==='REVIEWED'?'Reviewed':'Submitted'):'Not submitted')+'</span></div>'+
+      '<p class="muted">Due: '+esc(dueLabel(h.DueAt))+'</p><div style="white-space:pre-wrap">'+esc(h.Instructions||'')+'</div>'+
+      (h.Materials.length?'<div style="margin-top:.7rem"><b>Class materials</b><ul>'+h.Materials.map(u=>'<li><a href="'+esc(u)+'" target="_blank" rel="noopener">Open material</a></li>').join('')+'</ul></div>':'')+
+      (h.Submission&&h.Submission.Feedback?'<div class="alert info" style="margin-top:.8rem"><b>Teacher feedback</b><br>'+esc(h.Submission.Feedback)+'</div>':'')+
+      '<form data-hw-form="'+esc(h.HomeworkID)+'" style="margin-top:1rem"><label class="f"><span>Your answer</span><textarea name="answer" rows="4" maxlength="5000" placeholder="Type your answer" style="width:100%;padding:.65rem;border:1px solid var(--line);border-radius:8px">'+esc(h.Submission?h.Submission.Answer:'')+'</textarea></label>'+
+      '<label class="f"><span>Optional link to your work</span><input name="attachmentUrl" type="url" maxlength="500" placeholder="https://…" value="'+esc(h.Submission?h.Submission.AttachmentURL:'')+'"></label>'+
+      '<small class="muted">Draft answers are saved in this browser tab while you work. Submit before the deadline; drafts are not sent until you submit.</small><button class="btn primary">'+(h.Submission?'Update submission':'Submit homework')+'</button></form></div>').join('') : '<div class="card empty"><b>No current homework</b>New assignments from your teacher will appear here. Work past its deadline is removed from this student view.</div>');
+  $$('[data-hw-form]',main).forEach(form=>{
+    const key='cmz_hw_'+(S.user&&S.user.linkedId||'student')+'_'+form.dataset.hwForm;
+    let draft=null;try{draft=JSON.parse(sessionStorage.getItem(key)||'null')}catch(e){}
+    if(draft){form.elements.answer.value=draft.answer||form.elements.answer.value;form.elements.attachmentUrl.value=draft.attachmentUrl||form.elements.attachmentUrl.value;}
+    const saveDraft=()=>{try{sessionStorage.setItem(key,JSON.stringify({answer:form.elements.answer.value,attachmentUrl:form.elements.attachmentUrl.value}));}catch(e){}};
+    form.elements.answer.addEventListener('input',saveDraft);form.elements.attachmentUrl.addEventListener('input',saveDraft);
+    form.addEventListener('submit',ev=>{ev.preventDefault();const b=form.querySelector('button');busy(b,async()=>{await api('student.homework.submit',{homeworkId:form.dataset.hwForm,answer:form.elements.answer.value.trim(),attachmentUrl:form.elements.attachmentUrl.value.trim()});try{sessionStorage.removeItem(key)}catch(e){}toast('Homework submitted.');go('homework');});});
+  });
 };
 
 /* ---- profile ---- */

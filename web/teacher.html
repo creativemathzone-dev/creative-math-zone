@@ -474,7 +474,7 @@ $('#logout').addEventListener('click', doLogout);
 $('#pw-out').addEventListener('click', doLogout);
 
 /* ---- nav ---- */
-const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['students','My students'],['sessions','Past classes'],['notices','Notices'],['income','Income'],['profile','Profile']];
+const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['students','My students'],['sessions','Past classes'],['homework','Homework'],['notices','Notices'],['income','Income'],['profile','Profile']];
 function buildNav(){
   const list = NAV.filter(n => n[0] !== 'income' || can('TEACHER_INCOME_VIEW'));
   $('#nav-items').innerHTML = list.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join('');
@@ -655,6 +655,47 @@ VIEWS.sessions = async main => {
       rows.map(s => '<tr><td data-l="Date">'+esc(fmtDate(s.Date))+'</td><td data-l="Subject">'+esc(s.SubjectName)+'</td><td data-l="Batch">'+esc(s.BatchName)+'</td>' +
         '<td data-l="Present"><b>'+s.Present+'</b></td><td data-l="Late">'+s.Late+'</td><td data-l="Absent">'+s.Absent+'</td><td data-l="Total">'+s.Total+'</td><td>'+pill(s.Status)+'</td></tr>').join('') + '</tbody></table></div>' :
       '<div class="card empty"><b>No classes yet</b>Start a class from the dashboard.</div>');
+};
+
+/* ---- homework ---- */
+VIEWS.homework = async main => {
+  const [rows, slots] = await Promise.all([api('teacher.homework.list'), api('teacher.timetable')]);
+  const pairs = new Map();
+  slots.forEach(s => (s.SubjectOptions || [{id:s.SubjectID,name:s.SubjectName}]).forEach(x => {
+    const key = s.BatchID + '|' + x.id;
+    if (!pairs.has(key)) pairs.set(key, { batchId:s.BatchID, batchName:s.BatchName, subjectId:x.id, subjectName:x.name });
+  }));
+  const choices = [...pairs.values()];
+  const batches = [...new Map(choices.map(x => [x.batchId, x])).values()];
+  main.innerHTML = '<div class="head"><div><h1>Homework</h1><p>Assign work, share materials, and review submissions. Expired homework is hidden from students.</p></div></div>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.8rem">Assign homework</h2>' +
+    (choices.length ? '<form id="hw-form"><div class="grid2">' +
+      '<label class="f"><span>Batch</span><select name="batchId" required>' + batches.map(x=>'<option value="'+esc(x.batchId)+'">'+esc(x.batchName)+'</option>').join('')+'</select></label>'+
+      '<label class="f"><span>Subject</span><select name="subjectId" required></select></label>'+
+      '<label class="f full"><span>Title</span><input name="title" maxlength="150" required></label>'+
+      '<label class="f full"><span>Instructions</span><textarea name="instructions" rows="4" maxlength="5000" placeholder="What should students complete?" style="width:100%;padding:.65rem;border:1px solid var(--line);border-radius:8px"></textarea></label>'+
+      '<label class="f"><span>Due date and time *</span><input name="dueAt" type="datetime-local" required><small>At the deadline, it is removed from the student view and submissions close. Teachers retain it to review submitted work.</small></label>'+
+      '<label class="f"><span>Material links (one per line)</span><textarea name="materials" rows="3" placeholder="https://…" style="width:100%;padding:.65rem;border:1px solid var(--line);border-radius:8px"></textarea></label>'+
+    '</div><button class="btn primary" id="hw-add">Assign homework</button></form>' : '<div class="empty">No active timetable assignment found. Ask an admin to assign you to a batch first.</div>') + '</div>' +
+    '<div class="head"><div><h2>Assigned work</h2></div></div>' + (rows.length ? rows.map(h => {
+      const pending = h.Submissions.filter(x=>x.Status!=='REVIEWED').length;
+      const expired = h.Expired || h.Status==='Archived';
+      return '<details class="card" style="margin-top:.8rem"><summary style="cursor:pointer"><b>'+esc(h.Title)+'</b> · '+esc(h.BatchName)+(h.SubjectName?' · '+esc(h.SubjectName):'')+
+        ' <span class="pill '+(expired?'':'warn')+'">'+(expired?'Closed':pending+' pending')+'</span></summary>'+
+        '<p style="white-space:pre-wrap">'+esc(h.Instructions)+'</p>'+(h.DueAt?'<p class="muted">Due '+esc(new Date(h.DueAt).toLocaleString())+'</p>':'')+
+        (h.Materials.length?'<p>'+h.Materials.map(u=>'<a href="'+esc(u)+'" target="_blank" rel="noopener">Open material</a>').join(' · ')+'</p>':'')+
+        (h.Submissions.length?'<div class="tablewrap"><table class="stack"><thead><tr><th>Student</th><th>Submitted</th><th>Answer</th><th>Link</th><th>Status / feedback</th></tr></thead><tbody>'+h.Submissions.map(s=>'<tr><td>'+esc(s.StudentName)+'</td><td>'+esc(new Date(s.SubmittedAt).toLocaleString())+'</td><td style="white-space:pre-wrap">'+esc(s.Answer)+'</td><td>'+(s.AttachmentURL?'<a href="'+esc(s.AttachmentURL)+'" target="_blank" rel="noopener">Open</a>':'—')+'</td><td>'+esc(s.Status)+(s.Feedback?'<br>'+esc(s.Feedback):'')+(s.Status!=='REVIEWED'?'<br><button class="btn small" data-hw-review="'+esc(h.HomeworkID)+'" data-hw-sub="'+esc(s.SubmissionID)+'">Review</button>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted">No submissions yet.</p>')+'</details>';
+    }).join('') : '<div class="card empty"><b>No homework assigned yet</b></div>');
+  const form=$('#hw-form',main);
+  if(form){
+    const refreshSubjects=()=>{const batch=form.elements.batchId.value;const opts=choices.filter(x=>x.batchId===batch);form.elements.subjectId.innerHTML=opts.map(x=>'<option value="'+esc(x.subjectId)+'">'+esc(x.subjectName)+'</option>').join('');};
+    form.elements.batchId.addEventListener('change',refreshSubjects);refreshSubjects();
+    form.addEventListener('submit',ev=>{ev.preventDefault();busy($('#hw-add',main),async()=>{
+      const f=form.elements; if(!form.reportValidity())return; await api('teacher.homework.create',{batchId:f.batchId.value,subjectId:f.subjectId.value,title:f.title.value.trim(),instructions:f.instructions.value.trim(),dueAt:new Date(f.dueAt.value).toISOString(),materials:f.materials.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean)});
+      toast('Homework assigned.');go('homework');
+    });});
+  }
+  $$('[data-hw-review]',main).forEach(b=>b.addEventListener('click',()=>{const feedback=prompt('Feedback for this student (optional):');if(feedback===null)return;busy(b,async()=>{await api('teacher.homework.review',{homeworkId:b.dataset.hwReview,submissionId:b.dataset.hwSub,feedback});toast('Marked reviewed.');go('homework');});}));
 };
 
 /* ---- notices ---- */
