@@ -968,7 +968,7 @@ Deno.serve(async (request) => {
       const input = isUpdate ? payload.changes : payload.item
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault('BAD_REQUEST', 'Provide the notice fields.')
       const map: Record<string, string> = { Title: 'title', Body: 'body', Audience: 'audience', BatchID: 'batch_id', ExpiresAt: 'expires_at', Status: 'status' }
-      const allowed = isUpdate ? Object.keys(map) : Object.keys(map).filter((x) => x !== 'Status')
+      const allowed = Object.keys(map)
       const row: Record<string, unknown> = {}
       for (const [key, raw] of Object.entries(input)) {
         if (!allowed.includes(key)) throw new ApiFault('BAD_REQUEST', `Unknown notice field: ${key}`)
@@ -1005,7 +1005,7 @@ Deno.serve(async (request) => {
       if (merged.audience !== 'BATCH' && 'audience' in row && !('batch_id' in row)) row.batch_id = null
       if (!isUpdate) {
         const { data: setting } = await admin.from('settings').select('value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle()
-        row.id = id; row.posted_by = user.id; row.academic_year = setting?.value || '2026-27'; row.status = 'Active'
+        row.id = id; row.posted_by = user.id; row.academic_year = setting?.value || '2026-27'; row.status = row.status || 'Active'
       }
       const { data: saved, error } = isUpdate
         ? await admin.from('notices').update(row).eq('id', id).select('*').single()
