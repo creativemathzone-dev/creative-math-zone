@@ -22,7 +22,8 @@
   --display:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif; --body:'Figtree','Segoe UI',system-ui,sans-serif;
 }
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 var(--body)}
+html{font-size:var(--cmz-font-size,16px)}
+body{margin:0;background:var(--paper);color:var(--ink);font:1rem/1.5 var(--body)}
 h1,h2,h3{font-family:var(--display);margin:0;line-height:1.15;letter-spacing:-.01em}
 button,input,select,textarea{font:inherit;color:inherit}
 .hidden{display:none!important}
@@ -82,6 +83,8 @@ nav.side button.item:hover{background:rgba(255,255,255,.07)}
 nav.side button.item[aria-current=page]{background:rgba(255,255,255,.1);border-left-color:var(--pencil);color:#fff;font-weight:600}
 nav.side .who{margin-top:auto;padding:.75rem;border-top:1px solid rgba(255,255,255,.14);font-size:.9rem}
 nav.side .who b{display:block;color:#fff}
+nav.side .text-size{display:flex;align-items:center;gap:.35rem;margin-top:.6rem;font-size:.8rem;color:#dbe5f5}
+nav.side .text-size button{min-width:38px;min-height:36px;border:1px solid rgba(255,255,255,.35);border-radius:6px;background:transparent;color:#fff;cursor:pointer}
 nav.side .who .btn{margin-top:.6rem;width:100%;background:transparent;color:#fff;border-color:rgba(255,255,255,.3)}
 .topbar{display:none}
 main{padding:2rem clamp(1rem,3vw,2.5rem) 4rem;max-width:1200px;width:100%}
@@ -383,7 +386,7 @@ document.addEventListener('DOMContentLoaded', function () {
   <nav class="side" id="side" aria-label="Main">
         <div class="brand"><div class="logo-badge" id="nav-logo-badge"><img id="nav-logo" alt=""></div><span id="nav-centre">Creative Math Zone</span><small>Teacher</small></div>
     <div id="nav-items"></div>
-    <div class="who"><b id="who-name"></b><span id="who-role" class="muted"></span><button class="btn small" id="logout">Sign out</button></div>
+        <div class="who"><b id="who-name"></b><span id="who-role" class="muted"></span><div class="text-size" aria-label="Text size controls"><span id="text-size-label" aria-live="polite">Text size</span><button type="button" id="text-sm" aria-label="Make text smaller">A−</button><button type="button" id="text-lg" aria-label="Make text larger">A+</button></div><button class="btn small" id="logout">Sign out</button></div>
   </nav>
   <main id="main" tabindex="-1"></main>
 </div>
@@ -397,6 +400,10 @@ const $ = (s,r) => (r||document).querySelector(s);
 const $$ = (s,r) => Array.from((r||document).querySelectorAll(s));
 const esc = v => String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const can = p => S.perms.indexOf('*') >= 0 || S.perms.indexOf(p) >= 0;
+function setTextSize(size){const n=Math.min(20,Math.max(16,Number(size)||16));document.documentElement.style.setProperty('--cmz-font-size',n+'px');try{localStorage.setItem('cmz_text_size',String(n))}catch(e){}const label=$('#text-size-label');if(label)label.textContent='Text '+n+'px'}
+try{setTextSize(localStorage.getItem('cmz_text_size')||16)}catch(e){setTextSize(16)}
+$('#text-sm').addEventListener('click',()=>setTextSize(parseInt(getComputedStyle(document.documentElement).fontSize,10)-2));
+$('#text-lg').addEventListener('click',()=>setTextSize(parseInt(getComputedStyle(document.documentElement).fontSize,10)+2));
 
 function api(action, payload) {
   const cfg = window.CMZ_CONFIG || {};
@@ -650,16 +657,40 @@ VIEWS.students = async main => {
 /* ---- past sessions ---- */
 VIEWS.sessions = async main => {
   const rows = await api('teacher.sessions', { limit: 50 });
-  main.innerHTML = '<div class="head"><h1>Past classes</h1><p>Your recent sessions and attendance counts</p></div>' +
-    (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Date</th><th>Subject</th><th>Batch</th><th>Present</th><th>Late</th><th>Absent</th><th>Total</th><th>Status</th></tr></thead><tbody>' +
-      rows.map(s => '<tr><td data-l="Date">'+esc(fmtDate(s.Date))+'</td><td data-l="Subject">'+esc(s.SubjectName)+'</td><td data-l="Batch">'+esc(s.BatchName)+'</td>' +
-        '<td data-l="Present"><b>'+s.Present+'</b></td><td data-l="Late">'+s.Late+'</td><td data-l="Absent">'+s.Absent+'</td><td data-l="Total">'+s.Total+'</td><td>'+pill(s.Status)+'</td></tr>').join('') + '</tbody></table></div>' :
-      '<div class="card empty"><b>No classes yet</b>Start a class from the dashboard.</div>');
+  const st = VIEWS.sessions.state = VIEWS.sessions.state || { search: '' };
+  const render = () => {
+    const q = st.search.trim().toLowerCase();
+    const filtered = rows.filter(s => !q || [s.Date, s.SubjectName, s.BatchName, s.Status].some(v => String(v || '').toLowerCase().includes(q)));
+    main.innerHTML = '<div class="head"><h1>Past classes</h1><p>Your recent sessions and attendance counts. Add a PDF for a class; students in that class can open it for one week.</p></div>' +
+      '<div class="toolbar"><label class="f" style="flex:1;min-width:220px;margin:0"><span>Search classes</span><input id="session-search" type="search" placeholder="Subject, batch, date, or status" value="'+esc(st.search)+'"></label></div>' +
+      (filtered.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Date</th><th>Subject</th><th>Batch</th><th>Present</th><th>Late</th><th>Absent</th><th>Total</th><th>Status</th><th>Class PDFs</th></tr></thead><tbody>' +
+        filtered.map(s => '<tr><td data-l="Date">'+esc(fmtDate(s.Date))+'</td><td data-l="Subject">'+esc(s.SubjectName)+'</td><td data-l="Batch">'+esc(s.BatchName)+'</td>' +
+          '<td data-l="Present"><b>'+s.Present+'</b></td><td data-l="Late">'+s.Late+'</td><td data-l="Absent">'+s.Absent+'</td><td data-l="Total">'+s.Total+'</td><td>'+pill(s.Status)+'</td>' +
+          '<td data-l="Class PDFs">'+(s.Materials||[]).map(m=>'<div><a href="'+esc(m.URL)+'" target="_blank" rel="noopener">'+esc(m.FileName)+'</a><small class="muted"> · until '+esc(fmtDate(m.ExpiresAt))+'</small></div>').join('') +
+          '<button type="button" class="btn small" data-pick-pdf="'+esc(s.SessionID)+'" style="margin-top:.3rem">Upload PDF</button><input type="file" accept="application/pdf,.pdf" data-session-pdf="'+esc(s.SessionID)+'" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"></td></tr>').join('') + '</tbody></table></div>' :
+        '<div class="card empty"><b>'+(q?'No matching classes':'No classes yet')+'</b>'+(q?'Try another search.':'Start a class from the dashboard.')+'</div>');
+    $('#session-search',main).addEventListener('input',e=>{st.search=e.target.value;const start=e.target.selectionStart;render();const input=$('#session-search',main);input.focus();input.setSelectionRange(start,start);});
+    $$('[data-pick-pdf]',main).forEach(button=>button.addEventListener('click',()=> $('[data-session-pdf="'+CSS.escape(button.dataset.pickPdf)+'"]',main).click()));
+    $$('[data-session-pdf]',main).forEach(input=>input.addEventListener('change',()=>{
+      const file=input.files&&input.files[0]; if(!file)return;
+      busy(input,async()=>{
+        if(file.type!=='application/pdf'&&!file.name.toLowerCase().endsWith('.pdf'))throw {error:'Choose a PDF file.'};
+        if(file.size>10*1024*1024)throw {error:'PDFs must be 10 MB or smaller.'};
+        const target=await api('teacher.classMaterials.upload',{sessionId:input.dataset.sessionPdf,fileName:file.name,fileSize:file.size,contentType:'application/pdf'});
+        const result=await fetch(target.uploadUrl,{method:'PUT',headers:{'Content-Type':'application/pdf'},body:file});
+        if(!result.ok)throw {error:'Upload failed. Check your connection and try again.'};
+        await api('teacher.classMaterials.register',{sessionId:input.dataset.sessionPdf,path:target.path,fileName:file.name});
+        toast('PDF uploaded. Students can access it for 7 days.');go('sessions');
+      });
+    }));
+  };
+  render();
 };
 
 /* ---- homework ---- */
 VIEWS.homework = async main => {
   const [rows, slots] = await Promise.all([api('teacher.homework.list'), api('teacher.timetable')]);
+  const st = VIEWS.homework.state = VIEWS.homework.state || { search: '' };
   const pairs = new Map();
   slots.forEach(s => (s.SubjectOptions || [{id:s.SubjectID,name:s.SubjectName}]).forEach(x => {
     const key = s.BatchID + '|' + x.id;
@@ -677,15 +708,17 @@ VIEWS.homework = async main => {
       '<label class="f"><span>Due date and time *</span><input name="dueAt" type="datetime-local" required><small>At the deadline, it is removed from the student view and submissions close. Teachers retain it to review submitted work.</small></label>'+
       '<label class="f"><span>Material links (one per line)</span><textarea name="materials" rows="3" placeholder="https://…" style="width:100%;padding:.65rem;border:1px solid var(--line);border-radius:8px"></textarea></label>'+
     '</div><button class="btn primary" id="hw-add">Assign homework</button></form>' : '<div class="empty">No active timetable assignment found. Ask an admin to assign you to a batch first.</div>') + '</div>' +
-    '<div class="head"><div><h2>Assigned work</h2></div></div>' + (rows.length ? rows.map(h => {
+    '<div class="head"><div><h2>Assigned work</h2></div></div><div class="toolbar"><label class="f" style="flex:1;min-width:220px;margin:0"><span>Search homework</span><input id="hw-search" type="search" placeholder="Title, subject, batch, or instructions" value="'+esc(st.search)+'"></label></div>' + (rows.length ? rows.map(h => {
       const pending = h.Submissions.filter(x=>x.Status!=='REVIEWED').length;
       const expired = h.Expired || h.Status==='Archived';
-      return '<details class="card" style="margin-top:.8rem"><summary style="cursor:pointer"><b>'+esc(h.Title)+'</b> · '+esc(h.BatchName)+(h.SubjectName?' · '+esc(h.SubjectName):'')+
+      return '<details class="card" data-hw-search="'+esc([h.Title,h.BatchName,h.SubjectName,h.Instructions].join(' '))+'" style="margin-top:.8rem"><summary style="cursor:pointer"><b>'+esc(h.Title)+'</b> · '+esc(h.BatchName)+(h.SubjectName?' · '+esc(h.SubjectName):'')+
         ' <span class="pill '+(expired?'':'warn')+'">'+(expired?'Closed':pending+' pending')+'</span></summary>'+
         '<p style="white-space:pre-wrap">'+esc(h.Instructions)+'</p>'+(h.DueAt?'<p class="muted">Due '+esc(new Date(h.DueAt).toLocaleString())+'</p>':'')+
         (h.Materials.length?'<p>'+h.Materials.map(u=>'<a href="'+esc(u)+'" target="_blank" rel="noopener">Open material</a>').join(' · ')+'</p>':'')+
         (h.Submissions.length?'<div class="tablewrap"><table class="stack"><thead><tr><th>Student</th><th>Submitted</th><th>Answer</th><th>Link</th><th>Status / feedback</th></tr></thead><tbody>'+h.Submissions.map(s=>'<tr><td>'+esc(s.StudentName)+'</td><td>'+esc(new Date(s.SubmittedAt).toLocaleString())+'</td><td style="white-space:pre-wrap">'+esc(s.Answer)+'</td><td>'+(s.AttachmentURL?'<a href="'+esc(s.AttachmentURL)+'" target="_blank" rel="noopener">Open</a>':'—')+'</td><td>'+esc(s.Status)+(s.Feedback?'<br>'+esc(s.Feedback):'')+(s.Status!=='REVIEWED'?'<br><button class="btn small" data-hw-review="'+esc(h.HomeworkID)+'" data-hw-sub="'+esc(s.SubmissionID)+'">Review</button>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted">No submissions yet.</p>')+'</details>';
-    }).join('') : '<div class="card empty"><b>No homework assigned yet</b></div>');
+    }).join('') + '<div id="hw-no-matches" class="card empty" hidden><b>No matching homework</b>Try another search.</div>' : '<div class="card empty"><b>No homework assigned yet</b></div>');
+  const filterHomework=()=>{const q=st.search.trim().toLowerCase();let count=0;$$('[data-hw-search]',main).forEach(card=>{card.hidden=!!q&&!card.dataset.hwSearch.toLowerCase().includes(q);if(!card.hidden)count++;});$('#hw-no-matches',main)?.toggleAttribute('hidden',count>0);};
+  $('#hw-search',main).addEventListener('input',e=>{st.search=e.target.value;filterHomework();});filterHomework();
   const form=$('#hw-form',main);
   if(form){
     const refreshSubjects=()=>{const batch=form.elements.batchId.value;const opts=choices.filter(x=>x.batchId===batch);form.elements.subjectId.innerHTML=opts.map(x=>'<option value="'+esc(x.subjectId)+'">'+esc(x.subjectName)+'</option>').join('');};

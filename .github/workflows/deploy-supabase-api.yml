@@ -23,3 +23,6 @@ jobs:
 
       - name: Deploy the API function
         run: supabase functions deploy api --project-ref "$PROJECT_ID"
+
+      - name: Deploy expired class material cleanup
+        run: supabase functions deploy cleanup-class-materials --project-ref "$PROJECT_ID"

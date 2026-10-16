@@ -22,7 +22,8 @@
   --display:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif; --body:'Figtree','Segoe UI',system-ui,sans-serif;
 }
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 var(--body)}
+html{font-size:var(--cmz-font-size,16px)}
+body{margin:0;background:var(--paper);color:var(--ink);font:1rem/1.5 var(--body)}
 h1,h2,h3{font-family:var(--display);margin:0;line-height:1.15;letter-spacing:-.01em}
 button,input,select,textarea{font:inherit;color:inherit}
 .hidden{display:none!important}
@@ -82,6 +83,8 @@ nav.side button.item:hover{background:rgba(255,255,255,.07)}
 nav.side button.item[aria-current=page]{background:rgba(255,255,255,.1);border-left-color:var(--pencil);color:#fff;font-weight:600}
 nav.side .who{margin-top:auto;padding:.75rem;border-top:1px solid rgba(255,255,255,.14);font-size:.9rem}
 nav.side .who b{display:block;color:#fff}
+nav.side .text-size{display:flex;align-items:center;gap:.35rem;margin-top:.6rem;font-size:.8rem;color:#dbe5f5}
+nav.side .text-size button{min-width:38px;min-height:36px;border:1px solid rgba(255,255,255,.35);border-radius:6px;background:transparent;color:#fff;cursor:pointer}
 nav.side .who .btn{margin-top:.6rem;width:100%;background:transparent;color:#fff;border-color:rgba(255,255,255,.3)}
 .topbar{display:none}
 main{padding:2rem clamp(1rem,3vw,2.5rem) 4rem;max-width:1200px;width:100%}
@@ -413,7 +416,7 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="brand"><img id="nav-logo" alt="" style="display:none;width:42px;height:42px;object-fit:contain;margin-bottom:.4rem;border-radius:6px"><span id="nav-centre">Creative Math Zone</span><small>Student</small></div>
     <div><span class="sid" id="nav-sid">—</span></div>
     <div id="nav-items"></div>
-    <div class="who"><b id="who-name"></b><span id="who-class" class="muted"></span><button class="btn small" id="logout">Sign out</button></div>
+    <div class="who"><b id="who-name"></b><span id="who-class" class="muted"></span><div class="text-size" aria-label="Text size controls"><span id="text-size-label" aria-live="polite">Text size</span><button type="button" id="text-sm" aria-label="Make text smaller">A−</button><button type="button" id="text-lg" aria-label="Make text larger">A+</button></div><button class="btn small" id="logout">Sign out</button></div>
   </nav>
   <main id="main" tabindex="-1"></main>
 </div>
@@ -426,6 +429,10 @@ const S = { token:null, user:null, cfg:{}, view:'dashboard' };
 const $ = (s,r) => (r||document).querySelector(s);
 const $$ = (s,r) => Array.from((r||document).querySelectorAll(s));
 const esc = v => String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function setTextSize(size){const n=Math.min(20,Math.max(16,Number(size)||16));document.documentElement.style.setProperty('--cmz-font-size',n+'px');try{localStorage.setItem('cmz_text_size',String(n))}catch(e){}const label=$('#text-size-label');if(label)label.textContent='Text '+n+'px'}
+try{setTextSize(localStorage.getItem('cmz_text_size')||16)}catch(e){setTextSize(16)}
+$('#text-sm').addEventListener('click',()=>setTextSize(parseInt(getComputedStyle(document.documentElement).fontSize,10)-2));
+$('#text-lg').addEventListener('click',()=>setTextSize(parseInt(getComputedStyle(document.documentElement).fontSize,10)+2));
 
 function api(action, payload) {
   const cfg = window.CMZ_CONFIG || {};
@@ -536,7 +543,7 @@ $('#logout').addEventListener('click', doLogout);
 $('#pw-out').addEventListener('click', doLogout);
 
 /* ---- nav ---- */
-const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['subjects','Subjects'],['attendance','Attendance'],['fees','Fees'],['homework','Homework'],['notices','Notices'],['profile','Profile']];
+const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['subjects','Subjects'],['attendance','Attendance'],['fees','Fees'],['homework','Homework'],['materials','Class PDFs'],['notices','Notices'],['profile','Profile']];
 function buildNav(){ $('#nav-items').innerHTML = NAV.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join(''); }
 function go(view){ S.view=view; $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
@@ -734,15 +741,23 @@ VIEWS.homework = async main => {
       (h.Submission&&h.Submission.Feedback?'<div class="alert info" style="margin-top:.8rem"><b>Teacher feedback</b><br>'+esc(h.Submission.Feedback)+'</div>':'')+
       '<form data-hw-form="'+esc(h.HomeworkID)+'" style="margin-top:1rem"><label class="f"><span>Your answer</span><textarea name="answer" rows="4" maxlength="5000" placeholder="Type your answer" style="width:100%;padding:.65rem;border:1px solid var(--line);border-radius:8px">'+esc(h.Submission?h.Submission.Answer:'')+'</textarea></label>'+
       '<label class="f"><span>Optional link to your work</span><input name="attachmentUrl" type="url" maxlength="500" placeholder="https://…" value="'+esc(h.Submission?h.Submission.AttachmentURL:'')+'"></label>'+
-      '<small class="muted">Draft answers are saved in this browser tab while you work. Submit before the deadline; drafts are not sent until you submit.</small><button class="btn primary">'+(h.Submission?'Update submission':'Submit homework')+'</button></form></div>').join('') : '<div class="card empty"><b>No current homework</b>New assignments from your teacher will appear here. Work past its deadline is removed from this student view.</div>');
+      '<small class="muted">Draft answers are saved on this device for up to 7 days. They stay private to this browser and are not sent until you submit.</small><button class="btn primary">'+(h.Submission?'Update submission':'Submit homework')+'</button></form></div>').join('') : '<div class="card empty"><b>No current homework</b>New assignments from your teacher will appear here. Work past its deadline is removed from this student view.</div>');
   $$('[data-hw-form]',main).forEach(form=>{
     const key='cmz_hw_'+(S.user&&S.user.linkedId||'student')+'_'+form.dataset.hwForm;
-    let draft=null;try{draft=JSON.parse(sessionStorage.getItem(key)||'null')}catch(e){}
+    let draft=null;try{draft=JSON.parse(localStorage.getItem(key)||'null');if(draft&&Date.now()-Number(draft.savedAt||0)>7*86400000){localStorage.removeItem(key);draft=null;}}catch(e){}
     if(draft){form.elements.answer.value=draft.answer||form.elements.answer.value;form.elements.attachmentUrl.value=draft.attachmentUrl||form.elements.attachmentUrl.value;}
-    const saveDraft=()=>{try{sessionStorage.setItem(key,JSON.stringify({answer:form.elements.answer.value,attachmentUrl:form.elements.attachmentUrl.value}));}catch(e){}};
+    const saveDraft=()=>{try{localStorage.setItem(key,JSON.stringify({answer:form.elements.answer.value,attachmentUrl:form.elements.attachmentUrl.value,savedAt:Date.now()}));}catch(e){}};
     form.elements.answer.addEventListener('input',saveDraft);form.elements.attachmentUrl.addEventListener('input',saveDraft);
-    form.addEventListener('submit',ev=>{ev.preventDefault();const b=form.querySelector('button');busy(b,async()=>{await api('student.homework.submit',{homeworkId:form.dataset.hwForm,answer:form.elements.answer.value.trim(),attachmentUrl:form.elements.attachmentUrl.value.trim()});try{sessionStorage.removeItem(key)}catch(e){}toast('Homework submitted.');go('homework');});});
+    form.addEventListener('submit',ev=>{ev.preventDefault();const b=form.querySelector('button');busy(b,async()=>{await api('student.homework.submit',{homeworkId:form.dataset.hwForm,answer:form.elements.answer.value.trim(),attachmentUrl:form.elements.attachmentUrl.value.trim()});try{localStorage.removeItem(key)}catch(e){}toast('Homework submitted.');go('homework');});});
   });
+};
+
+/* ---- class PDFs ---- */
+VIEWS.materials = async main => {
+  const rows = await api('student.classMaterials.list');
+  main.innerHTML = '<div class="head"><h1>Class PDFs</h1><p>Materials shared by your teachers. Each file is available for seven days after upload.</p></div>' +
+    (rows.length ? '<div class="card">'+rows.map(m=>'<div style="padding:.8rem 0;border-bottom:1px solid var(--line)"><a href="'+esc(m.URL)+'" target="_blank" rel="noopener"><b>'+esc(m.FileName)+'</b></a><div class="muted" style="font-size:.88rem">'+esc(m.SubjectName)+' · '+esc(m.BatchName)+' · '+esc(fmtDate(m.Date))+' · available until '+esc(fmtTime(m.ExpiresAt))+'</div></div>').join('')+'</div>' :
+      '<div class="card empty"><b>No current class PDFs</b>When a teacher shares a PDF, it will appear here for one week.</div>');
 };
 
 /* ---- profile ---- */

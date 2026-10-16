@@ -1,3 +1,7 @@
 [functions.api]
 # The function handles public actions and verifies bearer tokens itself.
 verify_jwt = false
+
+[functions.cleanup-class-materials]
+# This endpoint only removes class PDFs whose seven-day expiry has passed.
+verify_jwt = false

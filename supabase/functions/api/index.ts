@@ -590,6 +590,8 @@ Deno.serve(async (request) => {
       'student.invoices': 'SELF_VIEW', 'student.receipt': 'SELF_VIEW', 'student.invoiceDoc': 'SELF_VIEW',
       'teacher.homework.list': 'SELF_VIEW', 'teacher.homework.create': 'CLASS_RUN', 'teacher.homework.review': 'CLASS_RUN',
       'student.homework.list': 'SELF_VIEW', 'student.homework.submit': 'SELF_VIEW',
+      'teacher.classMaterials.upload': 'CLASS_RUN', 'teacher.classMaterials.register': 'CLASS_RUN', 'teacher.classMaterials.list': 'SELF_VIEW',
+      'student.classMaterials.list': 'SELF_VIEW',
       'teacher.dashboard': 'SELF_VIEW', 'teacher.timetable': 'SELF_VIEW', 'teacher.students': 'SELF_VIEW',
       'teacher.startClass': 'CLASS_RUN', 'teacher.regenerateCode': 'CLASS_RUN', 'teacher.classStatus': 'CLASS_RUN',
       'teacher.manualAttendance': 'ATTENDANCE_MARK', 'teacher.markAll': 'ATTENDANCE_MARK',
@@ -683,6 +685,87 @@ Deno.serve(async (request) => {
         BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id, SubjectID: r.subject_id || '', SubjectName: sm.get(r.subject_id) || '',
         Materials: Array.isArray(r.materials) ? r.materials : [], DueAt: r.due_at || '', Status: r.status,
         Expired: !!r.due_at && new Date(r.due_at).getTime() <= Date.now(), Submissions: subMap.get(r.id) || [] })) })
+    }
+
+    if (action === 'teacher.classMaterials.upload' || action === 'teacher.classMaterials.register' || action === 'teacher.classMaterials.list' || action === 'student.classMaterials.list') {
+      const now = new Date()
+      if (action === 'teacher.classMaterials.upload') {
+        if (user.user_type !== 'TEACHER' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'Only a linked teacher can upload class materials.')
+        const sessionId = requireText(payload.sessionId, 'Class session', 80, true)
+        const fileName = requireText(payload.fileName, 'PDF filename', 180, true).replace(/[\\/\u0000-\u001f]/g, '_')
+        const fileSize = Number(payload.fileSize)
+        if (!fileName.toLowerCase().endsWith('.pdf') || String(payload.contentType || '').toLowerCase() !== 'application/pdf') throw new ApiFault('BAD_REQUEST', 'Choose a PDF file.')
+        if (!Number.isFinite(fileSize) || fileSize < 1 || fileSize > 10 * 1024 * 1024) throw new ApiFault('BAD_REQUEST', 'PDFs must be smaller than 10 MB.')
+        const { data: session, error: sessionError } = await admin.from('class_sessions').select('id,teacher_id').eq('id', sessionId).maybeSingle()
+        if (sessionError) throw sessionError
+        if (!session || session.teacher_id !== user.linked_id) throw new ApiFault('FORBIDDEN', 'You can upload materials only for your own classes.')
+        const safeName = fileName.normalize('NFKD').replace(/[^A-Za-z0-9._-]/g, '_').slice(-120) || 'class.pdf'
+        const path = `${user.linked_id}/${sessionId}/${crypto.randomUUID()}-${safeName}`
+        const { data: signed, error: signError } = await admin.storage.from('class-materials').createSignedUploadUrl(path)
+        if (signError || !signed) throw signError || new ApiFault('UPLOAD_FAILED', 'Could not prepare the PDF upload.')
+        return response({ ok: true, data: { path, uploadUrl: signed.signedUrl } })
+      }
+      if (action === 'teacher.classMaterials.register') {
+        if (user.user_type !== 'TEACHER' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'Only a linked teacher can register class materials.')
+        const sessionId = requireText(payload.sessionId, 'Class session', 80, true)
+        const path = requireText(payload.path, 'PDF path', 500, true)
+        const fileName = requireText(payload.fileName, 'PDF filename', 180, true)
+        const expectedPrefix = `${user.linked_id}/${sessionId}/`
+        if (!path.startsWith(expectedPrefix) || path.includes('..') || !fileName.toLowerCase().endsWith('.pdf')) throw new ApiFault('BAD_REQUEST', 'Invalid class PDF upload.')
+        const { data: session, error: sessionError } = await admin.from('class_sessions').select('id,teacher_id').eq('id', sessionId).maybeSingle()
+        if (sessionError) throw sessionError
+        if (!session || session.teacher_id !== user.linked_id) throw new ApiFault('FORBIDDEN', 'You can upload materials only for your own classes.')
+        const objectName = path.slice(path.lastIndexOf('/') + 1)
+        const { data: files, error: fileError } = await admin.storage.from('class-materials').list(`${user.linked_id}/${sessionId}`, { search: objectName })
+        if (fileError) throw fileError
+        if (!(files || []).some((file) => file.name === objectName)) throw new ApiFault('UPLOAD_FAILED', 'The PDF upload could not be found. Please retry the upload.')
+        const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+        const { error: insertError } = await admin.from('class_materials').insert({ id: `MAT-${crypto.randomUUID()}`, session_id: sessionId,
+          teacher_id: user.linked_id, file_path: path, file_name: fileName, created_at: now.toISOString(), expires_at: expiresAt })
+        if (insertError) { await admin.storage.from('class-materials').remove([path]); throw insertError }
+        return response({ ok: true, data: { expiresAt } })
+      }
+
+      let sessionIds: string[] = []
+      if (action === 'teacher.classMaterials.list') {
+        if (user.user_type !== 'TEACHER' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'Only a linked teacher can view class materials.')
+        const sessionId = requireText(payload.sessionId, 'Class session', 80, true)
+        const { data: session, error } = await admin.from('class_sessions').select('id,teacher_id').eq('id', sessionId).maybeSingle()
+        if (error) throw error
+        if (!session || session.teacher_id !== user.linked_id) throw new ApiFault('FORBIDDEN', 'You can view materials only for your own classes.')
+        sessionIds = [sessionId]
+      } else {
+        if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'Only a linked student can view class materials.')
+        const { data: assignments, error: assignmentError } = await admin.from('student_subjects').select('subject_id,batch_id').eq('student_id', user.linked_id).ilike('status', 'active')
+        if (assignmentError) throw assignmentError
+        const batchIds = [...new Set((assignments || []).map((r) => r.batch_id))]
+        if (batchIds.length) {
+          const { data: sessions, error } = await admin.from('class_sessions').select('id,batch_id,subject_id,co_subject_id').in('batch_id', batchIds).order('session_date', { ascending: false }).limit(200)
+          if (error) throw error
+          const assigned = new Set((assignments || []).map((r) => `${r.batch_id}|${r.subject_id}`))
+          sessionIds = (sessions || []).filter((s) => [s.subject_id, s.co_subject_id].filter(Boolean).some((subjectId) => assigned.has(`${s.batch_id}|${subjectId}`))).map((s) => s.id)
+        }
+      }
+      if (!sessionIds.length) return response({ ok: true, data: [] })
+      const { data: materials, error: materialError } = await admin.from('class_materials').select('id,session_id,file_path,file_name,created_at,expires_at')
+        .in('session_id', sessionIds).gt('expires_at', now.toISOString()).order('created_at', { ascending: false }).limit(100)
+      if (materialError) throw materialError
+      const ids = [...new Set((materials || []).map((m) => m.session_id))]
+      const [{ data: sessions, error: sessionsError }, { data: batches }, { data: subjects }] = await Promise.all([
+        admin.from('class_sessions').select('id,session_date,start_time,end_time,batch_id,subject_id,co_subject_id').in('id', ids),
+        admin.from('batches').select('id,name'), admin.from('subjects').select('id,name'),
+      ])
+      if (sessionsError) throw sessionsError
+      const sm = new Map((subjects || []).map((s) => [s.id, s.name])), bm = new Map((batches || []).map((b) => [b.id, b.name]))
+      return response({ ok: true, data: await Promise.all((materials || []).map(async (m) => {
+        const secondsLeft = Math.max(1, Math.min(3600, Math.ceil((new Date(m.expires_at).getTime() - now.getTime()) / 1000)))
+        const { data: signed, error } = await admin.storage.from('class-materials').createSignedUrl(m.file_path, secondsLeft, { download: m.file_name })
+        if (error) throw error
+        const session = (sessions || []).find((s) => s.id === m.session_id)
+        return { MaterialID: m.id, SessionID: m.session_id, FileName: m.file_name, CreatedAt: m.created_at, ExpiresAt: m.expires_at,
+          URL: signed.signedUrl, Date: session?.session_date || '', StartTime: session?.start_time || '', EndTime: session?.end_time || '',
+          BatchName: bm.get(session?.batch_id) || '', SubjectName: [session?.subject_id, session?.co_subject_id].filter(Boolean).map((id) => sm.get(id) || id).join(' + ') }
+      })) })
     }
 
     if (action === 'student.homework.list' || action === 'student.homework.submit') {
@@ -2118,11 +2201,24 @@ Deno.serve(async (request) => {
         if (mError) throw mError
         const [subjects, batches] = await Promise.all([admin.from('subjects').select('id,name'), admin.from('batches').select('id,name')])
         const sm = new Map((subjects.data || []).map((x) => [x.id, x.name])), bm = new Map((batches.data || []).map((x) => [x.id, x.name]))
+        const sessionIds = (sessions || []).map((s) => s.id)
+        const { data: classMaterials, error: classMaterialsError } = sessionIds.length
+          ? await admin.from('class_materials').select('id,session_id,file_path,file_name,expires_at').in('session_id', sessionIds).gt('expires_at', new Date().toISOString())
+          : { data: [], error: null }
+        if (classMaterialsError) throw classMaterialsError
+        const materialLinks = await Promise.all((classMaterials || []).map(async (x) => {
+          const secondsLeft = Math.max(1, Math.min(3600, Math.ceil((new Date(x.expires_at).getTime() - Date.now()) / 1000)))
+          const { data: signed, error } = await admin.storage.from('class-materials').createSignedUrl(x.file_path, secondsLeft, { download: x.file_name })
+          if (error) throw error
+          return { MaterialID: x.id, SessionID: x.session_id, FileName: x.file_name, ExpiresAt: x.expires_at, URL: signed.signedUrl }
+        }))
+        const bySession = new Map<string, any[]>()
+        for (const material of materialLinks) bySession.set(material.SessionID, [...(bySession.get(material.SessionID) || []), material])
         return response({ ok: true, data: (sessions || []).map((s) => { const m = (marks || []).filter((x) => x.session_id === s.id); return { SessionID: s.id,
           Date: s.session_date, StartTime: s.start_time, EndTime: s.end_time, BatchName: bm.get(s.batch_id) || s.batch_id,
           SubjectName: [sm.get(s.subject_id) || s.subject_id, s.co_subject_id ? sm.get(s.co_subject_id) || s.co_subject_id : ''].filter(Boolean).join(' + '),
           Status: s.status, Present: m.filter((x) => x.status === 'PRESENT').length, Late: m.filter((x) => x.status === 'LATE').length,
-          Absent: m.filter((x) => x.status === 'ABSENT').length, Total: m.length } }) })
+          Absent: m.filter((x) => x.status === 'ABSENT').length, Total: m.length, Materials: bySession.get(s.id) || [] } }) })
       }
       const [{ data: assignments }, { data: subjects }, { data: batches }, { data: rooms }, { data: sessions }] = await Promise.all([
         admin.from('student_subjects').select('student_id,subject_id,batch_id,status').eq('teacher_id', teacher.id).ilike('status', 'active'),
