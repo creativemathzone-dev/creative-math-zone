@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#102447">
   <meta name="description" content="Download and install the Creative Math Zone Android app.">
+  <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon-192.png" type="image/png">
   <title>Download the Creative Math Zone app</title>
   <style>
     :root{color-scheme:dark;--navy:#102447;--deep:#0a1830;--gold:#ffc629;--muted:#d5e0f1}
     *{box-sizing:border-box}
+    [hidden]{display:none!important}
     body{margin:0;min-height:100vh;color:#fff;font:16px/1.6 'Segoe UI',Arial,sans-serif;background:radial-gradient(ellipse at 50% 0%,#244b7a 0%,var(--navy) 48%,var(--deep) 100%)}
     main{width:min(760px,100%);margin:auto;padding:28px 20px 48px}
     header{display:flex;align-items:center;gap:14px;margin-bottom:36px}
@@ -21,6 +23,7 @@
     h1{margin:0;font-size:clamp(2rem,6vw,3rem);line-height:1.1}
     .muted{color:var(--muted)}
     .download{display:inline-flex;justify-content:center;align-items:center;min-height:52px;margin:14px 0 4px;padding:12px 20px;border-radius:12px;background:var(--gold);color:#142746;text-decoration:none;font-weight:800}
+    .installed{margin:14px 0 4px;padding:13px 16px;border:1px solid #85d6a5;border-radius:12px;background:#123c32;color:#e7fff0}
     .steps{padding-left:1.3rem}
     .steps li{padding:.35rem 0}
     .note{margin-top:20px;padding:14px 16px;border-left:4px solid var(--gold);background:#ffffff0d;border-radius:8px}
@@ -38,8 +41,9 @@
       <p class="muted">Official Android app</p>
       <h1 id="title">Creative Math Zone</h1>
       <p class="muted">Install the app for quick access to the student, teacher, and admin portals. An internet connection is required to use portal features.</p>
-      <a class="download" href="../downloads/CreativeMathZone.apk" download>Download Android app (APK)</a>
-      <p class="muted">Only install the APK downloaded from <strong>creativemathzone.in</strong>.</p>
+      <a class="download" id="apk-download" href="../downloads/CreativeMathZone.apk" download>Download Android app (APK)</a>
+      <p class="installed" id="apk-installed" role="status" aria-live="polite" hidden>The APK download was started on this device. Open it from Downloads to install Creative Math Zone.</p>
+      <p class="muted" id="apk-source-note">Only install the APK downloaded from <strong>creativemathzone.in</strong>.</p>
     </section>
     <section class="card" aria-labelledby="install-title">
       <h2 id="install-title">Install on Android</h2>
@@ -52,7 +56,16 @@
       <div class="note">Android may warn that the app was downloaded outside Google Play. Check that you downloaded it from the official Creative Math Zone website. Do not install APK files forwarded from other sources.</div>
       <p class="muted">To update later, download the new version from this page and install it over the existing app.</p>
     </section>
+    <section class="card" aria-labelledby="web-app-title">
+      <h2 id="web-app-title">Use the Android web app instead</h2>
+      <p class="muted">You can use the portal without downloading the APK. Open this website in Chrome, open the menu, and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
+    </section>
+    <section class="card" aria-labelledby="ios-title">
+      <h2 id="ios-title">On iPhone or iPad</h2>
+      <p class="muted">There is no APK for iPhone or iPad. Open this website in Safari, tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</p>
+    </section>
     <footer>© Creative Math Zone</footer>
   </main>
+  <script src="./installed-app.js" defer></script>
 </body>
 </html>

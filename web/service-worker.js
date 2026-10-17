@@ -1,12 +1,14 @@
-const CACHE_NAME = 'cmz-pwa-v4';
+const CACHE_NAME = 'cmz-pwa-v5';
 const SHELL_FILES = [
   './',
   './index.html',
   './admin.html',
   './teacher.html',
   './student.html',
+  './download.html',
   './config.js',
   './pwa.js',
+  './installed-app.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
