@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "in.creativemathzone.app",
+        "sha256_cert_fingerprints": ["70:75:73:DA:B8:55:85:E1:39:74:4E:0F:00:5D:E8:54:15:E5:5B:1A:7C:AD:B9:CB:AD:7E:09:73:D3:0A:29:0A"]
+      }
+    }]

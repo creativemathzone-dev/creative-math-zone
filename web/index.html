@@ -36,6 +36,8 @@
     #install-app{padding:12px 17px;border:0;border-radius:12px;background:var(--gold);color:#132440;font:700 1rem 'Segoe UI',Arial,sans-serif;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.16)}
     #install-app:hover{filter:brightness(1.07)}
     .install-note{font-size:.88rem;color:#c1d0e5;margin:14px 0 0}
+    .android-download{display:inline-flex;align-items:center;justify-content:center;margin-top:12px;padding:10px 15px;border:1px solid rgba(255,255,255,.35);border-radius:10px;text-decoration:none;font-weight:700}
+    .android-download:hover,.android-download:focus-visible{border-color:var(--gold);outline:none;background:rgba(255,255,255,.1)}
     footer{display:flex;justify-content:space-between;gap:16px;align-items:center;border-top:1px solid rgba(255,255,255,.14);padding-top:17px;color:#bdcbe0;font-size:.85rem}
     footer span:last-child{color:#91a6c4}
     @media(max-width:760px){.page{padding-top:18px}.hero{grid-template-columns:1fr;gap:42px;padding:44px 0}.intro{max-width:500px;margin:auto}.hero-logo{width:150px}.eyebrow{margin-top:20px}.portals{width:min(520px,100%);margin:auto}.portals h2,.portals>p{text-align:center}footer{flex-direction:column;gap:4px;text-align:center}}
@@ -65,6 +67,7 @@
         </nav>
         <div class="install-row"><button id="install-app" type="button" hidden>Install Creative Math Zone</button></div>
         <p class="install-note">On Android, use Chrome’s menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
+        <a class="android-download" href="download.html">Download the Android app</a>
       </section>
     </main>
     <footer><span>© Creative Math Zone</span><span>Student · Teacher · Admin</span></footer>
