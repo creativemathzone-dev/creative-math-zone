@@ -62,18 +62,12 @@ create table if not exists public.google_drive_oauth_states (
 -- Repair an earlier partial SQL Editor attempt, which may have created this
 -- table with app_user_id as text before the incompatible FK caused an error.
 alter table public.google_drive_oauth_states
+  drop constraint if exists google_drive_oauth_states_app_user_id_fkey;
+alter table public.google_drive_oauth_states
   alter column app_user_id type uuid using app_user_id::uuid;
-do $$ begin
-  if not exists (
-    select 1 from pg_constraint
-    where conname = 'google_drive_oauth_states_app_user_id_fkey'
-      and conrelid = 'public.google_drive_oauth_states'::regclass
-  ) then
-    alter table public.google_drive_oauth_states
-      add constraint google_drive_oauth_states_app_user_id_fkey
-      foreign key (app_user_id) references public.app_users(id) on delete cascade;
-  end if;
-end $$;
+alter table public.google_drive_oauth_states
+  add constraint google_drive_oauth_states_app_user_id_fkey
+  foreign key (app_user_id) references public.app_users(id) on delete cascade;
 alter table public.google_drive_oauth_states enable row level security;
 
 -- The archive worker runs hourly. Add the Vault secret named
