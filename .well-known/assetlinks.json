@@ -1,8 +1,22 @@
-[{
-      "relation": ["delegate_permission/common.handle_all_urls"],
-      "target": {
-        "namespace": "android_app",
-        "package_name": "in.creativemathzone.app",
-        "sha256_cert_fingerprints": ["70:75:73:DA:B8:55:85:E1:39:74:4E:0F:00:5D:E8:54:15:E5:5B:1A:7C:AD:B9:CB:AD:7E:09:73:D3:0A:29:0A"]
-      }
-    }]
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "in.creativemathzone.app",
+      "sha256_cert_fingerprints": [
+        "70:75:73:DA:B8:55:85:E1:39:74:4E:0F:00:5D:E8:54:15:E5:5B:1A:7C:AD:B9:CB:AD:7E:09:73:D3:0A:29:0A"
+      ]
+    }
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "in.creativemathzone.twa",
+      "sha256_cert_fingerprints": [
+        "43:30:98:8A:D3:17:66:87:57:89:1A:79:A1:EC:F5:2C:3C:08:5D:56:BC:8D:F9:CE:D6:F1:B4:00:08:BF:5C:8A"
+      ]
+    }
+  }
+]

@@ -1,31 +1,45 @@
 (() => {
-  const APK_DOWNLOAD_KEY = 'cmz-apk-download-started';
-  const apkLink = document.getElementById('android-apk-link');
-  const apkDownload = document.getElementById('apk-download');
-  const installedMessage = document.getElementById('android-app-installed');
-  const installedPageMessage = document.getElementById('apk-installed');
-  const sourceNote = document.getElementById('apk-source-note');
-  const downloadStartedMessage = document.getElementById('apk-download-started');
+  const downloadOptions = [
+    {
+      key: 'cmz-apk-download-started',
+      linkIds: ['android-apk-link', 'apk-download'],
+      messageIds: ['android-app-installed', 'apk-installed'],
+      sourceNoteIds: ['apk-source-note'],
+    },
+    {
+      key: 'cmz-student-apk-download-started',
+      linkIds: ['student-apk-download'],
+      messageIds: ['student-apk-installed'],
+      sourceNoteIds: ['student-apk-source-note'],
+    },
+  ];
 
-  const hideDownloadLink = () => {
-    if (apkLink) apkLink.hidden = true;
-    if (apkDownload) apkDownload.hidden = true;
-    if (sourceNote) sourceNote.hidden = true;
-    if (installedMessage) installedMessage.hidden = false;
-    if (installedPageMessage) installedPageMessage.hidden = false;
-    if (downloadStartedMessage) downloadStartedMessage.hidden = false;
+  const setVisible = (ids, hidden) => {
+    ids.forEach((id) => {
+      const element = document.getElementById(id);
+      if (element) element.hidden = hidden;
+    });
   };
 
-  try {
-    if (localStorage.getItem(APK_DOWNLOAD_KEY) === 'true') hideDownloadLink();
-  } catch {}
+  const markDownloadStarted = (option) => {
+    setVisible(option.linkIds, true);
+    setVisible(option.sourceNoteIds, true);
+    setVisible(option.messageIds, false);
+  };
 
-  if (apkDownload) {
-    apkDownload.addEventListener('click', () => {
+  downloadOptions.forEach((option) => {
+    try {
+      if (localStorage.getItem(option.key) === 'true') markDownloadStarted(option);
+    } catch {}
+
+    const downloadLink = document.getElementById(option.linkIds.at(-1));
+    if (!downloadLink) return;
+
+    downloadLink.addEventListener('click', () => {
       try {
-        localStorage.setItem(APK_DOWNLOAD_KEY, 'true');
-        hideDownloadLink();
+        localStorage.setItem(option.key, 'true');
+        markDownloadStarted(option);
       } catch {}
     });
-  }
+  });
 })();

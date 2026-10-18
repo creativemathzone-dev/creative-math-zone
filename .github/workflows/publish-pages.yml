@@ -30,8 +30,10 @@ jobs:
           cp web/*.webmanifest _site/web/
           cp -R web/icons _site/web/icons
           test -f downloads/CreativeMathZone.apk
+          test -f downloads/CreativeMathZoneStudent.apk
           test -f .well-known/assetlinks.json
           cp downloads/CreativeMathZone.apk _site/downloads/CreativeMathZone.apk
+          cp downloads/CreativeMathZoneStudent.apk _site/downloads/CreativeMathZoneStudent.apk
           cp .well-known/assetlinks.json _site/.well-known/assetlinks.json
 
       - name: Configure Pages
