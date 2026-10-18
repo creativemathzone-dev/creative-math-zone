@@ -48,7 +48,7 @@ alter table public.homework_files add constraint homework_files_drive_connection
 
 create table public.google_drive_oauth_states (
   state text primary key,
-  app_user_id text not null references public.app_users(id) on delete cascade,
+  app_user_id uuid not null references public.app_users(id) on delete cascade,
   created_at timestamptz not null default now()
 );
 alter table public.google_drive_oauth_states enable row level security;
