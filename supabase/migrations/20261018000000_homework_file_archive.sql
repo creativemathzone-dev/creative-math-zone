@@ -6,7 +6,7 @@ values ('homework-files', 'homework-files', false, 10485760,
 on conflict (id) do update set public = false, file_size_limit = 10485760,
   allowed_mime_types = excluded.allowed_mime_types;
 
-create table public.homework_files (
+create table if not exists public.homework_files (
   id text primary key,
   homework_id text not null references public.homework(id) on delete cascade,
   submission_id text references public.homework_submissions(id) on delete cascade,
@@ -24,13 +24,13 @@ create table public.homework_files (
   check ((uploaded_by_type = 'TEACHER' and submission_id is null) or
          (uploaded_by_type = 'STUDENT' and submission_id is not null))
 );
-create index homework_files_due_archive_idx on public.homework_files(homework_id, archived_at);
-create index homework_files_drive_connection_idx on public.homework_files(drive_connection_id);
+create index if not exists homework_files_due_archive_idx on public.homework_files(homework_id, archived_at);
+create index if not exists homework_files_drive_connection_idx on public.homework_files(drive_connection_id);
 alter table public.homework_files enable row level security;
 
 -- Refresh tokens are encrypted by the Edge Function before insertion. RLS is
 -- enabled with no client policies; only the service role can read them.
-create table public.google_drive_connections (
+create table if not exists public.google_drive_connections (
   id uuid primary key default gen_random_uuid(),
   account_email text not null,
   refresh_token_ciphertext text not null,
@@ -40,13 +40,21 @@ create table public.google_drive_connections (
   drive_folder_id text,
   disconnected_at timestamptz
 );
-create unique index google_drive_one_primary_idx on public.google_drive_connections(is_primary)
+create unique index if not exists google_drive_one_primary_idx on public.google_drive_connections(is_primary)
   where is_primary and disconnected_at is null;
 alter table public.google_drive_connections enable row level security;
-alter table public.homework_files add constraint homework_files_drive_connection_fk
-  foreign key (drive_connection_id) references public.google_drive_connections(id) on delete restrict;
+do $$ begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'homework_files_drive_connection_fk'
+      and conrelid = 'public.homework_files'::regclass
+  ) then
+    alter table public.homework_files add constraint homework_files_drive_connection_fk
+      foreign key (drive_connection_id) references public.google_drive_connections(id) on delete restrict;
+  end if;
+end $$;
 
-create table public.google_drive_oauth_states (
+create table if not exists public.google_drive_oauth_states (
   state text primary key,
   app_user_id uuid not null references public.app_users(id) on delete cascade,
   created_at timestamptz not null default now()
