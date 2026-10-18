@@ -25,6 +25,7 @@ jobs:
       - name: Prepare the website files
         run: |
           mkdir -p _site/web _site/downloads _site/.well-known
+          touch _site/.nojekyll
           cp index.html _site/index.html
           cp web/*.html web/*.js _site/web/
           cp web/*.webmanifest _site/web/
