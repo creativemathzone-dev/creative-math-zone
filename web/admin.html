@@ -573,7 +573,7 @@ function signedOut(msg) {
 function startApp() {
   $('#who-name').textContent = S.user.displayName;
   $('#who-role').textContent = S.user.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Accounts Admin';
-  buildNav(); show('app'); go('dashboard'); refreshRegBadge(); startLive();
+  buildNav(); show('app'); go(new URLSearchParams(location.search).has('drive_code')?'settings':'dashboard'); refreshRegBadge(); startLive();
 }
 function afterAuth(user, token) {
   S.token = token; S.user = user; S.perms = user.permissions || [];
@@ -2214,9 +2214,27 @@ VIEWS.notices = async main => {
 VIEWS.settings = async main => {
   const rows = await api('settings.get'), edit = can('SETTINGS_EDIT');
   await loadLookups();
+  const superAdmin=S.user&&S.user.role==='SUPER_ADMIN';
+  let driveConnections=[];
+  if(superAdmin){
+    const params=new URLSearchParams(location.search),code=params.get('drive_code'),state=params.get('drive_state');
+    if(code&&state){
+      const cfg=window.CMZ_CONFIG||{};
+      const complete=await fetch(cfg.supabaseUrl.replace(/\/$/,'')+'/functions/v1/google-drive-oauth',{method:'POST',headers:{'Content-Type':'application/json',apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+S.token},body:JSON.stringify({code,state})});
+      const result=await complete.json();
+      if(!complete.ok)throw {error:result.error||'Could not connect Google Drive.'};
+      history.replaceState(null,'',location.pathname);toast('Google Drive connected: '+result.email);
+    }
+    driveConnections=await api('drive.connections.list');
+  }
   main.innerHTML = '<div class="head"><div><h1>Settings</h1><p>Changes apply straight away. Nothing else needs editing in the code.</p></div>' + (edit ? '<button class="btn primary" id="set-save">Save changes</button>' : '') + '</div>' +
     '<div class="card"><form id="set-f">' + rows.map(r => '<label class="f"><span>' + esc(r.description || r.key) + '</span><input name="' + esc(r.key) + '" value="' + esc(r.value) + '"' + (edit ? '' : ' readonly') + '><small>' + esc(r.key) +
-      (r.key === 'SUBJECT_BLOCKED_PAIRS' ? ' — subject IDs: ' + L('subjects').map(s => s.SubjectID + ' = ' + s.SubjectName).join(', ') : '') + '</small></label>').join('') + '</form></div>';
+      (r.key === 'SUBJECT_BLOCKED_PAIRS' ? ' — subject IDs: ' + L('subjects').map(s => s.SubjectID + ' = ' + s.SubjectName).join(', ') : '') + '</small></label>').join('') + '</form></div>' +
+    (superAdmin?'<section class="section"><h2>Homework file archive</h2><div class="card"><p>Connect the centre Google account used to archive homework and student submissions after deadlines. Older accounts stay connected so archived files remain available. Use transfer to move an old account’s archive to the current account; it disconnects the old account after all files move.</p><div id="drive-connections">'+(driveConnections.length?driveConnections.map(c=>'<div class="row" style="padding:.65rem 0;border-top:1px solid var(--line)"><b>'+esc(c.account_email)+'</b><span class="pill '+(c.is_primary?'ok':'')+'">'+(c.is_primary?'Current archive account':'Previous archive account')+'</span>'+(c.is_primary?'':'<button class="btn small" data-drive-transfer="'+esc(c.id)+'">Transfer archive and disconnect</button>')+'</div>').join(''):'<p class="muted">No Google Drive account connected yet.</p>')+'</div><button class="btn primary" id="drive-connect">Connect / change Google account</button><p class="muted" style="margin-bottom:0">Files remain in Supabase if Drive is not connected or an upload fails. Drive copies are kept until a teacher deletes them from the homework page.</p></div></section>':'');
+  if(superAdmin){
+    $('#drive-connect').addEventListener('click',ev=>busy(ev.target,async()=>{const result=await api('drive.oauthStart');location.href=result.url;}));
+    $$('[data-drive-transfer]',main).forEach(button=>button.addEventListener('click',()=>{const primary=driveConnections.find(c=>c.is_primary);if(!primary){fail({error:'Connect the new Google Drive account first.'});return;}if(!confirm('Copy this old account’s archived homework files into '+primary.account_email+'? The old connection will be removed after every file transfers.'))return;busy(button,async()=>{const cfg=window.CMZ_CONFIG||{},res=await fetch(cfg.supabaseUrl.replace(/\/$/,'')+'/functions/v1/homework-drive',{method:'POST',headers:{'Content-Type':'application/json',apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+S.token},body:JSON.stringify({action:'transfer',sourceConnectionId:button.dataset.driveTransfer,targetConnectionId:primary.id})}),data=await res.json();if(!res.ok)throw {error:data.error||'Transfer failed.'};toast(data.transferred+' archived file(s) transferred; '+data.remaining+' remaining.');go('settings');});}));
+  }
   if (edit) $('#set-save').addEventListener('click', ev => busy(ev.target, async () => {
     const orig = {}; rows.forEach(r => { orig[r.key] = r.value; });
     const cur = {}; $$('#set-f input').forEach(i => { cur[i.name] = i.value.trim(); });

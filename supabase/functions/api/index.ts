@@ -590,6 +590,8 @@ Deno.serve(async (request) => {
       'student.invoices': 'SELF_VIEW', 'student.receipt': 'SELF_VIEW', 'student.invoiceDoc': 'SELF_VIEW',
       'teacher.homework.list': 'SELF_VIEW', 'teacher.homework.create': 'CLASS_RUN', 'teacher.homework.review': 'CLASS_RUN',
       'student.homework.list': 'SELF_VIEW', 'student.homework.submit': 'SELF_VIEW',
+      'homework.files.upload': 'SELF_VIEW', 'homework.files.register': 'SELF_VIEW', 'homework.files.delete': 'SELF_VIEW',
+      'drive.connections.list': 'SETTINGS_VIEW', 'drive.oauthStart': 'SETTINGS_EDIT',
       'teacher.classMaterials.upload': 'CLASS_RUN', 'teacher.classMaterials.register': 'CLASS_RUN', 'teacher.classMaterials.list': 'SELF_VIEW',
       'student.classMaterials.list': 'SELF_VIEW',
       'teacher.dashboard': 'SELF_VIEW', 'teacher.timetable': 'SELF_VIEW', 'teacher.students': 'SELF_VIEW',
@@ -615,6 +617,95 @@ Deno.serve(async (request) => {
       if (error) throw error
       const stamp = data?.logged_at || '0'
       return response({ ok: true, data: { v: stamp, l: stamp } })
+    }
+
+    if (action === 'homework.files.upload' || action === 'homework.files.register' || action === 'homework.files.delete') {
+      if (!['TEACHER','STUDENT'].includes(user.user_type) || !user.linked_id) throw new ApiFault('FORBIDDEN', 'A linked teacher or student account is required.')
+      const homeworkId = requireText(payload.homeworkId, 'Homework', 60, true)
+      const { data: hw, error: hwError } = await admin.from('homework').select('id,teacher_id,batch_id,due_at,status').eq('id', homeworkId).maybeSingle()
+      if (hwError) throw hwError
+      if (!hw || hw.status !== 'Active') throw new ApiFault('NOT_FOUND', 'Homework not found.')
+      if(action!=='homework.files.delete'&&hw.due_at&&new Date(hw.due_at).getTime()<=Date.now())throw new ApiFault('EXPIRED','The homework deadline has passed; uploads are closed.')
+      let ownerType: 'TEACHER'|'STUDENT' = user.user_type
+      if (ownerType === 'TEACHER' && hw.teacher_id !== user.linked_id) throw new ApiFault('FORBIDDEN', 'You can manage files only for your own homework.')
+      if (ownerType === 'STUDENT') {
+        const { data: student, error } = await admin.from('students').select('id,current_batch_id').eq('id', user.linked_id).maybeSingle()
+        if (error) throw error
+        const { data: assignments } = await admin.from('student_subjects').select('batch_id').eq('student_id', user.linked_id).ilike('status','active')
+        if (!student || ![student.current_batch_id, ...(assignments||[]).map((x)=>x.batch_id)].includes(hw.batch_id)) throw new ApiFault('NOT_FOUND','Homework not found for your class.')
+        if (hw.due_at && new Date(hw.due_at).getTime() <= Date.now()) throw new ApiFault('EXPIRED','The homework deadline has passed; uploads are closed.')
+      }
+      if (action === 'homework.files.upload' || action === 'homework.files.register') {
+        const fileName = requireText(payload.fileName, 'File name', 180, true).replace(/[\\/\u0000-\u001f]/g, '_')
+        const mimeType = requireText(payload.mimeType, 'File type', 150, true).toLowerCase()
+        const fileSize = Number(payload.fileSize)
+        const allowed = new Set(['application/pdf','image/jpeg','image/png','application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
+        const extension = fileName.split('.').pop()?.toLowerCase() || ''
+        const extensionMime: Record<string,string> = {pdf:'application/pdf',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}
+        if (!allowed.has(mimeType) || extensionMime[extension] !== mimeType) throw new ApiFault('BAD_REQUEST','Use a PDF, JPG, PNG, or DOCX file.')
+        if (!Number.isFinite(fileSize) || fileSize < 1 || fileSize > 10*1024*1024) throw new ApiFault('BAD_REQUEST','Each file must be 10 MB or smaller.')
+        if (action === 'homework.files.upload') {
+          const { count } = await admin.from('homework_files').select('id',{count:'exact',head:true}).eq('homework_id',homeworkId).eq('uploaded_by_type',ownerType).eq('uploaded_by_id',user.linked_id)
+          if ((count || 0) >= 5) throw new ApiFault('BAD_REQUEST','You can attach up to five files here.')
+          const safe = fileName.normalize('NFKD').replace(/[^A-Za-z0-9._-]/g,'_').slice(-120) || 'homework-file'
+          const path = `${homeworkId}/${ownerType.toLowerCase()}/${user.linked_id}/${crypto.randomUUID()}-${safe}`
+          const { data: signed, error } = await admin.storage.from('homework-files').createSignedUploadUrl(path)
+          if (error || !signed) throw error || new ApiFault('UPLOAD_FAILED','Could not prepare the file upload.')
+          return response({ok:true,data:{path,uploadUrl:signed.signedUrl}})
+        }
+        const path = requireText(payload.path,'File path',600,true)
+        const prefix = `${homeworkId}/${ownerType.toLowerCase()}/${user.linked_id}/`
+        if (!path.startsWith(prefix) || path.includes('..')) throw new ApiFault('BAD_REQUEST','Invalid homework file path.')
+        const objectName = path.slice(path.lastIndexOf('/')+1)
+        const {data: objects,error:listError}=await admin.storage.from('homework-files').list(path.slice(0,path.lastIndexOf('/')),{search:objectName})
+        if(listError)throw listError
+        if(!(objects||[]).some((x)=>x.name===objectName))throw new ApiFault('UPLOAD_FAILED','The uploaded file was not found. Please try again.')
+        let submissionIdToStore: string|null = null
+        if(ownerType==='STUDENT'){
+          const {data:sub,error:subError}=await admin.from('homework_submissions').select('id').eq('homework_id',homeworkId).eq('student_id',user.linked_id).maybeSingle()
+          if(subError)throw subError
+          if(!sub)throw new ApiFault('BAD_REQUEST','Submit your answer before adding files.')
+          submissionIdToStore=sub.id
+        }
+        const {error:insertError}=await admin.from('homework_files').insert({id:`HWF-${crypto.randomUUID()}`,homework_id:homeworkId,submission_id:submissionIdToStore,uploaded_by_type:ownerType,uploaded_by_id:user.linked_id,file_path:path,file_name:fileName,mime_type:mimeType,file_size:fileSize})
+        if(insertError){await admin.storage.from('homework-files').remove([path]);throw insertError}
+        return response({ok:true,data:{registered:true}})
+      }
+      const fileId = requireText(payload.fileId,'File',100,true)
+      let query=admin.from('homework_files').select('id,file_path,homework_id,uploaded_by_type,uploaded_by_id,drive_file_id,drive_connection_id').eq('id',fileId)
+      if(ownerType==='STUDENT') query=query.eq('uploaded_by_type','STUDENT').eq('uploaded_by_id',user.linked_id)
+      const {data:file,error}=await query.maybeSingle()
+      if(error)throw error
+      if(!file)throw new ApiFault('NOT_FOUND','File not found.')
+      if(ownerType==='TEACHER'){
+        const {data:owned,error:ownedError}=await admin.from('homework').select('id').eq('id',file.homework_id).eq('teacher_id',user.linked_id).maybeSingle()
+        if(ownedError)throw ownedError
+        if(!owned)throw new ApiFault('FORBIDDEN','You can delete files only from your own homework.')
+      }
+      const secrets=JSON.parse(Deno.env.get('SUPABASE_PUBLISHABLE_KEYS')||'{}')
+      const deletion=await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/homework-drive`,{method:'POST',headers:{'Content-Type':'application/json','apikey':secrets.default,Authorization:`Bearer ${token}`},body:JSON.stringify({action:'delete',fileId})})
+      const result=await deletion.json()
+      if(!deletion.ok)throw new ApiFault('DELETE_FAILED',result.error||'Could not delete the file.')
+      return response({ok:true,data:result})
+    }
+
+    if (action === 'drive.connections.list' || action === 'drive.oauthStart') {
+      if(user.user_type!=='ADMIN'||user.role!=='SUPER_ADMIN')throw new ApiFault('FORBIDDEN','Only the Super Admin can manage the centre Google Drive connection.')
+      if(action==='drive.oauthStart'){
+        const clientId=Deno.env.get('GOOGLE_DRIVE_CLIENT_ID')
+        const callback=Deno.env.get('GOOGLE_DRIVE_REDIRECT_URI')
+        if(!clientId||!callback)throw new ApiFault('SETUP','Set GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_REDIRECT_URI in Supabase function secrets first.')
+        const state=crypto.randomUUID()+crypto.randomUUID()
+        const {error}=await admin.from('google_drive_oauth_states').insert({state,app_user_id:user.id})
+        if(error)throw error
+        const url=new URL('https://accounts.google.com/o/oauth2/v2/auth')
+        url.searchParams.set('client_id',clientId);url.searchParams.set('redirect_uri',callback);url.searchParams.set('response_type','code')
+        url.searchParams.set('scope','openid email https://www.googleapis.com/auth/drive.file');url.searchParams.set('access_type','offline');url.searchParams.set('prompt','consent');url.searchParams.set('state',state)
+        return response({ok:true,data:{url:url.toString()}})
+      }
+      const {data,error}=await admin.from('google_drive_connections').select('id,account_email,created_at,is_primary,disconnected_at').is('disconnected_at',null).order('created_at',{ascending:false})
+      if(error)throw error
+      return response({ok:true,data:data||[]})
     }
 
     if (action === 'teacher.homework.list' || action === 'teacher.homework.create' || action === 'teacher.homework.review') {
@@ -677,14 +768,18 @@ Deno.serve(async (request) => {
       const studentIds = [...new Set((submissions || []).map((x) => x.student_id))]
       const { data: students } = studentIds.length ? await admin.from('students').select('id,name').in('id', studentIds) : { data: [] }
       const bm = new Map((batches || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name])), stm = new Map((students || []).map((x) => [x.id, x.name]))
+      const { data: files, error: filesError } = ids.length ? await admin.from('homework_files').select('id,homework_id,submission_id,uploaded_by_type,uploaded_by_id,file_name,mime_type,file_size,archived_at,drive_file_id,archive_error').in('homework_id',ids) : { data: [], error: null }
+      if(filesError)throw filesError
+      const fileMap = new Map<string, any[]>()
+      for(const f of files||[]) fileMap.set(f.submission_id || f.homework_id,[...(fileMap.get(f.submission_id || f.homework_id)||[]),{FileID:f.id,FileName:f.file_name,MimeType:f.mime_type,Size:f.file_size,Archived:!!f.archived_at,ArchiveError:f.archive_error||'',UploaderType:f.uploaded_by_type}])
       const subMap = new Map<string, any[]>()
       for (const row of submissions || []) subMap.set(row.homework_id, [...(subMap.get(row.homework_id) || []), {
         SubmissionID: row.id, StudentID: row.student_id, StudentName: stm.get(row.student_id) || row.student_id,
-        Answer: row.answer, AttachmentURL: row.attachment_url, Status: row.status, Feedback: row.feedback, SubmittedAt: row.submitted_at }])
+        Answer: row.answer, AttachmentURL: row.attachment_url, Files:fileMap.get(row.id)||[], Status: row.status, Feedback: row.feedback, SubmittedAt: row.submitted_at }])
       return response({ ok: true, data: list.map((r) => ({ HomeworkID: r.id, Title: r.title, Instructions: r.instructions,
         BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id, SubjectID: r.subject_id || '', SubjectName: sm.get(r.subject_id) || '',
         Materials: Array.isArray(r.materials) ? r.materials : [], DueAt: r.due_at || '', Status: r.status,
-        Expired: !!r.due_at && new Date(r.due_at).getTime() <= Date.now(), Submissions: subMap.get(r.id) || [] })) })
+        Files:fileMap.get(r.id)||[], Expired: !!r.due_at && new Date(r.due_at).getTime() <= Date.now(), Submissions: subMap.get(r.id) || [] })) })
     }
 
     if (action === 'teacher.classMaterials.upload' || action === 'teacher.classMaterials.register' || action === 'teacher.classMaterials.list' || action === 'student.classMaterials.list') {
@@ -779,7 +874,7 @@ Deno.serve(async (request) => {
         const homeworkId = requireText(payload.homeworkId, 'Homework', 60, true)
         const answer = requireText(payload.answer, 'Answer', 5000)
         const attachmentUrl = requireText(payload.attachmentUrl, 'Attachment link', 500, false)
-        if (!answer && !attachmentUrl) throw new ApiFault('BAD_REQUEST', 'Write an answer or provide a submission link.')
+        if (!answer && !attachmentUrl && !payload.hasFiles) throw new ApiFault('BAD_REQUEST', 'Write an answer, provide a submission link, or attach a file.')
         if (attachmentUrl) { let url: URL; try { url = new URL(attachmentUrl) } catch { throw new ApiFault('BAD_REQUEST', 'Submission link must be a valid http or https URL.') }; if (!['http:', 'https:'].includes(url.protocol)) throw new ApiFault('BAD_REQUEST', 'Submission links must use http or https.') }
         const { data: hw, error } = await admin.from('homework').select('id,due_at,batch_id,status').eq('id', homeworkId).eq('status', 'Active').maybeSingle()
         if (error) throw error
@@ -801,6 +896,15 @@ Deno.serve(async (request) => {
       const ids = currentRows.map((x) => x.id)
       const { data: submissions } = ids.length ? await admin.from('homework_submissions').select('*').eq('student_id', student.id).in('homework_id', ids) : { data: [] }
       const subMap = new Map((submissions || []).map((x) => [x.homework_id, x]))
+      const submissionIds=(submissions||[]).map((x)=>x.id)
+      const {data: studentFiles,error:studentFilesError}=submissionIds.length?await admin.from('homework_files').select('id,homework_id,submission_id,file_name,mime_type,file_size,archived_at,archive_error').in('submission_id',submissionIds):{data:[],error:null}
+      if(studentFilesError)throw studentFilesError
+      const studentFileMap=new Map<string,any[]>()
+      for(const f of studentFiles||[])studentFileMap.set(f.homework_id,[...(studentFileMap.get(f.homework_id)||[]),{FileID:f.id,FileName:f.file_name,MimeType:f.mime_type,Size:f.file_size,Archived:!!f.archived_at,ArchiveError:f.archive_error||''}])
+      const {data: assignmentFiles,error:assignmentFilesError}=ids.length?await admin.from('homework_files').select('id,homework_id,file_name,mime_type,file_size,archived_at,archive_error').in('homework_id',ids).eq('uploaded_by_type','TEACHER').is('submission_id',null):{data:[],error:null}
+      if(assignmentFilesError)throw assignmentFilesError
+      const assignmentFileMap=new Map<string,any[]>()
+      for(const f of assignmentFiles||[])assignmentFileMap.set(f.homework_id,[...(assignmentFileMap.get(f.homework_id)||[]),{FileID:f.id,FileName:f.file_name,MimeType:f.mime_type,Size:f.file_size,Archived:!!f.archived_at,ArchiveError:f.archive_error||''}])
       const teacherIds = [...new Set(currentRows.map((x) => x.teacher_id))], subjectIds = [...new Set(currentRows.map((x) => x.subject_id).filter(Boolean))]
       const [{ data: teachers }, { data: subjects }, { data: batches }] = await Promise.all([
         teacherIds.length ? admin.from('teachers').select('id,name').in('id', teacherIds) : Promise.resolve({ data: [] }),
@@ -810,8 +914,8 @@ Deno.serve(async (request) => {
       const tm = new Map((teachers || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name])), bm = new Map((batches || []).map((x) => [x.id, x.name]))
       return response({ ok: true, data: currentRows.map((r) => { const sub = subMap.get(r.id); return { HomeworkID: r.id, Title: r.title,
         Instructions: r.instructions, TeacherName: tm.get(r.teacher_id) || '', SubjectName: sm.get(r.subject_id) || '', BatchName: bm.get(r.batch_id) || '',
-        Materials: Array.isArray(r.materials) ? r.materials : [], DueAt: r.due_at || '', Submission: sub ? { Answer: sub.answer,
-          AttachmentURL: sub.attachment_url, Status: sub.status, Feedback: sub.feedback, SubmittedAt: sub.submitted_at } : null } }) })
+        Materials: Array.isArray(r.materials) ? r.materials : [], Files:assignmentFileMap.get(r.id)||[], DueAt: r.due_at || '', Submission: sub ? { Answer: sub.answer,
+          AttachmentURL: sub.attachment_url, Files:studentFileMap.get(r.id)||[], Status: sub.status, Feedback: sub.feedback, SubmittedAt: sub.submitted_at } : null } }) })
     }
 
     if (action === 'subjects.list') {

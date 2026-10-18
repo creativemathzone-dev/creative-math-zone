@@ -5,3 +5,11 @@ verify_jwt = false
 [functions.cleanup-class-materials]
 # This endpoint only removes class PDFs whose seven-day expiry has passed.
 verify_jwt = false
+
+[functions.google-drive-oauth]
+# The function validates Supabase user tokens itself and handles Google OAuth callbacks.
+verify_jwt = false
+
+[functions.homework-drive]
+# The function validates user tokens for downloads and a private cron secret for archive runs.
+verify_jwt = false

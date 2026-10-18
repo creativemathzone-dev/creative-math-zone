@@ -448,6 +448,21 @@ function api(action, payload) {
     return r.data;
   }).catch(e => { if (e && e.code) throw e; throw { code:'NETWORK', error:'Could not reach Supabase. Check your internet and project settings.' }; });
 }
+async function uploadHomeworkFiles(homeworkId, files) {
+  for(const file of Array.from(files||[])){
+    const mime=file.type||({'pdf':'application/pdf','jpg':'image/jpeg','jpeg':'image/jpeg','png':'image/png','docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}[file.name.split('.').pop().toLowerCase()]||'');
+    const target=await api('homework.files.upload',{homeworkId,fileName:file.name,fileSize:file.size,mimeType:mime});
+    const uploaded=await fetch(target.uploadUrl,{method:'PUT',headers:{'Content-Type':mime},body:file});
+    if(!uploaded.ok)throw {error:'File upload failed. Check your connection and retry.'};
+    await api('homework.files.register',{homeworkId,path:target.path,fileName:file.name,fileSize:file.size,mimeType:mime});
+  }
+}
+async function openHomeworkFile(fileId) {
+  const cfg=window.CMZ_CONFIG||{},url=cfg.supabaseUrl.replace(/\/$/,'')+'/functions/v1/homework-drive?file='+encodeURIComponent(fileId);
+  const res=await fetch(url,{headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+S.token}});
+  if(!res.ok){const err=await res.json().catch(()=>({}));throw {error:err.error||'Could not open the homework file.'};}
+  const blob=await res.blob(),objectUrl=URL.createObjectURL(blob),a=document.createElement('a'),disposition=res.headers.get('Content-Disposition')||'',match=/filename="([^"]+)"/i.exec(disposition);a.href=objectUrl;a.download=match?match[1]:'homework-file';a.click();setTimeout(()=>URL.revokeObjectURL(objectUrl),30000);
+}
 const SESSION_CODES = ['SESSION_EXPIRED','SESSION_REVOKED','AUTH_REQUIRED'];
 function fail(e) {
   if (e && SESSION_CODES.indexOf(e.code) >= 0) { signedOut(e.error); return; }
@@ -738,9 +753,12 @@ VIEWS.homework = async main => {
       '<span class="pill '+(h.Submission?'ok':'warn')+'">'+(h.Submission?(h.Submission.Status==='REVIEWED'?'Reviewed':'Submitted'):'Not submitted')+'</span></div>'+
       '<p class="muted">Due: '+esc(dueLabel(h.DueAt))+'</p><div style="white-space:pre-wrap">'+esc(h.Instructions||'')+'</div>'+
       (h.Materials.length?'<div style="margin-top:.7rem"><b>Class materials</b><ul>'+h.Materials.map(u=>'<li><a href="'+esc(u)+'" target="_blank" rel="noopener">Open material</a></li>').join('')+'</ul></div>':'')+
+      (h.Files.length?'<div style="margin-top:.7rem"><b>Homework files</b><ul>'+h.Files.map(f=>'<li><button type="button" class="link" data-hw-file="'+esc(f.FileID)+'">'+esc(f.FileName)+(f.Archived?' · Drive archive':f.ArchiveError?' · Archive pending retry':'')+'</button></li>').join('')+'</ul></div>':'')+
+      (h.Submission&&h.Submission.Files&&h.Submission.Files.length?'<div style="margin-top:.7rem"><b>Your uploaded files</b><ul>'+h.Submission.Files.map(f=>'<li><button type="button" class="link" data-hw-file="'+esc(f.FileID)+'">'+esc(f.FileName)+(f.Archived?' · Drive archive':f.ArchiveError?' · Archive pending retry':'')+'</button></li>').join('')+'</ul></div>':'')+
       (h.Submission&&h.Submission.Feedback?'<div class="alert info" style="margin-top:.8rem"><b>Teacher feedback</b><br>'+esc(h.Submission.Feedback)+'</div>':'')+
       '<form data-hw-form="'+esc(h.HomeworkID)+'" style="margin-top:1rem"><label class="f"><span>Your answer</span><textarea name="answer" rows="4" maxlength="5000" placeholder="Type your answer" style="width:100%;padding:.65rem;border:1px solid var(--line);border-radius:8px">'+esc(h.Submission?h.Submission.Answer:'')+'</textarea></label>'+
       '<label class="f"><span>Optional link to your work</span><input name="attachmentUrl" type="url" maxlength="500" placeholder="https://…" value="'+esc(h.Submission?h.Submission.AttachmentURL:'')+'"></label>'+
+      '<label class="f"><span>Answer files (up to 5, 10 MB each)</span><input name="files" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document"><small>PDF, JPG, PNG, or DOCX.</small></label>'+
       '<small class="muted">Draft answers are saved on this device for up to 7 days. They stay private to this browser and are not sent until you submit.</small><button class="btn primary">'+(h.Submission?'Update submission':'Submit homework')+'</button></form></div>').join('') : '<div class="card empty"><b>No current homework</b>New assignments from your teacher will appear here. Work past its deadline is removed from this student view.</div>');
   $$('[data-hw-form]',main).forEach(form=>{
     const key='cmz_hw_'+(S.user&&S.user.linkedId||'student')+'_'+form.dataset.hwForm;
@@ -748,8 +766,10 @@ VIEWS.homework = async main => {
     if(draft){form.elements.answer.value=draft.answer||form.elements.answer.value;form.elements.attachmentUrl.value=draft.attachmentUrl||form.elements.attachmentUrl.value;}
     const saveDraft=()=>{try{localStorage.setItem(key,JSON.stringify({answer:form.elements.answer.value,attachmentUrl:form.elements.attachmentUrl.value,savedAt:Date.now()}));}catch(e){}};
     form.elements.answer.addEventListener('input',saveDraft);form.elements.attachmentUrl.addEventListener('input',saveDraft);
-    form.addEventListener('submit',ev=>{ev.preventDefault();const b=form.querySelector('button');busy(b,async()=>{await api('student.homework.submit',{homeworkId:form.dataset.hwForm,answer:form.elements.answer.value.trim(),attachmentUrl:form.elements.attachmentUrl.value.trim()});try{localStorage.removeItem(key)}catch(e){}toast('Homework submitted.');go('homework');});});
+    form.addEventListener('submit',ev=>{ev.preventDefault();const b=form.querySelector('button');busy(b,async()=>{if(form.elements.files.files.length>5)throw {error:'Choose up to five files.'};await api('student.homework.submit',{homeworkId:form.dataset.hwForm,answer:form.elements.answer.value.trim(),attachmentUrl:form.elements.attachmentUrl.value.trim(),hasFiles:form.elements.files.files.length>0});await uploadHomeworkFiles(form.dataset.hwForm,form.elements.files.files);try{localStorage.removeItem(key)}catch(e){}toast('Homework submitted.');go('homework');});});
   });
+  $$('[data-hw-file]',main).forEach(b=>b.addEventListener('click',()=>busy(b,()=>openHomeworkFile(b.dataset.hwFile))));
+  $$('[data-hw-delete]',main).forEach(b=>b.addEventListener('click',()=>{if(!confirm('Delete this uploaded file?'))return;busy(b,async()=>{await api('homework.files.delete',{homeworkId:b.dataset.homeworkId,fileId:b.dataset.hwDelete});toast('File deleted.');go('homework');});}));
 };
 
 /* ---- class PDFs ---- */

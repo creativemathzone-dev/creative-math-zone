@@ -419,6 +419,21 @@ function api(action, payload) {
     return r.data;
   }).catch(e => { if (e && e.code) throw e; throw { code:'NETWORK', error:'Could not reach Supabase. Check your internet and project settings.' }; });
 }
+async function uploadHomeworkFiles(homeworkId, files) {
+  for (const file of Array.from(files||[])) {
+    const mime=file.type||({'pdf':'application/pdf','jpg':'image/jpeg','jpeg':'image/jpeg','png':'image/png','docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}[file.name.split('.').pop().toLowerCase()]||'');
+    const target=await api('homework.files.upload',{homeworkId,fileName:file.name,fileSize:file.size,mimeType:mime});
+    const uploaded=await fetch(target.uploadUrl,{method:'PUT',headers:{'Content-Type':mime},body:file});
+    if(!uploaded.ok)throw {error:'File upload failed. Check your connection and retry.'};
+    await api('homework.files.register',{homeworkId,path:target.path,fileName:file.name,fileSize:file.size,mimeType:mime});
+  }
+}
+async function openHomeworkFile(fileId) {
+  const cfg=window.CMZ_CONFIG||{},url=cfg.supabaseUrl.replace(/\/$/,'')+'/functions/v1/homework-drive?file='+encodeURIComponent(fileId);
+  const res=await fetch(url,{headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+S.token}});
+  if(!res.ok){const err=await res.json().catch(()=>({}));throw {error:err.error||'Could not open the homework file.'};}
+  const blob=await res.blob(),objectUrl=URL.createObjectURL(blob),a=document.createElement('a'),disposition=res.headers.get('Content-Disposition')||'',match=/filename="([^"]+)"/i.exec(disposition);a.href=objectUrl;a.download=match?match[1]:'homework-file';a.click();setTimeout(()=>URL.revokeObjectURL(objectUrl),30000);
+}
 const SESSION_CODES = ['SESSION_EXPIRED','SESSION_REVOKED','AUTH_REQUIRED'];
 function fail(e) {
   if (e && SESSION_CODES.indexOf(e.code) >= 0) { signedOut(e.error); return; }
@@ -707,15 +722,18 @@ VIEWS.homework = async main => {
       '<label class="f full"><span>Instructions</span><textarea name="instructions" rows="4" maxlength="5000" placeholder="What should students complete?" style="width:100%;padding:.65rem;border:1px solid var(--line);border-radius:8px"></textarea></label>'+
       '<label class="f"><span>Due date and time *</span><input name="dueAt" type="datetime-local" required><small>At the deadline, it is removed from the student view and submissions close. Teachers retain it to review submitted work.</small></label>'+
       '<label class="f"><span>Material links (one per line)</span><textarea name="materials" rows="3" placeholder="https://…" style="width:100%;padding:.65rem;border:1px solid var(--line);border-radius:8px"></textarea></label>'+
+      '<label class="f full"><span>Homework files (up to 5, 10 MB each)</span><input name="files" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document"><small>PDF, JPG, PNG, or DOCX. Files are kept in the portal until the deadline, then archived to the centre Google Drive.</small></label>'+
     '</div><button class="btn primary" id="hw-add">Assign homework</button></form>' : '<div class="empty">No active timetable assignment found. Ask an admin to assign you to a batch first.</div>') + '</div>' +
     '<div class="head"><div><h2>Assigned work</h2></div></div><div class="toolbar"><label class="f" style="flex:1;min-width:220px;margin:0"><span>Search homework</span><input id="hw-search" type="search" placeholder="Title, subject, batch, or instructions" value="'+esc(st.search)+'"></label></div>' + (rows.length ? rows.map(h => {
       const pending = h.Submissions.filter(x=>x.Status!=='REVIEWED').length;
       const expired = h.Expired || h.Status==='Archived';
-      return '<details class="card" data-hw-search="'+esc([h.Title,h.BatchName,h.SubjectName,h.Instructions].join(' '))+'" style="margin-top:.8rem"><summary style="cursor:pointer"><b>'+esc(h.Title)+'</b> · '+esc(h.BatchName)+(h.SubjectName?' · '+esc(h.SubjectName):'')+
+      return '<details class="card" data-homework-id="'+esc(h.HomeworkID)+'" data-hw-search="'+esc([h.Title,h.BatchName,h.SubjectName,h.Instructions].join(' '))+'" style="margin-top:.8rem"><summary style="cursor:pointer"><b>'+esc(h.Title)+'</b> · '+esc(h.BatchName)+(h.SubjectName?' · '+esc(h.SubjectName):'')+
         ' <span class="pill '+(expired?'':'warn')+'">'+(expired?'Closed':pending+' pending')+'</span></summary>'+
         '<p style="white-space:pre-wrap">'+esc(h.Instructions)+'</p>'+(h.DueAt?'<p class="muted">Due '+esc(new Date(h.DueAt).toLocaleString())+'</p>':'')+
         (h.Materials.length?'<p>'+h.Materials.map(u=>'<a href="'+esc(u)+'" target="_blank" rel="noopener">Open material</a>').join(' · ')+'</p>':'')+
-        (h.Submissions.length?'<div class="tablewrap"><table class="stack"><thead><tr><th>Student</th><th>Submitted</th><th>Answer</th><th>Link</th><th>Status / feedback</th></tr></thead><tbody>'+h.Submissions.map(s=>'<tr><td>'+esc(s.StudentName)+'</td><td>'+esc(new Date(s.SubmittedAt).toLocaleString())+'</td><td style="white-space:pre-wrap">'+esc(s.Answer)+'</td><td>'+(s.AttachmentURL?'<a href="'+esc(s.AttachmentURL)+'" target="_blank" rel="noopener">Open</a>':'—')+'</td><td>'+esc(s.Status)+(s.Feedback?'<br>'+esc(s.Feedback):'')+(s.Status!=='REVIEWED'?'<br><button class="btn small" data-hw-review="'+esc(h.HomeworkID)+'" data-hw-sub="'+esc(s.SubmissionID)+'">Review</button>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted">No submissions yet.</p>')+'</details>';
+        (h.Files.length?'<p><b>Attached files:</b> '+h.Files.map(f=>'<span><button class="link" data-hw-file="'+esc(f.FileID)+'">'+esc(f.FileName)+(f.Archived?' · Drive archive':f.ArchiveError?' · Archive failed; copy retained':' · Pending archive')+'</button> <button class="btn small danger" data-hw-delete="'+esc(f.FileID)+'">Delete</button></span>').join(' · ')+'</p>':'')+
+        (!expired?'<div class="row"><input type="file" multiple data-hw-extra="'+esc(h.HomeworkID)+'" accept=".pdf,.jpg,.jpeg,.png,.docx,application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document"><button type="button" class="btn small" data-hw-extra-add="'+esc(h.HomeworkID)+'">Add files</button></div>':'')+
+        (h.Submissions.length?'<div class="tablewrap"><table class="stack"><thead><tr><th>Student</th><th>Submitted</th><th>Answer</th><th>Link / files</th><th>Status / feedback</th></tr></thead><tbody>'+h.Submissions.map(s=>'<tr><td>'+esc(s.StudentName)+'</td><td>'+esc(new Date(s.SubmittedAt).toLocaleString())+'</td><td style="white-space:pre-wrap">'+esc(s.Answer)+'</td><td>'+(s.AttachmentURL?'<a href="'+esc(s.AttachmentURL)+'" target="_blank" rel="noopener">Open link</a>':'')+(s.Files||[]).map(f=>'<div><button class="link" data-hw-file="'+esc(f.FileID)+'">'+esc(f.FileName)+(f.Archived?' · Drive archive':f.ArchiveError?' · Archive failed; copy retained':' · Pending archive')+'</button> <button class="btn small danger" data-hw-delete="'+esc(f.FileID)+'">Delete</button></div>').join('')+'</td><td>'+esc(s.Status)+(s.Feedback?'<br>'+esc(s.Feedback):'')+(s.Status!=='REVIEWED'?'<br><button class="btn small" data-hw-review="'+esc(h.HomeworkID)+'" data-hw-sub="'+esc(s.SubmissionID)+'">Review</button>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted">No submissions yet.</p>')+'</details>';
     }).join('') + '<div id="hw-no-matches" class="card empty" hidden><b>No matching homework</b>Try another search.</div>' : '<div class="card empty"><b>No homework assigned yet</b></div>');
   const filterHomework=()=>{const q=st.search.trim().toLowerCase();let count=0;$$('[data-hw-search]',main).forEach(card=>{card.hidden=!!q&&!card.dataset.hwSearch.toLowerCase().includes(q);if(!card.hidden)count++;});$('#hw-no-matches',main)?.toggleAttribute('hidden',count>0);};
   $('#hw-search',main).addEventListener('input',e=>{st.search=e.target.value;filterHomework();});filterHomework();
@@ -724,10 +742,14 @@ VIEWS.homework = async main => {
     const refreshSubjects=()=>{const batch=form.elements.batchId.value;const opts=choices.filter(x=>x.batchId===batch);form.elements.subjectId.innerHTML=opts.map(x=>'<option value="'+esc(x.subjectId)+'">'+esc(x.subjectName)+'</option>').join('');};
     form.elements.batchId.addEventListener('change',refreshSubjects);refreshSubjects();
     form.addEventListener('submit',ev=>{ev.preventDefault();busy($('#hw-add',main),async()=>{
-      const f=form.elements; if(!form.reportValidity())return; await api('teacher.homework.create',{batchId:f.batchId.value,subjectId:f.subjectId.value,title:f.title.value.trim(),instructions:f.instructions.value.trim(),dueAt:new Date(f.dueAt.value).toISOString(),materials:f.materials.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean)});
+      const f=form.elements; if(!form.reportValidity())return; if(f.files.files.length>5)throw {error:'Choose up to five files.'}; const created=await api('teacher.homework.create',{batchId:f.batchId.value,subjectId:f.subjectId.value,title:f.title.value.trim(),instructions:f.instructions.value.trim(),dueAt:new Date(f.dueAt.value).toISOString(),materials:f.materials.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean)});
+      try{await uploadHomeworkFiles(created.id,f.files.files);}catch(error){toast('Homework was assigned, but a file did not upload. Open the assignment and retry with Add files.',true);go('homework');return;}
       toast('Homework assigned.');go('homework');
     });});
   }
+  $$('[data-hw-file]',main).forEach(b=>b.addEventListener('click',()=>busy(b,()=>openHomeworkFile(b.dataset.hwFile))));
+  $$('[data-hw-delete]',main).forEach(b=>b.addEventListener('click',()=>{if(!confirm('Permanently delete this homework file from the portal and Google Drive archive?'))return;busy(b,async()=>{await api('homework.files.delete',{homeworkId:b.closest('[data-homework-id]')?.dataset.homeworkId||'',fileId:b.dataset.hwDelete});toast('File deleted.');go('homework');});}));
+  $$('[data-hw-extra-add]',main).forEach(b=>b.addEventListener('click',()=>{const input=$('[data-hw-extra="'+CSS.escape(b.dataset.hwExtraAdd)+'"]',main),files=Array.from(input.files||[]),homework=rows.find(x=>x.HomeworkID===b.dataset.hwExtraAdd);if(!files.length){toast('Choose at least one file.',true);return;}if(files.length+(homework?.Files.length||0)>5){toast('There is room for up to five files on this assignment.',true);return;}busy(b,async()=>{await uploadHomeworkFiles(b.dataset.hwExtraAdd,files);toast('Homework files uploaded.');go('homework');});}));
   $$('[data-hw-review]',main).forEach(b=>b.addEventListener('click',()=>{const feedback=prompt('Feedback for this student (optional):');if(feedback===null)return;busy(b,async()=>{await api('teacher.homework.review',{homeworkId:b.dataset.hwReview,submissionId:b.dataset.hwSub,feedback});toast('Marked reviewed.');go('homework');});}));
 };
 
