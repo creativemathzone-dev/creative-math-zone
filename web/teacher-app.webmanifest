@@ -1,0 +1,16 @@
+{
+  "id": "./teacher-app",
+  "name": "Creative Math Zone Teacher",
+  "short_name": "CMZ Teacher",
+  "description": "Teacher portal for Creative Math Zone.",
+  "start_url": "./teacher.html?source=teacher-app",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#102447",
+  "theme_color": "#102447",
+  "icons": [
+    {"src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
