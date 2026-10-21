@@ -1,6 +1,8 @@
 [
   {
-    "relation": ["delegate_permission/common.handle_all_urls"],
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
     "target": {
       "namespace": "android_app",
       "package_name": "in.creativemathzone.app",
@@ -10,12 +12,38 @@
     }
   },
   {
-    "relation": ["delegate_permission/common.handle_all_urls"],
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
     "target": {
       "namespace": "android_app",
       "package_name": "in.creativemathzone.twa",
       "sha256_cert_fingerprints": [
         "43:30:98:8A:D3:17:66:87:57:89:1A:79:A1:EC:F5:2C:3C:08:5D:56:BC:8D:F9:CE:D6:F1:B4:00:08:BF:5C:8A"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "in.creativemathzone.teacher",
+      "sha256_cert_fingerprints": [
+        "90:A3:E8:D9:57:EB:CC:78:43:13:A2:02:4F:C7:99:4B:6D:C8:0F:EB:30:85:BE:D8:89:F8:B8:D6:62:A2:1C:02"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "in.creativemathzone.admin",
+      "sha256_cert_fingerprints": [
+        "FE:62:A5:67:D7:2E:D1:39:B0:54:ED:08:C5:C7:5F:FD:5A:6D:4C:56:1E:96:8D:DC:74:E1:8F:6C:DC:1D:BC:A6"
       ]
     }
   }

@@ -12,6 +12,18 @@
       messageIds: ['student-apk-installed'],
       sourceNoteIds: ['student-apk-source-note'],
     },
+    {
+      key: 'cmz-teacher-apk-download-started',
+      linkIds: ['teacher-apk-download'],
+      messageIds: ['teacher-apk-installed'],
+      sourceNoteIds: ['teacher-apk-source-note'],
+    },
+    {
+      key: 'cmz-admin-apk-download-started',
+      linkIds: ['admin-apk-download'],
+      messageIds: ['admin-apk-installed'],
+      sourceNoteIds: ['admin-apk-source-note'],
+    },
   ];
 
   const setVisible = (ids, hidden) => {

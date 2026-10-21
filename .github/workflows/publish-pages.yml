@@ -32,9 +32,13 @@ jobs:
           cp -R web/icons _site/web/icons
           test -f downloads/CreativeMathZone.apk
           test -f downloads/CreativeMathZoneStudent.apk
+          test -f downloads/CreativeMathZoneTeacher.apk
+          test -f downloads/CreativeMathZoneAdmin.apk
           test -f .well-known/assetlinks.json
           cp downloads/CreativeMathZone.apk _site/downloads/CreativeMathZone.apk
           cp downloads/CreativeMathZoneStudent.apk _site/downloads/CreativeMathZoneStudent.apk
+          cp downloads/CreativeMathZoneTeacher.apk _site/downloads/CreativeMathZoneTeacher.apk
+          cp downloads/CreativeMathZoneAdmin.apk _site/downloads/CreativeMathZoneAdmin.apk
           cp .well-known/assetlinks.json _site/.well-known/assetlinks.json
 
       - name: Configure Pages
