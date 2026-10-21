@@ -2091,7 +2091,7 @@ VIEWS.notices = async main => {
 
     $('#nt-list').innerHTML = filtered.length
       ? '<div class="tablewrap"><table class="stack"><thead><tr>' +
-          '<th>Title</th><th>Audience</th><th>Posted</th><th>Expires</th><th>Status</th><th></th>' +
+          '<th>Title</th><th>Audience</th><th>Landing page</th><th>Posted</th><th>Expires</th><th>Status</th><th></th>' +
         '</tr></thead><tbody>' +
         filtered.map(r => {
           const isExp = r.ExpiresAt && r.ExpiresAt < today;
@@ -2100,6 +2100,7 @@ VIEWS.notices = async main => {
           return '<tr>' +
             '<td data-l="Title"><b>' + esc(r.Title) + '</b></td>' +
             '<td data-l="Audience">' + esc(audienceLabel_(r.Audience, r.BatchName)) + '</td>' +
+            '<td data-l="Landing page">' + (r.ShowOnLandingPage ? '<span class="pill ok">Public</span>' : '<span class="muted">Portal only</span>') + '</td>' +
             '<td data-l="Posted">' + esc(r.PostedAt ? fmtTime(r.PostedAt) : '—') + '</td>' +
             '<td data-l="Expires">' + esc(r.ExpiresAt ? fmtDate(r.ExpiresAt) : '—') + '</td>' +
             '<td>' + statusPill + '</td>' +
@@ -2170,6 +2171,8 @@ VIEWS.notices = async main => {
             '<option value="Inactive"' + (stat === 'Inactive' ? ' selected' : '') + '>Inactive</option>' +
           '</select>' +
         '</label>' +
+        '<label class="f full"><span><input name="ShowOnLandingPage" type="checkbox" style="width:auto;min-height:0;padding:0;margin-right:.5rem;accent-color:var(--navy)"' + (row && row.ShowOnLandingPage ? ' checked' : '') + '>Show on public landing page</span>' +
+          '<small>Only use this for a notice meant for everyone. Batch-only or staff notices can never be shown publicly.</small></label>' +
       '</div>' +
     '</form>';
 
@@ -2180,14 +2183,22 @@ VIEWS.notices = async main => {
       d => {
         const audSel = d.querySelector('[name=Audience]');
         const batchWrap = d.querySelector('[data-batchwrap]');
+        const publicCheck = d.querySelector('[name=ShowOnLandingPage]');
         const syncBatch = () => { batchWrap.style.display = (audSel.value === 'BATCH') ? '' : 'none'; };
+        const syncPublic = () => {
+          const everyone = audSel.value === 'ALL';
+          publicCheck.disabled = !everyone;
+          if (!everyone) publicCheck.checked = false;
+        };
         audSel.addEventListener('change', syncBatch);
-        syncBatch();
+        audSel.addEventListener('change', syncPublic);
+        syncBatch(); syncPublic();
 
         $('#nt-save', d).addEventListener('click', ev => busy(ev.target, async () => {
           if (!validForm(d)) return;
           const fields = [{ n: 'Title' }, { n: 'Body' }, { n: 'Audience' }, { n: 'BatchID' }, { n: 'ExpiresAt' }, { n: 'Status' }];
           const data = collect(d, fields);
+          data.ShowOnLandingPage = d.querySelector('[name=ShowOnLandingPage]').checked ? 'TRUE' : 'FALSE';
           try {
             if (isEdit) {
               const ch = changedOnly(data, row);

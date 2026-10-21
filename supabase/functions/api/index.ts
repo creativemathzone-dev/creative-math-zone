@@ -381,6 +381,22 @@ Deno.serve(async (request) => {
       } })
     }
 
+    if (action === 'public.landingNotices') {
+      const { data: settings, error: settingsError } = await admin.from('settings').select('setting_key,value')
+      if (settingsError) throw settingsError
+      const publicIds = (settings || [])
+        .filter((r) => String(r.setting_key).startsWith('PUBLIC_LANDING_NOTICE_') && String(r.value).toUpperCase() === 'TRUE')
+        .map((r) => String(r.setting_key).slice('PUBLIC_LANDING_NOTICE_'.length))
+        .filter(Boolean)
+      if (!publicIds.length) return response({ ok: true, data: [] })
+      const { data, error } = await admin.from('notices').select('id,title,body,audience,posted_at,expires_at')
+        .in('id', publicIds).eq('status', 'Active').eq('audience', 'ALL').order('posted_at', { ascending: false }).limit(50)
+      if (error) throw error
+      const today = todayDate()
+      return response({ ok: true, data: (data || []).filter((r) => !r.expires_at || r.expires_at >= today).slice(0, 8)
+        .map((r) => ({ Title: r.title, Body: r.body, PostedAt: r.posted_at })) })
+    }
+
     if (action === 'public.registerOptions') {
       const [{ data: settings, error: settingsError }, { data: subjects, error: subjectsError }, { data: batches, error: batchesError }] = await Promise.all([
         admin.from('settings').select('setting_key,value').in('setting_key', ['REGISTRATION_ENABLED', 'SUBJECT_BLOCKED_PAIRS']),
@@ -927,7 +943,7 @@ Deno.serve(async (request) => {
     if (action === 'settings.get') {
       const { data, error } = await admin.from('settings').select('*').order('setting_key')
       if (error) throw error
-      return response({ ok: true, data: (data || []).map((r) => ({ key: r.setting_key, value: r.value,
+      return response({ ok: true, data: (data || []).filter((r) => !String(r.setting_key).startsWith('PUBLIC_LANDING_NOTICE_')).map((r) => ({ key: r.setting_key, value: r.value,
         description: r.description, updatedAt: r.updated_at, updatedBy: r.updated_by })) })
     }
 
@@ -1060,11 +1076,17 @@ Deno.serve(async (request) => {
     if (action === 'notices.adminList') {
       const { data, error } = await admin.from('notices').select('*').order('posted_at', { ascending: false }).limit(500)
       if (error) throw error
-      const { data: batches } = await admin.from('batches').select('id,name')
+      const [{ data: batches }, { data: publicSettings, error: publicSettingsError }] = await Promise.all([
+        admin.from('batches').select('id,name'), admin.from('settings').select('setting_key,value'),
+      ])
+      if (publicSettingsError) throw publicSettingsError
       const batchNames = new Map((batches || []).map((b) => [b.id, b.name]))
+      const publicIds = new Set((publicSettings || []).filter((r) => String(r.setting_key).startsWith('PUBLIC_LANDING_NOTICE_') && String(r.value).toUpperCase() === 'TRUE')
+        .map((r) => String(r.setting_key).slice('PUBLIC_LANDING_NOTICE_'.length)))
       return response({ ok: true, data: (data || []).map((r) => ({ NoticeID: r.id, Title: r.title, Body: r.body,
         Audience: r.audience, BatchID: r.batch_id || '', BatchName: r.batch_id ? batchNames.get(r.batch_id) || '' : '',
-        PostedBy: r.posted_by, PostedAt: r.posted_at, ExpiresAt: r.expires_at || '', Status: r.status })) })
+        PostedBy: r.posted_by, PostedAt: r.posted_at, ExpiresAt: r.expires_at || '', Status: r.status,
+        ShowOnLandingPage: publicIds.has(r.id) && r.audience === 'ALL' })) })
     }
 
     if (action === 'notices.add' || action === 'notices.update') {
@@ -1074,7 +1096,14 @@ Deno.serve(async (request) => {
       const map: Record<string, string> = { Title: 'title', Body: 'body', Audience: 'audience', BatchID: 'batch_id', ExpiresAt: 'expires_at', Status: 'status' }
       const allowed = Object.keys(map)
       const row: Record<string, unknown> = {}
+      let showOnLandingPage: boolean | null = null
       for (const [key, raw] of Object.entries(input)) {
+        if (key === 'ShowOnLandingPage') {
+          const selected = requireText(raw, key, 5, true).toUpperCase()
+          if (!['TRUE', 'FALSE'].includes(selected)) throw new ApiFault('BAD_REQUEST', 'ShowOnLandingPage must be TRUE or FALSE.')
+          showOnLandingPage = selected === 'TRUE'
+          continue
+        }
         if (!allowed.includes(key)) throw new ApiFault('BAD_REQUEST', `Unknown notice field: ${key}`)
         if (key === 'Audience') {
           const audience = requireText(raw, key, 20, true).toUpperCase()
@@ -1102,6 +1131,7 @@ Deno.serve(async (request) => {
         Object.assign(merged, old, row)
       }
       if (merged.audience === 'BATCH' && !merged.batch_id) throw new ApiFault('BAD_REQUEST', 'Choose a batch for a batch notice.')
+      if (showOnLandingPage === true && merged.audience !== 'ALL') throw new ApiFault('BAD_REQUEST', 'Only notices for Everyone can be shown on the public landing page.')
       if (merged.audience === 'BATCH') {
         const { data: batch } = await admin.from('batches').select('id,status').eq('id', merged.batch_id).maybeSingle()
         if (!batch || batch.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Choose an active batch for this notice.')
@@ -1115,9 +1145,17 @@ Deno.serve(async (request) => {
         ? await admin.from('notices').update(row).eq('id', id).select('*').single()
         : await admin.from('notices').insert(row).select('*').single()
       if (error) throw error
+      if (showOnLandingPage !== null) {
+        const { error: publicFlagError } = await admin.from('settings').upsert({
+          setting_key: `PUBLIC_LANDING_NOTICE_${id}`, value: showOnLandingPage ? 'TRUE' : 'FALSE',
+          description: 'Whether notice ' + id + ' is shown on the public landing page.', updated_at: new Date().toISOString(), updated_by: user.id,
+        }, { onConflict: 'setting_key' })
+        if (publicFlagError) throw publicFlagError
+      }
       await logAction(admin, user, isUpdate ? 'EDIT_NOTICE' : 'ADD_NOTICE', 'NOTICE', id, row)
       return response({ ok: true, data: { NoticeID: saved.id, Title: saved.title, Body: saved.body, Audience: saved.audience,
-        BatchID: saved.batch_id || '', PostedAt: saved.posted_at, ExpiresAt: saved.expires_at || '', Status: saved.status } })
+        BatchID: saved.batch_id || '', PostedAt: saved.posted_at, ExpiresAt: saved.expires_at || '', Status: saved.status,
+        ShowOnLandingPage: showOnLandingPage === true && saved.audience === 'ALL' } })
     }
 
     if (action === 'notices.setStatus') {

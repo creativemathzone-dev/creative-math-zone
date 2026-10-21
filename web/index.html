@@ -8,6 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <script src="./config.js"></script>
   <script src="./pwa.js" defer></script>
   <title>Creative Math Zone | Learn · Explore · Grow</title>
   <style>
@@ -48,14 +49,18 @@
     section.content{padding:clamp(3.5rem,7vw,5.5rem) 0}
     .section-title{font-size:clamp(1.9rem,4vw,2.8rem);letter-spacing:-.025em}
     .lead{max-width:66ch;margin:.65rem 0 2rem;color:var(--muted);font-size:1.04rem}
-    .portal-section{padding:2rem 0 1rem}
-    .portal-head{display:flex;align-items:end;justify-content:space-between;gap:1rem;margin-bottom:1rem}
-    .portal-head p{margin:0;color:var(--muted)}
-    .portal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
-    .portal-card{display:flex;align-items:center;gap:.9rem;min-height:94px;padding:1rem 1.1rem;border:2px solid var(--line);border-radius:20px;background:var(--surface);text-decoration:none;box-shadow:0 8px 20px #19264b0a;transition:transform .16s,border-color .16s,box-shadow .16s}
-    .portal-card:hover{transform:translateY(-3px);border-color:var(--blue);box-shadow:0 14px 28px #19264b18}
-    .portal-icon{flex:none;width:48px;height:48px;display:grid;place-items:center;border-radius:15px;background:#edf2ff;font-size:1.5rem}
-    .portal-card strong{display:block;font-size:1.04rem}.portal-card small{display:block;color:var(--muted);font-size:.86rem;margin-top:.12rem}
+    .quick-enquiry{padding:1.2rem 0;background:#fff9dc;border-bottom:1px solid #eee5bb}
+    .quick-enquiry-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+    .quick-enquiry p{margin:0;color:var(--muted)}.quick-actions{display:flex;gap:.6rem;flex-wrap:wrap}
+    .quick-actions a{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:.55rem .9rem;border:1px solid #d7c75a;border-radius:999px;background:#fff;color:var(--ink);font-weight:900;text-decoration:none}
+    .quick-actions a:hover{background:var(--yellow)}
+    .explore-strip{padding:1.5rem 0;background:#fffdf3}
+    .explore-row{display:flex;align-items:center;justify-content:space-between;gap:1.25rem;flex-wrap:wrap}
+    .explore-row h2{font-size:1.35rem}.explore-row p{margin:.25rem 0 0;color:var(--muted)}
+    .explore-links{display:flex;gap:.65rem;flex-wrap:wrap}.explore-links a{font-weight:900;color:var(--blue-dark);text-decoration:none;border-bottom:2px solid var(--yellow)}
+    .notices{padding:1.1rem 0;background:#edf8f1;border-block:1px solid #d3ead9}
+    .notice-list{display:grid;gap:.65rem}.notice-card{padding:.85rem 1rem;border:1px solid #cde4d4;border-radius:14px;background:#fff}
+    .notice-card h3{font-size:1.04rem}.notice-card p{margin:.25rem 0 0;white-space:pre-wrap;color:var(--muted)}.notice-card time{display:block;margin-top:.35rem;color:var(--muted);font-size:.82rem}
     .boards{background:#f4f6ff;border-block:1px solid var(--line)}
     .board-grid,.subject-grid,.why-grid,.steps-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}
     .board-card,.subject-card{height:100%;padding:1.4rem;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:0 8px 24px #1c23400a}
@@ -67,9 +72,10 @@
     .why{background:var(--blue);color:#fff}
     .why .lead{color:#e0e9ff}.why-grid article{padding:1.2rem;border-left:4px solid var(--yellow);background:#ffffff12;border-radius:0 16px 16px 0}
     .why-grid h3{font-size:1.15rem;margin-bottom:.35rem}.why-grid p{margin:0;color:#e3ebff}
-    .gallery-box{display:flex;align-items:center;justify-content:space-between;gap:1.5rem;padding:clamp(1.4rem,4vw,2.3rem);border:1px dashed #9aa8c8;border-radius:var(--radius);background:#f5f7ff}
-    .gallery-box h3{font-size:1.3rem}.gallery-box p{max-width:60ch;margin:.45rem 0 0;color:var(--muted)}
-    .gallery-mark{flex:none;width:76px;height:76px;display:grid;place-items:center;border-radius:24px;background:#e7edff;font-size:2rem}
+    .highlight-card{padding:clamp(1.4rem,4vw,2.2rem);border:1px solid #e3dcae;border-radius:var(--radius);background:linear-gradient(120deg,#fff9dc,#fff)}
+    .highlight-card h3{font-size:1.3rem}.highlight-card p{max-width:72ch;margin:.5rem 0 0;color:var(--muted)}
+    .faq-list{display:grid;gap:.75rem;max-width:900px}.faq-list details{padding:1rem 1.15rem;border:1px solid var(--line);border-radius:15px;background:#fff}
+    .faq-list summary{font-weight:900;cursor:pointer}.faq-list details p{margin:.6rem 0 0;color:var(--muted)}
     .steps-grid{counter-reset:step}
     .step{padding:1.25rem;border:2px dashed var(--line);border-radius:20px;background:var(--surface);counter-increment:step}
     .step::before{content:counter(step);width:36px;height:36px;display:grid;place-items:center;margin-bottom:.7rem;border-radius:50%;background:var(--yellow);font-weight:900}
@@ -94,9 +100,9 @@
     #android-app-installed{margin:.75rem 0 0;color:#e0e9ff;font-size:.9rem}
     footer{padding:1.6rem 0;background:var(--blue-dark);color:#dce6ff;text-align:center}
     footer p{margin:.25rem 0}
-    @media(max-width:900px){.header-row{flex-wrap:wrap;padding-block:.65rem}.nav-toggle{display:inline-flex}.main-nav{display:none;order:3;width:100%;padding:.8rem 0 .35rem;flex-wrap:wrap;gap:.8rem 1.1rem}.main-nav.open{display:flex}.hero-grid{grid-template-columns:1fr .75fr;gap:1.5rem}.portal-grid{gap:.65rem}.portal-card{padding:.8rem;gap:.6rem}.portal-card small{font-size:.78rem}}
-    @media(max-width:680px){.wrap{width:min(100% - 1.4rem,560px)}.hero{padding:3.2rem 0 3.7rem}.hero-grid{grid-template-columns:1fr;text-align:center}.hero-copy{margin-inline:auto}.cta-row{justify-content:center}.hero-art{width:min(280px,72vw);margin-top:.4rem}.math-bubble{width:44px;height:44px;font-size:1.3rem}.portal-head{display:block}.portal-head p{margin-top:.35rem}.portal-grid{grid-template-columns:1fr}.portal-card{min-height:76px;padding:.8rem 1rem}.install-panel,.contact-grid{grid-template-columns:1fr}.gallery-box{align-items:flex-start}.gallery-mark{width:56px;height:56px;border-radius:18px;font-size:1.6rem}}
-    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.portal-card,.btn{transition:none}}
+    @media(max-width:900px){.header-row{flex-wrap:wrap;padding-block:.65rem}.nav-toggle{display:inline-flex}.main-nav{display:none;order:3;width:100%;padding:.8rem 0 .35rem;flex-wrap:wrap;gap:.8rem 1.1rem}.main-nav.open{display:flex}.hero-grid{grid-template-columns:1fr .75fr;gap:1.5rem}}
+    @media(max-width:680px){.wrap{width:min(100% - 1.4rem,560px)}.hero{padding:3.2rem 0 3.7rem}.hero-grid{grid-template-columns:1fr;text-align:center}.hero-copy{margin-inline:auto}.cta-row,.quick-actions{justify-content:center}.quick-enquiry-row,.explore-row{justify-content:center;text-align:center}.hero-art{width:min(280px,72vw);margin-top:.4rem}.math-bubble{width:44px;height:44px;font-size:1.3rem}.install-panel,.contact-grid{grid-template-columns:1fr}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn{transition:none}}
   </style>
 </head>
 <body>
@@ -108,7 +114,7 @@
       </a>
       <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="main-navigation">Menu</button>
       <nav class="main-nav" id="main-navigation" aria-label="Main navigation">
-        <a href="#boards">Boards</a><a href="#subjects">Subjects</a><a href="#gallery">Gallery</a><a href="#about">Why CMZ</a><a href="#contact">Enquiry</a><a href="#apps-title">Apps</a>
+        <a href="#boards">Boards</a><a href="#subjects">Subjects</a><a href="#achievements">Achievements</a><a href="#about">Why CMZ</a><a href="#faq">FAQs</a><a href="#contact">Enquiry</a><a href="#apps-title">Apps</a>
         <a class="nav-portal" href="admin.html">Admin</a><a class="nav-portal" href="teacher.html">Teacher</a><a class="nav-portal" href="student.html">Student</a>
       </nav>
     </div>
@@ -130,14 +136,19 @@
       </div>
     </section>
 
-    <section class="portal-section" aria-labelledby="portal-title">
-      <div class="wrap">
-        <div class="portal-head"><h2 class="section-title" id="portal-title">Choose your portal</h2><p>Quick access for students, teachers, and administrators.</p></div>
-        <nav class="portal-grid" aria-label="Portals">
-          <a class="portal-card" href="admin.html"><span class="portal-icon" aria-hidden="true">🛡️</span><span><strong>Admin portal</strong><small>Manage the centre and its records</small></span></a>
-          <a class="portal-card" href="teacher.html"><span class="portal-icon" aria-hidden="true">📘</span><span><strong>Teacher portal</strong><small>Classes, attendance, and student progress</small></span></a>
-          <a class="portal-card" href="student.html"><span class="portal-icon" aria-hidden="true">🎓</span><span><strong>Student portal</strong><small>Sign in or register for classes</small></span></a>
-        </nav>
+    <section class="quick-enquiry" aria-label="Quick WhatsApp enquiry">
+      <div class="wrap quick-enquiry-row"><p><strong>Have a class question?</strong> Message us directly on WhatsApp.</p>
+        <div class="quick-actions"><a href="https://wa.me/919748460059?text=Hello%20Creative%20Math%20Zone%2C%20I%20would%20like%20to%20ask%20about%20classes." target="_blank" rel="noopener noreferrer">WhatsApp 97484 60059</a><a href="https://wa.me/919836719201?text=Hello%20Creative%20Math%20Zone%2C%20I%20would%20like%20to%20ask%20about%20classes." target="_blank" rel="noopener noreferrer">WhatsApp 98367 19201</a></div>
+      </div>
+    </section>
+
+    <section class="notices" id="public-notices" aria-labelledby="notices-title" hidden>
+      <div class="wrap"><h2 class="section-title" id="notices-title" style="font-size:1.45rem;margin-bottom:.7rem">Latest announcements</h2><div class="notice-list" id="notice-list" aria-live="polite"></div></div>
+    </section>
+
+    <section class="explore-strip" aria-labelledby="explore-title">
+      <div class="wrap explore-row"><div><h2 id="explore-title">Explore classes</h2><p>Browse the subjects and boards we support. Ask us privately about current batches.</p></div>
+        <nav class="explore-links" aria-label="Explore classes"><a href="#subjects">Subjects</a><a href="#boards">Boards and exam preparation</a></nav>
       </div>
     </section>
 
@@ -167,11 +178,10 @@
       </div>
     </section>
 
-    <section class="content" id="gallery" aria-labelledby="gallery-title">
-      <div class="wrap">
-        <h2 class="section-title" id="gallery-title">Life at Creative Math Zone</h2>
-        <p class="lead">We’re preparing a gallery of real class, coding, and robotics moments.</p>
-        <div class="gallery-box"><div><h3>Photos and videos coming soon</h3><p>For current class information, ask us directly. We’ll add centre photos and videos here as they’re ready.</p><a class="btn" href="#contact">Contact the centre</a></div><span class="gallery-mark" aria-hidden="true">📷</span></div>
+    <section class="content" id="achievements" aria-labelledby="achievements-title">
+      <div class="wrap"><h2 class="section-title" id="achievements-title">Student achievements</h2>
+        <p class="lead">We’re proud of every student’s effort and progress. Approved results and student work will be featured here only with the student’s permission.</p>
+        <div class="highlight-card"><h3>Celebrating learning and progress</h3><p>Student highlights will appear here when the centre has approved stories to share. We won’t publish student names, photos, or results without permission.</p></div>
       </div>
     </section>
 
@@ -201,6 +211,18 @@
       </div>
     </section>
 
+    <section class="content boards" id="faq" aria-labelledby="faq-title">
+      <div class="wrap"><h2 class="section-title" id="faq-title">Frequently asked questions</h2><p class="lead">A few quick answers for students and families considering classes.</p>
+        <div class="faq-list">
+          <details><summary>Which subjects can I ask about?</summary><p>Mathematics, Computer Science, Computer Applications, Statistics, AI and Robotics, and WBJEE Mathematics preparation.</p></details>
+          <details><summary>Which boards and classes do you support?</summary><p>Creative Math Zone offers support for WBBSE and WBCHSE. Contact the centre to ask about your class and subject.</p></details>
+          <details><summary>Where is the centre?</summary><p>9, Gopal Lal Tagore Road, Kolkata – 700036. <a href="https://maps.app.goo.gl/AvcaEwNmGuH2beGg8" target="_blank" rel="noopener noreferrer">Open directions in Google Maps</a>.</p></details>
+          <details><summary>How do I find current batch timings or admission availability?</summary><p>These details can change, so please contact us directly by WhatsApp or use the enquiry form. We’ll share the current options privately.</p></details>
+          <details><summary>How do I send an enquiry?</summary><p>Use the WhatsApp buttons or fill in the enquiry form. It opens a message for you to review and send.</p></details>
+        </div>
+      </div>
+    </section>
+
     <section class="content" id="contact" aria-labelledby="contact-title">
       <div class="wrap">
         <h2 class="section-title" id="contact-title">Talk to Creative Math Zone</h2>
@@ -209,6 +231,7 @@
           <div class="contact-panel">
             <h3>Phone and WhatsApp</h3>
             <p>Choose a number to ask about subjects, admissions, or current class timings.</p>
+            <p><strong>Centre address</strong><br>9, Gopal Lal Tagore Road<br>Kolkata – 700036<br><a href="https://maps.app.goo.gl/AvcaEwNmGuH2beGg8" target="_blank" rel="noopener noreferrer">Get directions in Google Maps ↗</a></p>
             <div class="contact-numbers">
               <a class="contact-link" href="https://wa.me/919748460059" target="_blank" rel="noopener noreferrer"><span>WhatsApp</span><span>97484 60059 ↗</span></a>
               <a class="contact-link" href="https://wa.me/919836719201" target="_blank" rel="noopener noreferrer"><span>WhatsApp</span><span>98367 19201 ↗</span></a>
@@ -238,7 +261,7 @@
           <article class="install-card"><h3>Android apps</h3><p>Get the Student, Teacher, Admin, or all-portals Android app from the official download page.</p><a class="btn" id="android-apk-link" href="download.html">Choose an Android app</a><p id="android-app-installed" role="status" aria-live="polite" hidden>Your APK download has started. Open it from Downloads to install. The web app is still available here.</p></article>
           <article class="install-card"><h3>Install the web app</h3><p>On supported browsers, install Creative Math Zone from the browser menu for quick access.</p><button class="btn" id="install-app" type="button" hidden>Install Creative Math Zone</button></article>
           <article class="install-card"><h3>iPhone or iPad</h3><p>Open this website in Safari, tap <strong>Share</strong>, then choose <strong>Add to Home Screen</strong>.</p></article>
-          <article class="install-card"><h3>Use in your browser</h3><p>You can always open the student, teacher, or admin portal directly from this page.</p><a class="btn ghost" href="#portal-title">Choose a portal</a></article>
+          <article class="install-card"><h3>Use in your browser</h3><p>Open the student, teacher, or admin portal from the buttons at the top of this page.</p><a class="btn ghost" href="#top">Back to the top</a></article>
         </div>
       </div>
     </section>
@@ -266,7 +289,25 @@
         const phone = data.get('contact');
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
       });
+      loadPublicNotices();
     })();
+    async function loadPublicNotices() {
+      const cfg = window.CMZ_CONFIG || {};
+      if (!cfg.supabaseUrl || !cfg.supabasePublishableKey) return;
+      try {
+        const response = await fetch(cfg.supabaseUrl.replace(/\/$/, '') + '/functions/v1/api', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.supabasePublishableKey },
+          body: JSON.stringify({ action: 'public.landingNotices', payload: {} })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok || !Array.isArray(result.data)) return;
+        const escapeHtml = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+        const items = result.data;
+        if (!items.length) return;
+        document.getElementById('notice-list').innerHTML = items.map(item => '<article class="notice-card"><h3>' + escapeHtml(item.Title) + '</h3><p>' + escapeHtml(item.Body) + '</p><time>' + escapeHtml(item.PostedAt ? new Date(item.PostedAt).toLocaleDateString('en-IN') : '') + '</time></article>').join('');
+        document.getElementById('public-notices').hidden = false;
+      } catch (_) { /* Keep the landing page usable when notices cannot be fetched. */ }
+    }
   </script>
 </body>
 </html>
