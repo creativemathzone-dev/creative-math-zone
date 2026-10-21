@@ -2,81 +2,271 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#102447">
-  <meta name="description" content="Creative Math Zone student, teacher, and admin portals.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#24457f">
+  <meta name="description" content="Creative Math Zone offers friendly coaching in mathematics, computing, statistics, AI, and robotics. Explore classes and contact us.">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <script src="./pwa.js" defer></script>
-  <title>Creative Math Zone</title>
+  <title>Creative Math Zone | Learn · Explore · Grow</title>
   <style>
-    :root{color-scheme:dark;--navy:#102447;--deep:#0a1830;--gold:#ffc629;--ink:#142746;--muted:#d5e0f1}
+    :root{color-scheme:light;--blue:#3157a4;--blue-dark:#223f7c;--yellow:#f5d327;--green:#2fb457;--sky:#86d4ea;--pink:#e86aa6;--orange:#f08a4b;--bg:#fffdf3;--surface:#fff;--ink:#1c2340;--muted:#58617d;--line:#e6e2cc;--radius:24px}
     *{box-sizing:border-box}
-    [hidden]{display:none!important}
-    body{margin:0;min-height:100vh;color:white;font:16px/1.55 'Segoe UI',Arial,sans-serif;background:radial-gradient(ellipse at 50% 0%,#244b7a 0%,var(--navy) 44%,var(--deep) 100%);}
-    a{color:inherit}
-    .page{width:min(1120px,100%);min-height:100vh;margin:auto;padding:26px clamp(20px,5vw,64px) 22px;display:flex;flex-direction:column}
-    header{display:flex;align-items:center;gap:14px}
-    .brand-mark{width:58px;height:58px;object-fit:contain;border-radius:50%;background:#fff;box-shadow:0 0 0 3px rgba(255,198,41,.9),0 0 24px rgba(255,198,41,.24)}
-    .brand-name{font-size:1.1rem;font-weight:800;letter-spacing:.01em}.brand-tag{font-size:.82rem;color:#c7d5e8}
-    .hero{flex:1;display:grid;grid-template-columns: minmax(240px,.85fr) minmax(380px,1.15fr);gap:clamp(36px,7vw,90px);align-items:center;padding:54px 0}
-    .intro{text-align:center}
-    .hero-logo{width:clamp(185px,24vw,280px);aspect-ratio:1;object-fit:contain;border-radius:50%;background:#fff;padding:8px;box-shadow:0 0 0 8px rgba(255,198,41,.16),0 18px 65px rgba(0,0,0,.28)}
-    .eyebrow{margin:28px 0 6px;color:var(--gold);font-weight:800;letter-spacing:.12em;text-transform:uppercase;font-size:.78rem}
-    h1{font-size:clamp(2rem,4vw,3.3rem);line-height:1.08;margin:0;letter-spacing:-.035em}
-    .intro p{max-width:400px;margin:16px auto 0;color:var(--muted);font-size:1.05rem}
-    .portals h2{margin:0 0 8px;font-size:1.55rem}
-    .portals>p{margin:0 0 22px;color:var(--muted)}
-    .cards{display:grid;gap:13px}
-    .card{display:grid;grid-template-columns:50px 1fr 28px;align-items:center;gap:15px;padding:17px 19px;border:1px solid rgba(255,255,255,.18);border-radius:17px;text-decoration:none;background:rgba(255,255,255,.08);backdrop-filter:blur(8px);transition:transform .18s,border-color .18s,background .18s}
-    .card:hover,.card:focus-visible{transform:translateY(-2px);border-color:var(--gold);background:rgba(255,255,255,.14);outline:none}
-    .symbol{display:grid;place-items:center;width:48px;height:48px;border-radius:14px;background:#fff;color:var(--ink);font-size:1.4rem}
-    .card strong{display:block;font-size:1.05rem}.card small{display:block;color:#d1dced;margin-top:2px}.arrow{font-size:1.4rem;color:var(--gold)}
-    .install-row{margin-top:18px}
-    #install-app{padding:12px 17px;border:0;border-radius:12px;background:var(--gold);color:#132440;font:700 1rem 'Segoe UI',Arial,sans-serif;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.16)}
-    #install-app:hover{filter:brightness(1.07)}
-    .install-note{font-size:.88rem;color:#c1d0e5;margin:14px 0 0}
-    .android-download{display:inline-flex;align-items:center;justify-content:center;margin-top:12px;padding:10px 15px;border:1px solid rgba(255,255,255,.35);border-radius:10px;text-decoration:none;font-weight:700}
-    .android-download:hover,.android-download:focus-visible{border-color:var(--gold);outline:none;background:rgba(255,255,255,.1)}
-    .platform-note{font-size:.88rem;color:#c1d0e5;margin:10px 0 0}
-    .platform-note strong{color:#fff}
-    footer{display:flex;justify-content:space-between;gap:16px;align-items:center;border-top:1px solid rgba(255,255,255,.14);padding-top:17px;color:#bdcbe0;font-size:.85rem}
-    footer span:last-child{color:#91a6c4}
-    @media(max-width:760px){.page{padding-top:18px}.hero{grid-template-columns:1fr;gap:42px;padding:44px 0}.intro{max-width:500px;margin:auto}.hero-logo{width:150px}.eyebrow{margin-top:20px}.portals{width:min(520px,100%);margin:auto}.portals h2,.portals>p{text-align:center}footer{flex-direction:column;gap:4px;text-align:center}}
-    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+    html{scroll-behavior:smooth;scroll-padding-top:90px}
+    body{margin:0;background:var(--bg);color:var(--ink);font:400 1rem/1.65 'Nunito','Trebuchet MS',system-ui,sans-serif}
+    img{display:block;max-width:100%}a{color:inherit}button,input,select,textarea{font:inherit}
+    :focus-visible{outline:3px solid #d5ae00;outline-offset:3px;border-radius:8px}
+    .wrap{width:min(1120px,calc(100% - 2.5rem));margin-inline:auto}
+    .site-header{position:sticky;top:0;z-index:20;background:var(--blue-dark);color:#fff;box-shadow:0 4px 22px #10244726}
+    .header-row{min-height:76px;display:flex;align-items:center;justify-content:space-between;gap:1rem}
+    .brand{display:flex;align-items:center;gap:.7rem;text-decoration:none;font-weight:900;line-height:1.15;white-space:nowrap}
+    .brand img{width:46px;height:46px;object-fit:contain;border-radius:50%;background:#fff}
+    .brand small{display:block;color:#dce6ff;font-size:.76rem;font-weight:600;margin-top:.22rem}
+    .nav-toggle{display:none;border:1px solid #ffffff66;border-radius:12px;padding:.5rem .75rem;background:transparent;color:#fff;font-weight:800}
+    .main-nav{display:flex;align-items:center;gap:1.15rem}
+    .main-nav a{text-decoration:none;font-weight:800;font-size:.92rem}
+    .main-nav a:hover{color:var(--yellow)}
+    .main-nav .nav-portal{padding:.48rem .76rem;border:1px solid #ffffff66;border-radius:999px}
+    .main-nav .nav-portal:hover{border-color:var(--yellow)}
+    .hero{position:relative;overflow:hidden;background:var(--blue);color:#fff;padding:clamp(3.5rem,8vw,6rem) 0}
+    .hero::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 88% 15%,#f5d32740,transparent 34%),radial-gradient(circle at 8% 95%,#2fb45745,transparent 35%),radial-gradient(#ffffff24 1px,transparent 1px) 0 0/25px 25px}
+    .hero-grid{position:relative;display:grid;grid-template-columns:1.1fr .9fr;gap:3rem;align-items:center}
+    .eyebrow{display:inline-block;margin:0 0 1rem;padding:.35rem .85rem;border:1px solid #ffffff55;border-radius:999px;background:#ffffff18;font-size:.84rem;font-weight:900;letter-spacing:.06em}
+    h1,h2,h3{font-family:'Trebuchet MS',system-ui,sans-serif;line-height:1.16;margin:0}
+    h1{max-width:680px;font-size:clamp(2.5rem,6.5vw,4.6rem);letter-spacing:-.045em}
+    .hero-copy{max-width:58ch;margin:1.15rem 0 0;color:#edf3ff;font-size:1.1rem}
+    .cta-row{display:flex;flex-wrap:wrap;gap:.8rem;margin-top:1.6rem}
+    .btn{display:inline-flex;justify-content:center;align-items:center;min-height:48px;padding:.7rem 1.1rem;border:2px solid transparent;border-radius:999px;background:var(--yellow);color:#1c2340;text-decoration:none;font-weight:900;cursor:pointer;transition:transform .16s,background .16s}
+    .btn:hover{transform:translateY(-2px)}.btn.ghost{border-color:#ffffff9c;background:transparent;color:#fff}.btn.ghost:hover{background:#ffffff1c}
+    .hero-art{position:relative;width:min(400px,82vw);aspect-ratio:1;margin:auto;display:grid;place-items:center}
+    .hero-art::before,.hero-art::after{content:"";position:absolute;inset:7%;border:1px solid #ffffff55;border-radius:50%}
+    .hero-art::after{inset:17%;border-style:dashed;border-color:#f5d327a8}
+    .hero-logo{position:relative;z-index:1;width:56%;aspect-ratio:1;object-fit:contain;padding:8px;border:7px solid #fff;border-radius:50%;background:#fff;box-shadow:0 18px 45px #10244777}
+    .math-bubble{position:absolute;z-index:2;display:grid;place-items:center;width:54px;height:54px;border-radius:18px;background:var(--bubble);color:#17213d;font-size:1.6rem;font-weight:900;box-shadow:0 8px 20px #10244755;transform:rotate(var(--rotate))}
+    .math-bubble.one{top:6%;left:46%;--bubble:var(--yellow);--rotate:-8deg}.math-bubble.two{right:2%;top:40%;--bubble:var(--sky);--rotate:8deg}.math-bubble.three{bottom:9%;left:22%;--bubble:#8fe0a5;--rotate:7deg}.math-bubble.four{left:4%;top:38%;--bubble:#ffc2dc;--rotate:-9deg}
+    section.content{padding:clamp(3.5rem,7vw,5.5rem) 0}
+    .section-title{font-size:clamp(1.9rem,4vw,2.8rem);letter-spacing:-.025em}
+    .lead{max-width:66ch;margin:.65rem 0 2rem;color:var(--muted);font-size:1.04rem}
+    .portal-section{padding:2rem 0 1rem}
+    .portal-head{display:flex;align-items:end;justify-content:space-between;gap:1rem;margin-bottom:1rem}
+    .portal-head p{margin:0;color:var(--muted)}
+    .portal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+    .portal-card{display:flex;align-items:center;gap:.9rem;min-height:94px;padding:1rem 1.1rem;border:2px solid var(--line);border-radius:20px;background:var(--surface);text-decoration:none;box-shadow:0 8px 20px #19264b0a;transition:transform .16s,border-color .16s,box-shadow .16s}
+    .portal-card:hover{transform:translateY(-3px);border-color:var(--blue);box-shadow:0 14px 28px #19264b18}
+    .portal-icon{flex:none;width:48px;height:48px;display:grid;place-items:center;border-radius:15px;background:#edf2ff;font-size:1.5rem}
+    .portal-card strong{display:block;font-size:1.04rem}.portal-card small{display:block;color:var(--muted);font-size:.86rem;margin-top:.12rem}
+    .boards{background:#f4f6ff;border-block:1px solid var(--line)}
+    .board-grid,.subject-grid,.why-grid,.steps-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}
+    .board-card,.subject-card{height:100%;padding:1.4rem;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:0 8px 24px #1c23400a}
+    .board-card{border-top:7px solid var(--accent)}
+    .board-card h3,.subject-card h3{font-size:1.25rem;margin-bottom:.4rem}
+    .board-card p,.subject-card p{margin:.25rem 0 0;color:var(--muted)}
+    .subject-icon{width:52px;height:52px;display:grid;place-items:center;margin-bottom:.9rem;border-radius:16px;background:var(--accent);color:#1c2340;font-size:1.4rem;font-weight:900}
+    .subject-card ul{margin:.8rem 0 0;padding-left:1.15rem;color:var(--muted);font-size:.93rem}
+    .why{background:var(--blue);color:#fff}
+    .why .lead{color:#e0e9ff}.why-grid article{padding:1.2rem;border-left:4px solid var(--yellow);background:#ffffff12;border-radius:0 16px 16px 0}
+    .why-grid h3{font-size:1.15rem;margin-bottom:.35rem}.why-grid p{margin:0;color:#e3ebff}
+    .gallery-box{display:flex;align-items:center;justify-content:space-between;gap:1.5rem;padding:clamp(1.4rem,4vw,2.3rem);border:1px dashed #9aa8c8;border-radius:var(--radius);background:#f5f7ff}
+    .gallery-box h3{font-size:1.3rem}.gallery-box p{max-width:60ch;margin:.45rem 0 0;color:var(--muted)}
+    .gallery-mark{flex:none;width:76px;height:76px;display:grid;place-items:center;border-radius:24px;background:#e7edff;font-size:2rem}
+    .steps-grid{counter-reset:step}
+    .step{padding:1.25rem;border:2px dashed var(--line);border-radius:20px;background:var(--surface);counter-increment:step}
+    .step::before{content:counter(step);width:36px;height:36px;display:grid;place-items:center;margin-bottom:.7rem;border-radius:50%;background:var(--yellow);font-weight:900}
+    .step h3{font-size:1.1rem}.step p{margin:.35rem 0 0;color:var(--muted)}
+    .contact-grid{display:grid;grid-template-columns:.9fr 1.1fr;gap:1.5rem;align-items:start}
+    .contact-panel,.enquiry-form{padding:1.5rem;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:0 8px 24px #1c23400a}
+    .contact-panel p{color:var(--muted)}.contact-numbers{display:grid;gap:.65rem;margin-top:1.2rem}
+    .contact-link{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:.8rem 1rem;border:1px solid var(--line);border-radius:14px;background:#f9faff;text-decoration:none;font-weight:900}
+    .contact-link span:last-child{color:var(--blue)}
+    .enquiry-form{display:grid;gap:.85rem}
+    .enquiry-form label{display:grid;gap:.32rem;font-weight:800;font-size:.93rem}
+    .enquiry-form input,.enquiry-form select,.enquiry-form textarea{width:100%;padding:.72rem .82rem;border:1px solid #cfd4e0;border-radius:12px;background:#fff;color:var(--ink)}
+    .enquiry-form textarea{min-height:96px;resize:vertical}
+    .enquiry-form .btn{justify-self:start;border:0}
+    .form-note{margin:0;color:var(--muted);font-size:.82rem}
+    .install-panel{display:grid;grid-template-columns:1.2fr 1fr;gap:1rem;margin-top:1.2rem}
+    .install-card{padding:1.2rem;border:1px solid #ffffff33;border-radius:18px;background:#ffffff12;color:#fff}
+    .install-card h3{font-size:1.08rem}.install-card p{margin:.45rem 0 0;color:#e0e9ff;font-size:.92rem}
+    .install-card .btn{margin-top:.8rem}
+    #install-app{display:none}
+    #install-app:not([hidden]){display:inline-flex}
+    #android-app-installed{margin:.75rem 0 0;color:#e0e9ff;font-size:.9rem}
+    footer{padding:1.6rem 0;background:var(--blue-dark);color:#dce6ff;text-align:center}
+    footer p{margin:.25rem 0}
+    @media(max-width:900px){.header-row{flex-wrap:wrap;padding-block:.65rem}.nav-toggle{display:inline-flex}.main-nav{display:none;order:3;width:100%;padding:.8rem 0 .35rem;flex-wrap:wrap;gap:.8rem 1.1rem}.main-nav.open{display:flex}.hero-grid{grid-template-columns:1fr .75fr;gap:1.5rem}.portal-grid{gap:.65rem}.portal-card{padding:.8rem;gap:.6rem}.portal-card small{font-size:.78rem}}
+    @media(max-width:680px){.wrap{width:min(100% - 1.4rem,560px)}.hero{padding:3.2rem 0 3.7rem}.hero-grid{grid-template-columns:1fr;text-align:center}.hero-copy{margin-inline:auto}.cta-row{justify-content:center}.hero-art{width:min(280px,72vw);margin-top:.4rem}.math-bubble{width:44px;height:44px;font-size:1.3rem}.portal-head{display:block}.portal-head p{margin-top:.35rem}.portal-grid{grid-template-columns:1fr}.portal-card{min-height:76px;padding:.8rem 1rem}.install-panel,.contact-grid{grid-template-columns:1fr}.gallery-box{align-items:flex-start}.gallery-mark{width:56px;height:56px;border-radius:18px;font-size:1.6rem}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.portal-card,.btn{transition:none}}
   </style>
 </head>
 <body>
-  <div class="page">
-    <header>
-      <img class="brand-mark" src="./icons/creative-math-zone-logo.png" alt="Creative Math Zone logo">
-      <div><div class="brand-name">Creative Math Zone</div><div class="brand-tag">Learn · Explore · Grow</div></div>
-    </header>
-    <main class="hero">
-      <section class="intro" aria-labelledby="welcome-title">
-        <img class="hero-logo" src="./icons/creative-math-zone-logo.png" alt="Creative Math Zone emblem">
-        <p class="eyebrow">Welcome to</p>
-        <h1 id="welcome-title">Creative Math Zone</h1>
-        <p>A place to learn, teach, and make every step in mathematics count.</p>
-      </section>
-      <section class="portals" aria-labelledby="portal-title">
-        <h2 id="portal-title">Choose your portal</h2>
-        <p>Open the space that’s right for you.</p>
-        <nav class="cards" aria-label="Portals">
-          <a class="card" href="admin.html"><span class="symbol" aria-hidden="true">🛡️</span><span><strong>Admin portal</strong><small>Manage the centre and its records</small></span><span class="arrow" aria-hidden="true">›</span></a>
-          <a class="card" href="teacher.html"><span class="symbol" aria-hidden="true">📘</span><span><strong>Teacher portal</strong><small>Attendance, classes, and student progress</small></span><span class="arrow" aria-hidden="true">›</span></a>
-          <a class="card" href="student.html"><span class="symbol" aria-hidden="true">🎓</span><span><strong>Student portal</strong><small>Sign in or register for classes</small></span><span class="arrow" aria-hidden="true">›</span></a>
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="#top" aria-label="Creative Math Zone home">
+        <img src="./icons/creative-math-zone-logo.png" alt="">
+        <span>Creative Math Zone<small>Learn · Explore · Grow</small></span>
+      </a>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="main-navigation">Menu</button>
+      <nav class="main-nav" id="main-navigation" aria-label="Main navigation">
+        <a href="#boards">Boards</a><a href="#subjects">Subjects</a><a href="#gallery">Gallery</a><a href="#about">Why CMZ</a><a href="#contact">Enquiry</a><a href="#apps-title">Apps</a>
+        <a class="nav-portal" href="admin.html">Admin</a><a class="nav-portal" href="teacher.html">Teacher</a><a class="nav-portal" href="student.html">Student</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="welcome-title">
+      <div class="wrap hero-grid">
+        <div>
+          <p class="eyebrow">Welcome to Creative Math Zone</p>
+          <h1 id="welcome-title">Where numbers become fun and ideas come alive.</h1>
+          <p class="hero-copy">Build confidence through clear explanations, regular practice, and creative learning in mathematics and computing.</p>
+          <div class="cta-row"><a class="btn" href="#subjects">Explore our subjects</a><a class="btn ghost" href="#contact">Ask about classes</a><a class="btn ghost" href="#apps-title">Get the app</a></div>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <span class="math-bubble one">π</span><span class="math-bubble two">×</span><span class="math-bubble three">Σ</span><span class="math-bubble four">+</span>
+          <img class="hero-logo" src="./icons/creative-math-zone-logo.png" alt="">
+        </div>
+      </div>
+    </section>
+
+    <section class="portal-section" aria-labelledby="portal-title">
+      <div class="wrap">
+        <div class="portal-head"><h2 class="section-title" id="portal-title">Choose your portal</h2><p>Quick access for students, teachers, and administrators.</p></div>
+        <nav class="portal-grid" aria-label="Portals">
+          <a class="portal-card" href="admin.html"><span class="portal-icon" aria-hidden="true">🛡️</span><span><strong>Admin portal</strong><small>Manage the centre and its records</small></span></a>
+          <a class="portal-card" href="teacher.html"><span class="portal-icon" aria-hidden="true">📘</span><span><strong>Teacher portal</strong><small>Classes, attendance, and student progress</small></span></a>
+          <a class="portal-card" href="student.html"><span class="portal-icon" aria-hidden="true">🎓</span><span><strong>Student portal</strong><small>Sign in or register for classes</small></span></a>
         </nav>
-        <div class="install-row"><button id="install-app" type="button" hidden>Install Creative Math Zone</button></div>
-        <a class="android-download" id="android-apk-link" href="download.html">Choose an Android app</a>
-        <p class="platform-note"><strong>Android web app:</strong> Prefer the browser version? In Chrome, choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
-        <p class="platform-note"><strong>iPhone or iPad:</strong> Open this page in Safari, tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</p>
-        <p class="platform-note" id="android-app-installed" role="status" aria-live="polite" hidden>The APK download was started on this device. Install it from your Downloads, then open Creative Math Zone. The browser app remains available above.</p>
-      </section>
-    </main>
-    <footer><span>© Creative Math Zone</span><span>Student · Teacher · Admin</span></footer>
-  </div>
+      </div>
+    </section>
+
+    <section class="content boards" id="boards" aria-labelledby="boards-title">
+      <div class="wrap">
+        <h2 class="section-title" id="boards-title">Learning for WBBSE and WBCHSE</h2>
+        <p class="lead">Board-aligned support with extra practice to help students understand concepts and prepare with confidence.</p>
+        <div class="board-grid">
+          <article class="board-card" style="--accent:var(--green)"><h3>WBBSE</h3><p>School mathematics support, concept practice, and preparation for board examinations.</p></article>
+          <article class="board-card" style="--accent:var(--yellow)"><h3>WBCHSE</h3><p>Higher secondary mathematics and computing support for Classes XI and XII.</p></article>
+          <article class="board-card" style="--accent:var(--sky)"><h3>WBJEE preparation</h3><p>Mathematics practice for students preparing for WBJEE alongside their studies.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="subjects" aria-labelledby="subjects-title">
+      <div class="wrap">
+        <h2 class="section-title" id="subjects-title">Explore our subjects</h2>
+        <p class="lead">A friendly place to strengthen school subjects, explore technology, and keep learning through practice.</p>
+        <div class="subject-grid">
+          <article class="subject-card"><span class="subject-icon" style="--accent:var(--yellow)" aria-hidden="true">π</span><h3>Mathematics</h3><p>Build strong concepts, sharpen problem-solving, and practise for board and entrance examinations.</p></article>
+          <article class="subject-card"><span class="subject-icon" style="--accent:var(--sky)" aria-hidden="true">{ }</span><h3>Computer Science</h3><p>Develop programming and logical thinking through clear explanations and practical work.</p></article>
+          <article class="subject-card"><span class="subject-icon" style="--accent:#8fe0a5" aria-hidden="true">▤</span><h3>Computer Applications</h3><p>Learn computing concepts and applications with support for the school syllabus.</p></article>
+          <article class="subject-card"><span class="subject-icon" style="--accent:#ffc2dc" aria-hidden="true">Σ</span><h3>Statistics</h3><p>Understand data, probability, and statistical ideas with worked examples and practice.</p></article>
+          <article class="subject-card"><span class="subject-icon" style="--accent:#ffc49b" aria-hidden="true">🤖</span><h3>AI &amp; Robotics</h3><p>Explore how technology works through creative projects and hands-on learning.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="gallery" aria-labelledby="gallery-title">
+      <div class="wrap">
+        <h2 class="section-title" id="gallery-title">Life at Creative Math Zone</h2>
+        <p class="lead">We’re preparing a gallery of real class, coding, and robotics moments.</p>
+        <div class="gallery-box"><div><h3>Photos and videos coming soon</h3><p>For current class information, ask us directly. We’ll add centre photos and videos here as they’re ready.</p><a class="btn" href="#contact">Contact the centre</a></div><span class="gallery-mark" aria-hidden="true">📷</span></div>
+      </div>
+    </section>
+
+    <section class="content why" id="about" aria-labelledby="about-title">
+      <div class="wrap">
+        <h2 class="section-title" id="about-title">A thoughtful way to learn</h2>
+        <p class="lead">Creative Math Zone brings mathematics and technology together in a supportive learning environment.</p>
+        <div class="why-grid">
+          <article><h3>Understand the idea</h3><p>Step-by-step explanations help students see why a method works.</p></article>
+          <article><h3>Practise with purpose</h3><p>Regular questions help build confidence and make progress visible.</p></article>
+          <article><h3>Learn by exploring</h3><p>Computing and robotics connect classroom ideas with practical activities.</p></article>
+          <article><h3>Stay connected</h3><p>Students can use the portal for notices, class details, homework, and records.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="path" aria-labelledby="path-title">
+      <div class="wrap">
+        <h2 class="section-title" id="path-title">Getting started is simple</h2>
+        <p class="lead">Ask us about the subject and timing that work for you.</p>
+        <div class="steps-grid">
+          <article class="step"><h3>Send an enquiry</h3><p>Share the student’s class, board, and subject of interest.</p></article>
+          <article class="step"><h3>Discuss class options</h3><p>We’ll help you understand available subjects and batch timings.</p></article>
+          <article class="step"><h3>Choose a suitable class</h3><p>Select the learning option that fits the student.</p></article>
+          <article class="step"><h3>Start learning</h3><p>Join the class and keep building skills step by step.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="contact" aria-labelledby="contact-title">
+      <div class="wrap">
+        <h2 class="section-title" id="contact-title">Talk to Creative Math Zone</h2>
+        <p class="lead">Send a WhatsApp enquiry or contact either centre number directly.</p>
+        <div class="contact-grid">
+          <div class="contact-panel">
+            <h3>Phone and WhatsApp</h3>
+            <p>Choose a number to ask about subjects, admissions, or current class timings.</p>
+            <div class="contact-numbers">
+              <a class="contact-link" href="https://wa.me/919748460059" target="_blank" rel="noopener noreferrer"><span>WhatsApp</span><span>97484 60059 ↗</span></a>
+              <a class="contact-link" href="https://wa.me/919836719201" target="_blank" rel="noopener noreferrer"><span>WhatsApp</span><span>98367 19201 ↗</span></a>
+              <a class="contact-link" href="tel:+919748460059"><span>Call</span><span>97484 60059</span></a>
+              <a class="contact-link" href="tel:+919836719201"><span>Call</span><span>98367 19201</span></a>
+            </div>
+          </div>
+          <form class="enquiry-form" id="enquiry-form">
+            <label>Student name<input name="student" required autocomplete="name"></label>
+            <label>Class<input name="class" required placeholder="For example, Class XI"></label>
+            <label>Board<select name="board"><option>WBBSE</option><option>WBCHSE</option><option>Other / not sure</option></select></label>
+            <label>Subject<select name="subject"><option>Mathematics</option><option>WBJEE Mathematics</option><option>Computer Science</option><option>Computer Applications</option><option>Statistics</option><option>AI &amp; Robotics</option></select></label>
+            <label>Message<textarea name="message" rows="3" placeholder="What would you like to know?"></textarea></label>
+            <label>Send enquiry to<select name="contact"><option value="919748460059">97484 60059</option><option value="919836719201">98367 19201</option></select></label>
+            <button class="btn" type="submit">Continue to WhatsApp</button>
+            <p class="form-note">WhatsApp opens with your enquiry ready to review and send.</p>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" style="background:var(--blue-dark);color:#fff" aria-labelledby="apps-title">
+      <div class="wrap">
+        <h2 class="section-title" id="apps-title">Use Creative Math Zone on your phone</h2>
+        <p class="lead" style="color:#dce6ff">Choose an Android app, install the web app, or add the site to your iPhone Home Screen.</p>
+        <div class="install-panel">
+          <article class="install-card"><h3>Android apps</h3><p>Get the Student, Teacher, Admin, or all-portals Android app from the official download page.</p><a class="btn" id="android-apk-link" href="download.html">Choose an Android app</a><p id="android-app-installed" role="status" aria-live="polite" hidden>Your APK download has started. Open it from Downloads to install. The web app is still available here.</p></article>
+          <article class="install-card"><h3>Install the web app</h3><p>On supported browsers, install Creative Math Zone from the browser menu for quick access.</p><button class="btn" id="install-app" type="button" hidden>Install Creative Math Zone</button></article>
+          <article class="install-card"><h3>iPhone or iPad</h3><p>Open this website in Safari, tap <strong>Share</strong>, then choose <strong>Add to Home Screen</strong>.</p></article>
+          <article class="install-card"><h3>Use in your browser</h3><p>You can always open the student, teacher, or admin portal directly from this page.</p><a class="btn ghost" href="#portal-title">Choose a portal</a></article>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer><div class="wrap"><img src="./icons/creative-math-zone-logo.png" alt="" width="54" height="54" style="margin:0 auto .5rem"><p><strong>Creative Math Zone</strong></p><p>Learn · Explore · Grow</p><p>© Creative Math Zone</p></div></footer>
   <script src="./installed-app.js" defer></script>
+  <script>
+    (() => {
+      const toggle = document.getElementById('nav-toggle');
+      const nav = document.getElementById('main-navigation');
+      toggle.addEventListener('click', () => {
+        const open = nav.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', String(open));
+      });
+      nav.addEventListener('click', event => {
+        if (event.target.closest('a')) {
+          nav.classList.remove('open');
+          toggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+      document.getElementById('enquiry-form').addEventListener('submit', event => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const message = `Hello Creative Math Zone! Student: ${data.get('student')}; Class: ${data.get('class')}; Board: ${data.get('board')}; Subject: ${data.get('subject')}. ${data.get('message') || ''}`;
+        const phone = data.get('contact');
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
+      });
+    })();
+  </script>
 </body>
 </html>

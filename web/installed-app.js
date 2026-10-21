@@ -1,9 +1,9 @@
 (() => {
   const downloadOptions = [
     {
-      key: 'cmz-apk-download-started',
-      linkIds: ['android-apk-link', 'apk-download'],
-      messageIds: ['android-app-installed', 'apk-installed'],
+      key: 'cmz-main-apk-download-started-v2',
+      linkIds: ['apk-download'],
+      messageIds: ['apk-installed'],
       sourceNoteIds: ['apk-source-note'],
     },
     {
