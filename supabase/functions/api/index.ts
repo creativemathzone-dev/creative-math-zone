@@ -585,7 +585,7 @@ Deno.serve(async (request) => {
       'students.list': 'STUDENT_VIEW', 'students.get': 'STUDENT_VIEW',
       'students.add': 'STUDENT_EDIT', 'students.update': 'STUDENT_EDIT',
       'students.resetPassword': 'STUDENT_EDIT',
-      'studentSubjects.assign': 'STUDENT_EDIT', 'studentSubjects.end': 'STUDENT_EDIT',
+      'studentSubjects.assign': 'STUDENT_EDIT', 'studentSubjects.end': 'STUDENT_EDIT', 'studentSubjects.updateFee': 'STUDENT_EDIT',
       'changes.list': 'STUDENT_VIEW',
       'teachers.add': 'TEACHER_EDIT', 'teachers.update': 'TEACHER_EDIT',
       'teachers.resetPassword': 'TEACHER_EDIT',
@@ -2182,7 +2182,7 @@ Deno.serve(async (request) => {
       if (!subject || subject.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Subject is not available.')
       if (!teacherRow || teacherRow.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Teacher is not available.')
       if (!batch || batch.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Batch is not available.')
-      const { data: current, error: currentError } = await admin.from('student_subjects').select('subject_id').eq('student_id', studentId).eq('status', 'ACTIVE')
+      const { data: current, error: currentError } = await admin.from('student_subjects').select('subject_id').eq('student_id', studentId).ilike('status', 'ACTIVE')
       if (currentError) throw currentError
       if ((current || []).some((r) => r.subject_id === subjectId)) throw new ApiFault('DUPLICATE', 'Student already takes this subject.')
       const { data: settings } = await admin.from('settings').select('setting_key,value').in('setting_key', ['ACADEMIC_YEAR', 'SUBJECT_BLOCKED_PAIRS'])
@@ -2198,7 +2198,7 @@ Deno.serve(async (request) => {
         fee_override: amount(payload.feeOverride, 'Fee override'), teacher_rate_override: amount(payload.teacherRateOverride, 'Teacher rate override'),
         academic_year: settingMap.ACADEMIC_YEAR || `${new Date().getFullYear()}-${String(new Date().getFullYear() + 1).slice(-2)}` })
         .select('*').single()
-      if (error?.code === '23505') throw new ApiFault('DUPLICATE', 'This subject is already assigned for the academic year.')
+      if (error?.code === '23505') throw new ApiFault('DUPLICATE', 'This subject already has an active assignment for the academic year.')
       if (error) throw error
       const reason = requireText(payload.reason, 'Reason', 200)
       await admin.from('change_history').insert({ id: `CHG-${crypto.randomUUID()}`, student_id: studentId, field: 'Subject',
@@ -2227,6 +2227,32 @@ Deno.serve(async (request) => {
         reason: requireText(payload.reason, 'Reason', 200), academic_year: row.academic_year || '' })
       await logAction(admin, user, 'END_STUDENT_SUBJECT', 'STUDENT_SUBJECT', id, { endDate })
       return response({ ok: true, data: { ended: true } })
+    }
+
+    if (action === 'studentSubjects.updateFee') {
+      const id = requireText(payload.studentSubjectId, 'Student subject ID', 40, true)
+      const raw = payload.feeOverride
+      let feeOverride: number | null = null
+      if (raw !== undefined && raw !== null && raw !== '') {
+        feeOverride = Number(raw)
+        if (!Number.isFinite(feeOverride) || feeOverride < 0 || feeOverride > 100000) {
+          throw new ApiFault('BAD_REQUEST', 'Special monthly fee must be from 0 to 100000.')
+        }
+      }
+      const { data: current, error: findError } = await admin.from('student_subjects').select('*').eq('id', id).maybeSingle()
+      if (findError) throw findError
+      if (!current) throw new ApiFault('NOT_FOUND', 'Subject assignment not found.')
+      if (String(current.status).toUpperCase() !== 'ACTIVE') throw new ApiFault('BAD_REQUEST', 'Only an active subject assignment can be edited.')
+      const { error } = await admin.from('student_subjects').update({ fee_override: feeOverride }).eq('id', id)
+      if (error) throw error
+      const displayFee = (value: number | null) => value === null ? 'Standard fee' : String(value)
+      const reason = requireText(payload.reason, 'Reason', 200) || 'Special monthly fee updated'
+      await admin.from('change_history').insert({ id: `CHG-${crypto.randomUUID()}`, student_id: current.student_id,
+        field: 'Special monthly fee', old_value: displayFee(current.fee_override === null ? null : Number(current.fee_override)),
+        new_value: displayFee(feeOverride), changed_by: user.id, reason, academic_year: current.academic_year || '' })
+      await logAction(admin, user, 'UPDATE_STUDENT_SUBJECT_FEE', 'STUDENT_SUBJECT', id,
+        { oldFeeOverride: current.fee_override, feeOverride, reason })
+      return response({ ok: true, data: { feeOverride } })
     }
 
     if (action === 'student.subjects' || action === 'student.timetable' || action === 'student.attendance' || action === 'student.dashboard') {

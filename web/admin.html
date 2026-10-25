@@ -753,7 +753,7 @@ VIEWS.student = async (main, id) => {
   const s = d.student, fields = studentFields(true), editable = can('STUDENT_EDIT');
   const subjRows = d.subjects.slice().reverse();
 
-  const activeSubjects = d.subjects.filter(x => x.Status === 'ACTIVE').length;
+  const activeSubjects = d.subjects.filter(x => String(x.Status).toUpperCase() === 'ACTIVE').length;
 
   main.innerHTML = '<p><button class="link" data-go-back>← All students</button></p>' +
     '<div class="head"><div><h1>' + esc(s.Name) + '</h1><p>' + esc(s.StudentID) + ' · Class ' + esc(s.CurrentClass) + ' · ' + esc(nameOf('batches', 'BatchID', 'BatchName', s.CurrentBatch) || 'No batch') + ' · ' + pill(s.Status) + '</p></div>' +
@@ -795,7 +795,7 @@ VIEWS.student = async (main, id) => {
     }); });
     $('#reset-pw').addEventListener('click', () => { if (confirm('Make a new temporary password for ' + s.Name + '? Their current password will stop working.')) busy($('#reset-pw'), async () => {
       const r = await api('students.resetPassword', { studentId: id }); credentials('New temporary password', r.username, r.tempPassword); }); });
-    wireSubjectPanel(s, id);
+    wireSubjectPanel(s, id, subjRows);
   }
 
   if (canFinance && fees && can('FINANCE_EDIT')) {
@@ -904,19 +904,33 @@ function subjectsPanel(s, rows, editable) {
     fieldHtml({ n: 'startDate', l: 'Start date', type: 'date' }, new Date().toISOString().slice(0, 10)) +
     fieldHtml({ n: 'feeOverride', l: 'Special monthly fee (optional)', type: 'number', step: 'any', hint: 'Leave empty to use the standard fee.' }) +
     '</div><button class="btn primary" id="af-save">Give subject</button></form></div>' : '') +
-    (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Subject</th><th>Teacher</th><th>Batch</th><th>From</th><th>To</th><th>Status</th><th></th></tr></thead><tbody>' +
-      rows.map(r => '<tr><td data-l="Subject"><b>' + esc(nameOf('subjects', 'SubjectID', 'SubjectName', r.SubjectID)) + '</b></td><td data-l="Teacher">' + esc(nameOf('teachers', 'TeacherID', 'Name', r.TeacherID)) + '</td><td data-l="Batch">' + esc(nameOf('batches', 'BatchID', 'BatchName', r.BatchID)) + '</td><td data-l="From">' + esc(fmtDate(r.StartDate)) + '</td><td data-l="To">' + esc(fmtDate(r.EndDate) || '—') + '</td><td>' + pill(r.Status) + '</td><td>' +
-        (editable && r.Status === 'ACTIVE' ? '<button class="btn small danger" data-end="' + esc(r.StudentSubjectID) + '">End</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' :
+    (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Subject</th><th>Teacher</th><th>Batch</th><th>Special fee</th><th>From</th><th>To</th><th>Status</th><th></th></tr></thead><tbody>' +
+      rows.map(r => '<tr><td data-l="Subject"><b>' + esc(nameOf('subjects', 'SubjectID', 'SubjectName', r.SubjectID)) + '</b></td><td data-l="Teacher">' + esc(nameOf('teachers', 'TeacherID', 'Name', r.TeacherID)) + '</td><td data-l="Batch">' + esc(nameOf('batches', 'BatchID', 'BatchName', r.BatchID)) + '</td><td data-l="Special fee">' + (r.FeeOverride === null || r.FeeOverride === undefined ? 'Standard' : '₹' + Number(r.FeeOverride).toLocaleString('en-IN')) + '</td><td data-l="From">' + esc(fmtDate(r.StartDate)) + '</td><td data-l="To">' + esc(fmtDate(r.EndDate) || '—') + '</td><td>' + pill(r.Status) + '</td><td>' +
+        (editable && String(r.Status).toUpperCase() === 'ACTIVE' ? '<button class="btn small" data-edit-fee="' + esc(r.StudentSubjectID) + '">Edit fee</button> <button class="btn small danger" data-end="' + esc(r.StudentSubjectID) + '">End</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' :
       '<div class="card empty"><b>No subjects yet</b>' + (editable ? 'Choose a subject, teacher and batch above.' : '') + '</div>');
 }
-function wireSubjectPanel(s, id) {
-  const af = $('#af'); if (!af) return;
-  $('#af-save').addEventListener('click', ev => { ev.preventDefault(); busy(ev.target, async () => {
-    if (!validForm(af)) return;
-    const v = collect(af, [{ n: 'subjectId' }, { n: 'teacherId' }, { n: 'batchId' }, { n: 'startDate' }, { n: 'feeOverride' }]);
-    await api('studentSubjects.assign', { studentId: id, subjectId: v.subjectId, teacherId: v.teacherId, batchId: v.batchId, startDate: v.startDate || undefined, feeOverride: v.feeOverride === '' ? undefined : v.feeOverride });
-    toast('Subject added.'); go('student', id); setTimeout(() => { const b = $('[data-tab=s]'); if (b) b.click(); }, 50);
-  }); });
+function wireSubjectPanel(s, id, rows) {
+  const af = $('#af');
+  if (af) $('#af-save').addEventListener('click', ev => { ev.preventDefault(); busy(ev.target, async () => {
+      if (!validForm(af)) return;
+      const v = collect(af, [{ n: 'subjectId' }, { n: 'teacherId' }, { n: 'batchId' }, { n: 'startDate' }, { n: 'feeOverride' }]);
+      await api('studentSubjects.assign', { studentId: id, subjectId: v.subjectId, teacherId: v.teacherId, batchId: v.batchId, startDate: v.startDate || undefined, feeOverride: v.feeOverride === '' ? undefined : v.feeOverride });
+      toast('Subject added.'); go('student', id); setTimeout(() => { const b = $('[data-tab=s]'); if (b) b.click(); }, 50);
+    }); });
+  $$('[data-edit-fee]').forEach(b => b.addEventListener('click', () => {
+    const row = rows.find(x => x.StudentSubjectID === b.dataset.editFee);
+    if (!row) return;
+    const subjectName = nameOf('subjects', 'SubjectID', 'SubjectName', row.SubjectID);
+    openDlg('Special monthly fee · ' + subjectName,
+      '<form><div class="grid2"><label class="f full"><span>Special monthly fee (₹)</span><input name="feeOverride" type="number" min="0" max="100000" step="any" value="' + esc(row.FeeOverride == null ? '' : row.FeeOverride) + '"><small>Leave empty to use the standard subject fee.</small></label><label class="f full"><span>Reason (optional)</span><input name="reason" maxlength="200" placeholder="Reason for this fee change"></label></div></form>',
+      '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="fee-override-save">Save fee</button>',
+      d => $('#fee-override-save', d).addEventListener('click', ev => busy(ev.target, async () => {
+        const input = d.querySelector('[name=feeOverride]');
+        if (input.value !== '' && (!Number.isFinite(Number(input.value)) || Number(input.value) < 0 || Number(input.value) > 100000)) { toast('Enter a fee from ₹0 to ₹100,000.', true); return; }
+        await api('studentSubjects.updateFee', { studentSubjectId: row.StudentSubjectID, feeOverride: input.value === '' ? null : input.value, reason: d.querySelector('[name=reason]').value });
+        closeDlg(); toast('Special monthly fee updated.'); go('student', id); setTimeout(() => { const t = $('[data-tab=s]'); if (t) t.click(); }, 50);
+      })))
+  }));
   $$('[data-end]').forEach(b => b.addEventListener('click', () => {
     if (!confirm('End this subject for ' + s.Name + ' from today? The record stays in their history.')) return;
     busy(b, async () => { await api('studentSubjects.end', { studentSubjectId: b.dataset.end }); toast('Subject ended.'); go('student', id); setTimeout(() => { const t = $('[data-tab=s]'); if (t) t.click(); }, 50); });
