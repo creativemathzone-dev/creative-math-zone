@@ -454,6 +454,11 @@ function fmtDate(s){ return /^\d{4}-\d{2}-\d{2}/.test(s||'') ? s.slice(8,10)+'/'
 function fmtTime(s){ return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s||'') ? fmtDate(s)+' '+s.slice(11,16) : fmtDate(s); }
 function fmtHM(hhmm){ if (!/^\d{2}:\d{2}/.test(hhmm||'')) return hhmm||''; const h=+hhmm.slice(0,2), m=hhmm.slice(3,5); return ((h%12)||12)+':'+m+' '+(h<12?'AM':'PM'); }
 function pill(s){ const k=String(s).toUpperCase(); const c=['PRESENT','ACTIVE','OK'].indexOf(k)>=0?'ok':(['ABSENT','INACTIVE','FAIL'].indexOf(k)>=0?'bad':'warn'); return '<span class="pill '+c+'">'+esc(s||'—')+'</span>'; }
+function localDateKolkata(){const p=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=t=>p.find(x=>x.type===t)?.value||'';return v('year')+'-'+v('month')+'-'+v('day')}
+function datePlusOne(value){const d=new Date(value+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+1);return d.toISOString().slice(0,10)}
+function nextOccurrence(day){const today=localDateKolkata(),d=new Date(today+'T00:00:00Z'),days=['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];const target=days.indexOf(String(day).toUpperCase());if(target<0)return datePlusOne(today);d.setUTCDate(d.getUTCDate()+((target-d.getUTCDay()+7)%7));return d.toISOString().slice(0,10)}
+function openDlg(title, body, footer, mount){const d=$('#dlg');d.innerHTML='<div class="dlg-h"><h2>'+esc(title)+'</h2><button type="button" class="btn small" data-close>Close</button></div><div class="dlg-b">'+body+'</div>'+(footer?'<div class="dlg-f">'+footer+'</div>':'');if(!d.open)d.showModal();if(mount)mount(d);return d}
+function closeDlg(){const d=$('#dlg');if(d.open)d.close()}
 
 document.addEventListener('click', ev => {
   const sh = ev.target.closest('[data-show]');
@@ -521,9 +526,12 @@ VIEWS.dashboard = async main => {
     const btn = c.ActiveSessionID
       ? '<button class="btn primary" data-open="'+esc(c.ActiveSessionID)+'">Open live class</button>'
       : (c.ClosedSessionID ? '' : '<button class="btn primary" data-start="'+esc(c.TimetableID)+'">Start class</button>');
+    const shiftLabel = c.IsRescheduled ? '<small class="muted">One-day change from '+esc(fmtDate(c.OriginalDate))+'</small>' : '';
+    const shiftButton = !c.IsRescheduled && !c.ActiveSessionID && !c.ClosedSessionID
+      ? '<button type="button" class="btn" data-reschedule="'+esc(c.TimetableID)+'">Reschedule this date</button>' : '';
     return '<div class="class-row"><span class="t">'+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</span>' +
-      '<div class="d"><b>'+esc(c.SubjectName)+' · '+esc(c.BatchName)+'</b><span>'+esc(c.RoomName||'Room TBD')+'</span></div>' +
-      status + btn + '</div>';
+      '<div class="d"><b>'+esc(c.SubjectName)+' · '+esc(c.BatchName)+'</b><span>'+esc(c.RoomName||'Room TBD')+'</span>'+shiftLabel+'</div>' +
+      status + btn + shiftButton + '</div>';
   }).join('') : '<div class="empty"><b>No classes scheduled today</b>Enjoy the break.</div>';
 
   main.innerHTML = '<div class="head"><h1>Welcome, '+esc(d.teacher.Name)+'</h1><p>'+esc(S.cfg.centreName||'')+' · '+esc(fmtDate(new Date().toISOString().slice(0,10)))+'</p></div>' +
@@ -537,8 +545,30 @@ VIEWS.dashboard = async main => {
   main.addEventListener('click', ev => {
     const st = ev.target.closest('[data-start]'); if (st) startClass(st.dataset.start);
     const op = ev.target.closest('[data-open]'); if (op) go('live', op.dataset.open);
+    const rs = ev.target.closest('[data-reschedule]'); if (rs) { const c=d.todayClasses.find(x=>x.TimetableID===rs.dataset.reschedule); if(c) rescheduleClass(c,localDateKolkata(),false); }
   });
 };
+
+function rescheduleClass(c, initialDate, canChooseSource){
+  const originalDate=initialDate||localDateKolkata(),nextDate=datePlusOne(originalDate),sourceInput=canChooseSource
+    ? '<label class="f"><span>Which scheduled class date?</span><input name="originalDate" type="date" min="'+esc(localDateKolkata())+'" value="'+esc(originalDate)+'" required><small>Choose a date that falls on this class’s usual weekday.</small></label>' : '<input type="hidden" name="originalDate" value="'+esc(originalDate)+'">';
+  const body='<form id="reschedule-form">'+
+    '<p class="muted">This changes this class occurrence only. Your weekly timetable stays the same, and its regular schedule resumes next week.</p>'+
+    sourceInput+'<label class="f"><span>Move this class to</span><input name="rescheduledDate" type="date" min="'+esc(nextDate)+'" value="'+esc(nextDate)+'" required></label>'+
+    '<div class="grid2"><label class="f"><span>New start time</span><input name="startTime" type="time" value="'+esc(String(c.StartTime).slice(0,5))+'" required></label>'+
+    '<label class="f"><span>New end time</span><input name="endTime" type="time" value="'+esc(String(c.EndTime).slice(0,5))+'" required></label></div>'+
+    '<label class="f"><span>Reason for students (optional)</span><textarea name="reason" rows="3" maxlength="240" placeholder="For example, teacher unavailable"></textarea></label></form>';
+  openDlg('Reschedule '+c.SubjectName+' · '+c.BatchName,body,'<button type="button" class="btn" data-close>Keep current schedule</button><button type="submit" form="reschedule-form" class="btn primary" id="reschedule-submit">Notify students and move class</button>',d=>{
+    $('#reschedule-form',d).addEventListener('submit',async ev=>{ev.preventDefault();const f=ev.target,btn=$('#reschedule-submit',d);btn.disabled=true;
+      try{await api('teacher.rescheduleClass',{timetableId:c.TimetableID,originalDate:f.elements.originalDate.value,rescheduledDate:f.elements.rescheduledDate.value,startTime:f.elements.startTime.value,endTime:f.elements.endTime.value,reason:f.elements.reason.value});closeDlg();toast('Class moved for this date. Students will be notified in the app.');go('dashboard');}
+      catch(e){fail(e)}finally{btn.disabled=false}
+    });
+    if(canChooseSource){
+      const source=$('#reschedule-form',d).elements.originalDate,target=$('#reschedule-form',d).elements.rescheduledDate;
+      source.addEventListener('change',()=>{target.min=datePlusOne(source.value);if(target.value<=source.value)target.value=target.min;});
+    }
+  });
+}
 
 async function startClass(timetableId) {
   try {
@@ -647,9 +677,10 @@ VIEWS.timetable = async main => {
   const order = ['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'];
   const byDay = {}; rows.forEach(r => (byDay[r.Day] = byDay[r.Day] || []).push(r));
   Object.keys(byDay).forEach(d => byDay[d].sort((a,b) => String(a.StartTime).localeCompare(String(b.StartTime))));
-  main.innerHTML = '<div class="head"><h1>Timetable</h1><p>Your weekly schedule</p></div>' +
+  main.innerHTML = '<div class="head"><h1>Timetable</h1><p>Your weekly schedule. Move a specific upcoming class date if needed; the recurring schedule will continue as usual.</p></div>' +
     order.filter(d => byDay[d]).map(d => '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">'+esc(d.charAt(0)+d.slice(1).toLowerCase())+'</h2>' +
-      byDay[d].map(c => '<div class="class-row"><span class="t">'+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</span><div class="d"><b>'+esc(c.SubjectName)+' · '+esc(c.BatchName)+'</b><span>'+esc(c.RoomName||'')+'</span></div></div>').join('') + '</div>').join('');
+      byDay[d].map(c => '<div class="class-row"><span class="t">'+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</span><div class="d"><b>'+esc(c.SubjectName)+' · '+esc(c.BatchName)+'</b><span>'+esc(c.RoomName||'')+'</span></div><button type="button" class="btn small" data-reschedule-slot="'+esc(c.TimetableID)+'">Move one class date</button></div>').join('') + '</div>').join('');
+  main.addEventListener('click',ev=>{const b=ev.target.closest('[data-reschedule-slot]');if(!b)return;const c=rows.find(x=>x.TimetableID===b.dataset.rescheduleSlot);if(c)rescheduleClass(c,nextOccurrence(c.Day),true);});
 };
 
 /* ---- students list ---- */

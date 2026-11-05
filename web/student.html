@@ -512,6 +512,7 @@ document.addEventListener('click', ev => {
 
 /* ---- sign in/out ---- */
 function signedOut(msg) {
+  if(classChangeWatcher){clearInterval(classChangeWatcher);classChangeWatcher=null;}
   S.token=null; S.user=null; try { sessionStorage.removeItem('cmz_st'); } catch(e){}
   closeDlg(); show('login');
   $('#lg-msg').innerHTML = msg ? '<div class="alert warn">'+esc(msg)+'</div>' : '';
@@ -526,7 +527,7 @@ function startApp() {
   $('#who-name').textContent = S.user.displayName;
   $('#who-class').textContent = (S.user.profile && S.user.profile.CurrentClass ? 'Class '+S.user.profile.CurrentClass : '');
   $('#nav-sid').textContent = S.user.linkedId;
-  buildNav(); show('app'); go('dashboard');
+  buildNav(); show('app'); go('dashboard'); startClassChangeWatcher();
 }
 $('#login-form').addEventListener('submit', async ev => {
   ev.preventDefault();
@@ -559,6 +560,24 @@ $('#pw-out').addEventListener('click', doLogout);
 
 /* ---- nav ---- */
 const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['subjects','Subjects'],['attendance','Attendance'],['fees','Fees'],['homework','Homework'],['materials','Class PDFs'],['notices','Notices'],['profile','Profile']];
+let classChangeWatcher=null;
+function startClassChangeWatcher(){
+  if(classChangeWatcher)clearInterval(classChangeWatcher);
+  let known=null;
+  const refresh=async()=>{
+    if(!S.token)return;
+    try{
+      const rows=await api('student.classChanges'),next=new Map(rows.map(x=>[x.RescheduleID,x.UpdatedAt]));
+      if(known){
+        rows.filter(x=>!known.has(x.RescheduleID)||known.get(x.RescheduleID)!==x.UpdatedAt).forEach(x=>
+          toast('Class change: '+x.SubjectName+' moved to '+fmtDate(x.RescheduledDate)+' at '+fmtHM(x.StartTime)+'. Open Notices for details.')
+        );
+      }
+      known=next;
+    }catch(e){if(e&&SESSION_CODES.indexOf(e.code)>=0)fail(e);}
+  };
+  refresh();classChangeWatcher=setInterval(refresh,30000);
+}
 function buildNav(){ $('#nav-items').innerHTML = NAV.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join(''); }
 function go(view){ S.view=view; $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
@@ -572,7 +591,7 @@ const VIEWS = {};
 
 /* ---- dashboard ---- */
 VIEWS.dashboard = async main => {
-  const [d, homework] = await Promise.all([api('student.dashboard'), api('student.homework.list')]);
+  const [d, homework, classChanges] = await Promise.all([api('student.dashboard'), api('student.homework.list'), api('student.classChanges')]);
   const st = d.student, s = d.stats;
   const classesHtml = d.todayClasses.length ? '<ul class="schedule">' + d.todayClasses.map(c =>
     '<li><span class="t">'+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</span><div class="d"><b>'+esc(c.SubjectName)+'</b><span>'+esc(c.TeacherName)+(c.RoomName?' · '+esc(c.RoomName):'')+'</span></div></li>'
@@ -585,6 +604,9 @@ VIEWS.dashboard = async main => {
   const homeworkHtml = homeworkAlerts.length ? '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Homework alerts</h2>' + homeworkAlerts.map(h =>
     '<div style="padding:.6rem 0;border-bottom:1px solid var(--line)"><b>'+esc(h.Title)+'</b> · '+esc(h.SubjectName||'Class work')+'<div class="muted">Due '+esc(new Date(h.DueAt).toLocaleString())+'</div></div>'
   ).join('') + '<p style="margin:.7rem 0 0"><button class="link" data-go="homework">Open homework →</button></p></div>' : '';
+  const changesHtml = classChanges.length ? '<div class="card" role="status" style="border-left:4px solid var(--pencil)"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Class schedule changes</h2>' + classChanges.slice(0,3).map(c=>
+    '<div style="padding:.65rem 0;border-bottom:1px solid var(--line)"><b>'+esc(c.SubjectName)+' · '+esc(c.TeacherName)+'</b><div>Moved from '+esc(fmtDate(c.OriginalDate))+' to <b>'+esc(fmtDate(c.RescheduledDate))+'</b>, '+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</div>'+(c.Reason?'<div class="muted">'+esc(c.Reason)+'</div>':'')+'</div>'
+  ).join('')+'<p style="margin:.7rem 0 0"><button class="link" data-go="notices">See all updates →</button></p></div>' : '';
 
   main.innerHTML =
     '<div class="head"><h1>Welcome, '+esc(st.Name)+'</h1><p>'+esc(st.StudentID)+' · Class '+esc(st.CurrentClass)+' · '+esc(batchLabel(st.CurrentBatch))+'</p></div>' +
@@ -595,7 +617,7 @@ VIEWS.dashboard = async main => {
       '<div class="card stat"><b>'+s.present+'</b><span>Present last 30 days</span></div>' +
       '<div class="card stat"><b>'+s.absent+'</b><span>Absent last 30 days</span></div>' +
     '</div>' +
-
+    changesHtml +
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Today\'s classes</h2>'+classesHtml+'</div>' +
     homeworkHtml +
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Latest notices</h2>'+noticesHtml+'</div>';
@@ -615,7 +637,7 @@ VIEWS.timetable = async main => {
   const byDay = {};
   rows.forEach(r => { (byDay[r.Day] = byDay[r.Day] || []).push(r); });
   Object.keys(byDay).forEach(d => byDay[d].sort((a,b) => String(a.StartTime).localeCompare(String(b.StartTime))));
-  main.innerHTML = '<div class="head"><h1>Timetable</h1><p>Your weekly schedule</p></div>' +
+  main.innerHTML = '<div class="head"><h1>Timetable</h1><p>Your weekly schedule. One-day changes appear on your Dashboard and in Notices.</p></div>' +
     '<div class="card">' + order.filter(d => byDay[d]).map(d =>
       '<div class="day"><h3>'+esc(d.charAt(0)+d.slice(1).toLowerCase())+'</h3>' +
       byDay[d].map(c => '<div class="cls"><span class="t">'+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</span><span class="subj">'+esc(c.SubjectName)+'</span><span class="meta">'+esc(c.TeacherName)+(c.RoomName?' · '+esc(c.RoomName):'')+'</span></div>').join('') +
@@ -737,11 +759,14 @@ VIEWS.fees = async main => {
 
 /* ---- notices ---- */
 VIEWS.notices = async main => {
-  const rows = await api('notices.list');
+  const [rows,classChanges] = await Promise.all([api('notices.list'),api('student.classChanges')]);
   main.innerHTML = '<div class="head"><h1>Notices</h1><p>Announcements from Creative Math Zone</p></div>' +
+    (classChanges.length ? '<div class="card" role="status" style="border-left:4px solid var(--pencil);margin-bottom:1rem"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Class schedule changes</h2>'+classChanges.map(c=>
+      '<div style="padding:.8rem 0;border-bottom:1px solid var(--line)"><b>'+esc(c.SubjectName)+' · '+esc(c.TeacherName)+'</b><div class="muted">Originally '+esc(fmtDate(c.OriginalDate))+'</div><div>New class: <b>'+esc(fmtDate(c.RescheduledDate))+' · '+esc(fmtHM(c.StartTime))+' – '+esc(fmtHM(c.EndTime))+'</b></div>'+(c.Reason?'<div style="margin-top:.3rem">'+esc(c.Reason)+'</div>':'')+'</div>'
+    ).join('')+'</div>' : '') +
     (rows.length ? '<div class="card">' + rows.map(n =>
       '<div style="padding:.8rem 0;border-bottom:1px solid var(--line)"><b>'+esc(n.Title)+'</b> '+pill(n.Audience||'ALL')+'<div class="muted" style="font-size:.85rem">'+esc(fmtTime(n.PostedAt))+(n.ExpiresAt?' · expires '+esc(fmtDate(n.ExpiresAt)):'')+'</div><div style="margin-top:.4rem;white-space:pre-wrap">'+esc(n.Body||'')+'</div></div>'
-    ).join('') + '</div>' : '<div class="card empty"><b>No notices yet</b>Announcements will appear here.</div>');
+    ).join('') + '</div>' : (classChanges.length ? '' : '<div class="card empty"><b>No notices yet</b>Announcements will appear here.</div>'));
 };
 
 /* ---- homework ---- */

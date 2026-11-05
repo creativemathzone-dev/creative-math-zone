@@ -347,6 +347,24 @@ function todayDate() {
   return `${part('year')}-${part('month')}-${part('day')}`
 }
 
+function validIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+function dateWeekday(value: string) {
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' })
+    .format(new Date(`${value}T12:00:00.000Z`)).toUpperCase()
+}
+
+function timeMinutes(value: string) {
+  const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(value)
+  if (!match) return -1
+  const hours = Number(match[1]), minutes = Number(match[2])
+  return hours < 24 && minutes < 60 ? hours * 60 + minutes : -1
+}
+
 function monthLabel(month: string) {
   const hit = /^(\d{4})-(\d{2})$/.exec(month)
   if (!hit) return month
@@ -612,9 +630,10 @@ Deno.serve(async (request) => {
       'student.classMaterials.list': 'SELF_VIEW',
       'teacher.dashboard': 'SELF_VIEW', 'teacher.timetable': 'SELF_VIEW', 'teacher.students': 'SELF_VIEW',
       'teacher.startClass': 'CLASS_RUN', 'teacher.regenerateCode': 'CLASS_RUN', 'teacher.classStatus': 'CLASS_RUN',
+      'teacher.rescheduleClass': 'CLASS_RUN',
       'teacher.manualAttendance': 'ATTENDANCE_MARK', 'teacher.markAll': 'ATTENDANCE_MARK',
       'teacher.closeClass': 'CLASS_RUN', 'teacher.sessions': 'SELF_VIEW', 'teacher.notices': 'NOTICE_VIEW',
-      'student.dashboard': 'SELF_VIEW', 'student.subjects': 'SELF_VIEW', 'student.timetable': 'SELF_VIEW',
+      'student.dashboard': 'SELF_VIEW', 'student.subjects': 'SELF_VIEW', 'student.timetable': 'SELF_VIEW', 'student.classChanges': 'SELF_VIEW',
       'student.attendance': 'SELF_VIEW', 'student.updateProfile': 'SELF_VIEW', 'student.enterCode': 'ATTENDANCE_SELF',
       'attendance.sessions': 'STUDENT_VIEW', 'attendance.detail': 'STUDENT_VIEW', 'attendance.correct': 'ATTENDANCE_CORRECT',
       'teacher.income': 'TEACHER_INCOME_VIEW',
@@ -2255,6 +2274,106 @@ Deno.serve(async (request) => {
       return response({ ok: true, data: { feeOverride } })
     }
 
+    if (action === 'teacher.rescheduleClass') {
+      if (user.user_type !== 'TEACHER' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'Only a linked teacher can reschedule a class.')
+      const timetableId = requireText(payload.timetableId, 'Class', 60, true)
+      const originalDate = requireText(payload.originalDate, 'Original date', 10, true)
+      const rescheduledDate = requireText(payload.rescheduledDate, 'New date', 10, true)
+      const startTime = requireText(payload.startTime, 'New start time', 8, true)
+      const endTime = requireText(payload.endTime, 'New end time', 8, true)
+      const reason = requireText(payload.reason, 'Reason', 240)
+      if (!validIsoDate(originalDate) || !validIsoDate(rescheduledDate)) throw new ApiFault('BAD_REQUEST', 'Choose valid class dates.')
+      if (originalDate < todayDate() || rescheduledDate < todayDate()) throw new ApiFault('BAD_REQUEST', 'Only today or future classes can be rescheduled.')
+      if (originalDate === rescheduledDate) throw new ApiFault('BAD_REQUEST', 'Choose a different date for the moved class.')
+      const startMinute = timeMinutes(startTime), endMinute = timeMinutes(endTime)
+      if (startMinute < 0 || endMinute <= startMinute) throw new ApiFault('BAD_REQUEST', 'Choose a valid time range.')
+
+      const { data: slot, error: slotError } = await admin.from('timetable').select('*').eq('id', timetableId).maybeSingle()
+      if (slotError) throw slotError
+      if (!slot || slot.teacher_id !== user.linked_id) throw new ApiFault('FORBIDDEN', 'This is not your timetable class.')
+      if (String(slot.status).toUpperCase() !== 'ACTIVE') throw new ApiFault('BAD_REQUEST', 'This timetable class is no longer active.')
+      if (dateWeekday(originalDate) !== String(slot.day).toUpperCase()) throw new ApiFault('BAD_REQUEST', 'The original date does not match this weekly timetable class.')
+      if (dateWeekday(rescheduledDate) === String(slot.day).toUpperCase()) throw new ApiFault('BAD_REQUEST', 'Choose a different weekday so this one-off class does not overlap the regular weekly class.')
+
+      const { data: sessionRows, error: sessionError } = await admin.from('class_sessions').select('id,status')
+        .eq('timetable_id', timetableId).eq('session_date', originalDate).limit(1)
+      if (sessionError) throw sessionError
+      if ((sessionRows || []).length) throw new ApiFault('BAD_REQUEST', 'This class has already started or finished, so it can no longer be moved.')
+
+      const [existingResult, sameTeacherResult, sameBatchResult, targetMovesResult] = await Promise.all([
+        admin.from('class_reschedules').select('id,status').eq('timetable_id', timetableId).eq('original_date', originalDate).maybeSingle(),
+        admin.from('timetable').select('id,day,start_time,end_time,teacher_id,batch_id,status').eq('teacher_id', slot.teacher_id).ilike('status', 'active').neq('id', timetableId),
+        admin.from('timetable').select('id,day,start_time,end_time,teacher_id,batch_id,status').eq('batch_id', slot.batch_id).ilike('status', 'active').neq('id', timetableId),
+        admin.from('class_reschedules').select('id,timetable_id,start_time,end_time,teacher_id,batch_id,status').eq('rescheduled_date', rescheduledDate).eq('status', 'ACTIVE'),
+      ])
+      if (existingResult.error) throw existingResult.error
+      if (sameTeacherResult.error) throw sameTeacherResult.error
+      if (sameBatchResult.error) throw sameBatchResult.error
+      if (targetMovesResult.error) throw targetMovesResult.error
+      const existing = existingResult.data
+      const peerSlots = new Map<string, any>()
+      for (const peer of [...(sameTeacherResult.data || []), ...(sameBatchResult.data || [])]) peerSlots.set(peer.id, peer)
+      const overlaps = (from: number, to: number, otherFrom: string, otherTo: string) => {
+        const otherStart = timeMinutes(otherFrom), otherEnd = timeMinutes(otherTo)
+        return otherStart >= 0 && otherEnd > otherStart && from < otherEnd && otherStart < to
+      }
+      for (const peer of peerSlots.values()) {
+        if (String(peer.day).toUpperCase() === dateWeekday(rescheduledDate) && overlaps(startMinute, endMinute, peer.start_time, peer.end_time)) {
+          throw new ApiFault('BAD_REQUEST', 'That time conflicts with another class for you or this batch. Choose another time.')
+        }
+      }
+      for (const move of targetMovesResult.data || []) {
+        if (move.id === existing?.id) continue
+        if (move.timetable_id === timetableId) throw new ApiFault('BAD_REQUEST', 'This same timetable class already has another occurrence moved to that date.')
+        if ((move.teacher_id === slot.teacher_id || move.batch_id === slot.batch_id) && overlaps(startMinute, endMinute, move.start_time, move.end_time)) {
+          throw new ApiFault('BAD_REQUEST', 'That time conflicts with another rescheduled class. Choose another time.')
+        }
+      }
+
+      const id = existing?.id || await newId(admin, 'class_reschedules', 'SHIFT-', 5)
+      const row = { id, timetable_id: timetableId, teacher_id: slot.teacher_id, batch_id: slot.batch_id,
+        subject_id: slot.subject_id, co_subject_id: slot.co_subject_id || null, room_id: slot.room_id || null,
+        original_date: originalDate, rescheduled_date: rescheduledDate, start_time: startTime, end_time: endTime,
+        reason, status: 'ACTIVE', created_by: user.id, updated_at: new Date().toISOString() }
+      const { data: saved, error: saveError } = await admin.from('class_reschedules').upsert(row, { onConflict: 'timetable_id,original_date' }).select('*').single()
+      if (saveError) throw saveError
+      const [{ data: subjects }, { data: batches }] = await Promise.all([
+        admin.from('subjects').select('id,name').in('id', [slot.subject_id, slot.co_subject_id].filter(Boolean)),
+        admin.from('batches').select('id,name').eq('id', slot.batch_id).maybeSingle(),
+      ])
+      const subjectNames = new Map((subjects || []).map((x) => [x.id, x.name]))
+      const subjectName = [subjectNames.get(slot.subject_id) || slot.subject_id, slot.co_subject_id ? subjectNames.get(slot.co_subject_id) || slot.co_subject_id : ''].filter(Boolean).join(' + ')
+      await logAction(admin, user, 'RESCHEDULE_CLASS_OCCURRENCE', 'CLASS_RESCHEDULE', saved.id,
+        { timetableId, originalDate, rescheduledDate, startTime, endTime, reason })
+      return response({ ok: true, data: { RescheduleID: saved.id, TimetableID: timetableId, OriginalDate: originalDate,
+        RescheduledDate: rescheduledDate, StartTime: saved.start_time, EndTime: saved.end_time, SubjectName: subjectName,
+        BatchName: batches?.name || slot.batch_id, Reason: reason, UpdatedAt: saved.updated_at } })
+    }
+
+    if (action === 'student.classChanges') {
+      if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'Only a linked student can view class changes.')
+      const { data: student, error: studentError } = await admin.from('students').select('current_batch_id').eq('id', user.linked_id).maybeSingle()
+      if (studentError) throw studentError
+      if (!student) throw new ApiFault('NOT_FOUND', 'Student record not found.')
+      if (!student.current_batch_id) return response({ ok: true, data: [] })
+      const since = new Date(Date.now() - 30 * 86400000).toISOString()
+      const { data: changes, error } = await admin.from('class_reschedules').select('id,timetable_id,original_date,rescheduled_date,start_time,end_time,reason,created_at,updated_at,subject_id,co_subject_id,teacher_id')
+        .eq('batch_id', student.current_batch_id).eq('status', 'ACTIVE').gte('updated_at', since).order('updated_at', { ascending: false }).limit(30)
+      if (error) throw error
+      const rows = changes || []
+      if (!rows.length) return response({ ok: true, data: [] })
+      const [subjects, teachers] = await Promise.all([
+        admin.from('subjects').select('id,name').in('id', [...new Set(rows.flatMap((r) => [r.subject_id, r.co_subject_id].filter(Boolean)))]),
+        admin.from('teachers').select('id,name').in('id', [...new Set(rows.map((r) => r.teacher_id))]),
+      ])
+      const subjectNames = new Map((subjects.data || []).map((x) => [x.id, x.name]))
+      const teacherNames = new Map((teachers.data || []).map((x) => [x.id, x.name]))
+      return response({ ok: true, data: rows.map((r) => ({ RescheduleID: r.id, TimetableID: r.timetable_id,
+        OriginalDate: r.original_date, RescheduledDate: r.rescheduled_date, StartTime: r.start_time, EndTime: r.end_time,
+        SubjectName: [subjectNames.get(r.subject_id) || r.subject_id, r.co_subject_id ? subjectNames.get(r.co_subject_id) || r.co_subject_id : ''].filter(Boolean).join(' + '),
+        TeacherName: teacherNames.get(r.teacher_id) || r.teacher_id, Reason: r.reason, CreatedAt: r.created_at, UpdatedAt: r.updated_at })) })
+    }
+
     if (action === 'student.subjects' || action === 'student.timetable' || action === 'student.attendance' || action === 'student.dashboard') {
       if (!user.linked_id) throw new ApiFault('NOT_FOUND', 'Student account is not linked to a student record.')
       const { data: student, error: studentError } = await admin.from('students').select('*').eq('id', user.linked_id).maybeSingle()
@@ -2303,22 +2422,36 @@ Deno.serve(async (request) => {
           BatchName: bm.get(r.batch_id) || r.batch_id, Status: r.status, Method: r.method, MarkedAt: r.marked_at })),
           summary: { present, late, absent, total: rows.length, pct: rows.length ? Math.round((present + late * 0.5) / rows.length * 100) : 0 } } })
       }
-      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()).toUpperCase()
+      const today = todayDate()
       const dayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(new Date()).toUpperCase()
-      const [{ data: sub }, { data: teachers }, { data: rooms }, { data: sessions }, { data: notices }] = await Promise.all([
+      const [{ data: sub }, { data: teachers }, { data: rooms }, { data: sessions }, { data: notices }, originalMoves, destinationMoves] = await Promise.all([
         admin.from('subjects').select('id,name').in('id', [...new Set((timetable || []).flatMap((r) => [r.subject_id, r.co_subject_id].filter(Boolean)))]),
         admin.from('teachers').select('id,name').in('id', (timetable || []).map((r) => r.teacher_id)),
         admin.from('rooms').select('id,name').in('id', (timetable || []).map((r) => r.room_id).filter(Boolean)),
         admin.from('class_sessions').select('id,timetable_id,status').eq('session_date', today),
         admin.from('notices').select('*').ilike('status', 'active').order('posted_at', { ascending: false }).limit(100),
+        student.current_batch_id ? admin.from('class_reschedules').select('*').eq('batch_id', student.current_batch_id).eq('original_date', today).eq('status', 'ACTIVE') : Promise.resolve({ data: [], error: null }),
+        student.current_batch_id ? admin.from('class_reschedules').select('*').eq('batch_id', student.current_batch_id).eq('rescheduled_date', today).eq('status', 'ACTIVE') : Promise.resolve({ data: [], error: null }),
       ])
+      if (originalMoves.error) throw originalMoves.error
+      if (destinationMoves.error) throw destinationMoves.error
       const sm = new Map((sub || []).map((x) => [x.id, x.name])), tm = new Map((teachers || []).map((x) => [x.id, x.name])), rm = new Map((rooms || []).map((x) => [x.id, x.name]))
       const activeSubjects = subjectRows.filter((r) => r.status.toUpperCase() === 'ACTIVE').length
-      const todayClasses = (timetable || []).filter((r) => r.day.toUpperCase() === dayName).map((r) => {
+      const movedAway = new Set((originalMoves.data || []).map((r) => r.timetable_id))
+      const todaySlots = new Map<string, { slot: any; move: any | null }>()
+      for (const slot of timetable || []) {
+        if (slot.day.toUpperCase() === dayName && !movedAway.has(slot.id)) todaySlots.set(slot.id, { slot, move: null })
+      }
+      for (const move of destinationMoves.data || []) {
+        const slot = (timetable || []).find((r) => r.id === move.timetable_id)
+        if (slot) todaySlots.set(slot.id, { slot, move })
+      }
+      const todayClasses = [...todaySlots.values()].sort((a, b) => String(a.move?.start_time || a.slot.start_time).localeCompare(String(b.move?.start_time || b.slot.start_time))).map(({ slot: r, move }) => {
         const ses = (sessions || []).find((s) => s.timetable_id === r.id && s.status === 'OPEN')
-        return { TimetableID: r.id, StartTime: r.start_time, EndTime: r.end_time,
+        return { TimetableID: r.id, StartTime: move?.start_time || r.start_time, EndTime: move?.end_time || r.end_time,
           SubjectName: [sm.get(r.subject_id) || r.subject_id, r.co_subject_id ? sm.get(r.co_subject_id) || r.co_subject_id : ''].filter(Boolean).join(' + '),
-          TeacherName: tm.get(r.teacher_id) || r.teacher_id, RoomName: rm.get(r.room_id) || r.room_id, ActiveSessionID: ses?.id || null }
+          TeacherName: tm.get(r.teacher_id) || r.teacher_id, RoomName: rm.get(r.room_id) || r.room_id, ActiveSessionID: ses?.id || null,
+          IsRescheduled: !!move, OriginalDate: move?.original_date || null }
       })
       const recentNotices = (notices || []).filter((n) => !n.expires_at || n.expires_at >= today).filter((n) =>
         ['ALL', 'STUDENTS'].includes(String(n.audience).toUpperCase()) || (String(n.audience).toUpperCase() === 'BATCH' && n.batch_id === student.current_batch_id))
@@ -2388,25 +2521,41 @@ Deno.serve(async (request) => {
           Status: s.status, Present: m.filter((x) => x.status === 'PRESENT').length, Late: m.filter((x) => x.status === 'LATE').length,
           Absent: m.filter((x) => x.status === 'ABSENT').length, Total: m.length, Materials: bySession.get(s.id) || [] } }) })
       }
-      const [{ data: assignments }, { data: subjects }, { data: batches }, { data: rooms }, { data: sessions }] = await Promise.all([
+      const today = todayDate()
+      const [{ data: assignments }, { data: subjects }, { data: batches }, { data: rooms }, { data: sessions }, originalMoves, destinationMoves] = await Promise.all([
         admin.from('student_subjects').select('student_id,subject_id,batch_id,status').eq('teacher_id', teacher.id).ilike('status', 'active'),
         admin.from('subjects').select('id,name'), admin.from('batches').select('id,name'), admin.from('rooms').select('id,name'),
-        admin.from('class_sessions').select('id,timetable_id,status').eq('session_date', new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())),
+        admin.from('class_sessions').select('id,timetable_id,status').eq('session_date', today),
+        admin.from('class_reschedules').select('*').eq('teacher_id', teacher.id).eq('original_date', today).eq('status', 'ACTIVE'),
+        admin.from('class_reschedules').select('*').eq('teacher_id', teacher.id).eq('rescheduled_date', today).eq('status', 'ACTIVE'),
       ])
+      if (originalMoves.error) throw originalMoves.error
+      if (destinationMoves.error) throw destinationMoves.error
       const activeAssignments = assignments || []
       const sm = new Map((subjects || []).map((x) => [x.id, x.name]))
       const bm = new Map((batches || []).map((x) => [x.id, x.name]))
       const rm = new Map((rooms || []).map((x) => [x.id, x.name]))
       const dayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(new Date()).toUpperCase()
-      const todays = tt.filter((r) => r.day.toUpperCase() === dayName)
+      const movedAway = new Set((originalMoves.data || []).map((r) => r.timetable_id))
+      const todaySlots = new Map<string, { slot: any; move: any | null }>()
+      for (const slot of tt) {
+        if (slot.day.toUpperCase() === dayName && !movedAway.has(slot.id)) todaySlots.set(slot.id, { slot, move: null })
+      }
+      for (const move of destinationMoves.data || []) {
+        const slot = tt.find((r) => r.id === move.timetable_id)
+        if (slot) todaySlots.set(slot.id, { slot, move })
+      }
+      const todays = [...todaySlots.values()].sort((a, b) => String(a.move?.start_time || a.slot.start_time).localeCompare(String(b.move?.start_time || b.slot.start_time)))
       const sessionRows = (sessions || [])
       return response({ ok: true, data: { teacher: { TeacherID: teacher.id, Name: teacher.name, Mobile: teacher.mobile, Email: teacher.email },
         stats: { students: new Set(activeAssignments.map((r) => r.student_id)).size, subjects: new Set(activeAssignments.map((r) => r.subject_id)).size, todayClasses: todays.length },
-        todayClasses: todays.map((r) => { const ses = sessionRows.find((x) => x.timetable_id === r.id && x.status === 'OPEN'); return { TimetableID: r.id,
-          StartTime: r.start_time, EndTime: r.end_time, BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id,
-          SubjectID: r.subject_id, CoSubjectID: r.co_subject_id || '',
-          SubjectName: [sm.get(r.subject_id) || r.subject_id, r.co_subject_id ? sm.get(r.co_subject_id) || r.co_subject_id : ''].filter(Boolean).join(' + '),
-          RoomID: r.room_id, RoomName: rm.get(r.room_id) || r.room_id, ActiveSessionID: ses?.id || null } }) } })
+        todayClasses: todays.map(({ slot: r, move }) => { const ses = sessionRows.find((x) => x.timetable_id === r.id && x.status === 'OPEN');
+          const closed = sessionRows.find((x) => x.timetable_id === r.id && x.status === 'CLOSED');
+          return { TimetableID: r.id, StartTime: move?.start_time || r.start_time, EndTime: move?.end_time || r.end_time,
+            BatchID: r.batch_id, BatchName: bm.get(r.batch_id) || r.batch_id, SubjectID: r.subject_id, CoSubjectID: r.co_subject_id || '',
+            SubjectName: [sm.get(r.subject_id) || r.subject_id, r.co_subject_id ? sm.get(r.co_subject_id) || r.co_subject_id : ''].filter(Boolean).join(' + '),
+            RoomID: r.room_id, RoomName: rm.get(r.room_id) || r.room_id, ActiveSessionID: ses?.id || null, ClosedSessionID: closed?.id || null,
+            IsRescheduled: !!move, OriginalDate: move?.original_date || null } }) } })
     }
 
     if (action === 'teacher.startClass' || action === 'teacher.regenerateCode' || action === 'student.enterCode') {
@@ -2418,6 +2567,15 @@ Deno.serve(async (request) => {
         if (error) throw error
         if (!slot) throw new ApiFault('NOT_FOUND', 'Timetable entry not found.')
         if (slot.teacher_id !== user.linked_id) throw new ApiFault('FORBIDDEN', 'This is not your class.')
+        const [movesAway, movesHere] = await Promise.all([
+          admin.from('class_reschedules').select('id').eq('timetable_id', id).eq('original_date', today).eq('status', 'ACTIVE').limit(1),
+          admin.from('class_reschedules').select('start_time,end_time').eq('timetable_id', id).eq('rescheduled_date', today).eq('status', 'ACTIVE').maybeSingle(),
+        ])
+        if (movesAway.error) throw movesAway.error
+        if (movesHere.error) throw movesHere.error
+        if ((movesAway.data || []).length) throw new ApiFault('BAD_REQUEST', 'This class was moved to another date and cannot be started today.')
+        const startTime = movesHere.data?.start_time || slot.start_time
+        const endTime = movesHere.data?.end_time || slot.end_time
         const { data: existing, error: findError } = await admin.from('class_sessions').select('*').eq('timetable_id', id).eq('session_date', today).eq('status', 'OPEN').maybeSingle()
         if (findError && findError.code !== 'PGRST116') throw findError
         if (existing) return response({ ok: true, data: { sessionId: existing.id, code: existing.attendance_code, reused: true } })
@@ -2429,7 +2587,7 @@ Deno.serve(async (request) => {
         const expires = new Date(now.getTime() + minutes * 60000).toISOString()
         const sessionId = await newId(admin, 'class_sessions', `SESSION-${today.replaceAll('-', '')}-`, 3)
         const { error: insertError } = await admin.from('class_sessions').insert({ id: sessionId, timetable_id: slot.id, session_date: today,
-          start_time: slot.start_time, end_time: slot.end_time, teacher_id: slot.teacher_id, batch_id: slot.batch_id, subject_id: slot.subject_id,
+          start_time: startTime, end_time: endTime, teacher_id: slot.teacher_id, batch_id: slot.batch_id, subject_id: slot.subject_id,
           room_id: slot.room_id, co_subject_id: slot.co_subject_id || null, attendance_code: code, code_created_at: now.toISOString(), code_expires_at: expires, status: 'OPEN',
           started_at: now.toISOString(), academic_year: slot.academic_year })
         if (insertError) {
