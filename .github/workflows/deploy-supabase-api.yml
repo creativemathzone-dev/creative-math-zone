@@ -22,13 +22,13 @@ jobs:
           version: latest
 
       - name: Deploy the API function
-        run: supabase functions deploy api --project-ref "$PROJECT_ID"
+        run: supabase functions deploy api --project-ref "$PROJECT_ID" --yes
 
       - name: Deploy expired class material cleanup
-        run: supabase functions deploy cleanup-class-materials --project-ref "$PROJECT_ID"
+        run: supabase functions deploy cleanup-class-materials --project-ref "$PROJECT_ID" --yes
 
       - name: Deploy Google Drive OAuth
-        run: supabase functions deploy google-drive-oauth --project-ref "$PROJECT_ID"
+        run: supabase functions deploy google-drive-oauth --project-ref "$PROJECT_ID" --yes
 
       - name: Deploy homework archive and file access
-        run: supabase functions deploy homework-drive --project-ref "$PROJECT_ID"
+        run: supabase functions deploy homework-drive --project-ref "$PROJECT_ID" --yes
