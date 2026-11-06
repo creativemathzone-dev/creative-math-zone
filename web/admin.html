@@ -1505,7 +1505,9 @@ VIEWS.invoices = async main => {
         r.rows.map(inv =>
           '<tr class="click" data-inv="' + esc(inv.InvoiceID) + '">' +
           '<td data-l="Invoice"><b>' + esc(inv.InvoiceID) + '</b></td>' +
-          '<td data-l="Student">' + esc(inv.StudentName) + '<div class="muted" style="font-size:.82rem">' + esc(inv.StudentID) + '</div></td>' +
+          '<td data-l="Student">' + esc(inv.StudentName) +
+            (inv.CurrentBatchName ? '<div class="muted" style="font-size:.82rem">Batch: ' + esc(inv.CurrentBatchName) + '</div>' : '') +
+            '<div class="muted" style="font-size:.82rem">' + esc(inv.StudentID) + '</div></td>' +
           '<td data-l="Class / subjects">' + esc(inv.Classes || 'No subject details') + '</td>' +
           '<td data-l="Month">' + esc(inv.MonthLabel) + '</td>' +
           '<td data-l="Total">₹' + inv.TotalAmount.toLocaleString('en-IN') + '</td>' +
@@ -1570,7 +1572,10 @@ VIEWS.invoice = async (main, invoiceId) => {
   main.innerHTML =
     '<p><button class="link" data-back>← All invoices</button></p>' +
     '<div class="head"><div><h1>' + esc(inv.MonthLabel) + ' · ' + esc(inv.StudentName) + '</h1>' +
-      '<p>' + esc(inv.InvoiceID) + ' · ' + esc(inv.StudentID) + ' · Due ' + esc(fmtDate(inv.DueDate)) + ' · ' + invoiceStatusPill(inv.Status) + '</p></div>' +
+      '<p>' + esc(inv.InvoiceID) + ' · ' + esc(inv.StudentID) +
+        (inv.CurrentClass ? ' · Class ' + esc(inv.CurrentClass) : '') +
+        (inv.CurrentBatchName ? ' · Batch ' + esc(inv.CurrentBatchName) : '') +
+        ' · Due ' + esc(fmtDate(inv.DueDate)) + ' · ' + invoiceStatusPill(inv.Status) + '</p></div>' +
       (canEdit && !isCancelled && !isPaid ? '<button class="btn danger" id="inv-cancel">Cancel invoice</button>' : '') + '</div>' +
 
     '<div class="stats">' +
@@ -1662,7 +1667,9 @@ VIEWS.receipts = async main => {
           '<tr class="click" data-rc="' + esc(r.ReceiptID) + '">' +
           '<td data-l="Receipt"><b>' + esc(r.ReceiptID) + '</b></td>' +
           '<td data-l="Date">' + esc(fmtDate(r.ReceiptDate)) + '</td>' +
-          '<td data-l="Student">' + esc(r.StudentName) + '<div class="muted" style="font-size:.82rem">' + esc(r.StudentID) + '</div></td>' +
+          '<td data-l="Student">' + esc(r.StudentName) +
+            (r.CurrentBatchName ? '<div class="muted" style="font-size:.82rem">Batch: ' + esc(r.CurrentBatchName) + '</div>' : '') +
+            '<div class="muted" style="font-size:.82rem">' + esc(r.StudentID) + '</div></td>' +
           '<td data-l="Class / subjects">' + esc(r.Classes || 'Unallocated / advance') + '</td>' +
           '<td data-l="Amount"><b>₹' + r.Amount.toLocaleString('en-IN') + '</b></td>' +
           '<td>' + pill(r.Status) + '</td>' +
@@ -1731,7 +1738,9 @@ VIEWS.receipt = async (main, receiptId) => {
 
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">' +
         '<div><div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem">Received from</div>' +
-          (st ? '<div><b>' + esc(st.Name) + '</b></div><div class="muted" style="font-size:.85rem">' + esc(st.StudentID) + ' · Class ' + esc(st.CurrentClass) + '</div>' +
+          (st ? '<div><b>' + esc(st.Name) + '</b></div><div class="muted" style="font-size:.85rem">' + esc(st.StudentID) +
+                (st.CurrentClass ? ' · Class ' + esc(st.CurrentClass) : '') +
+                (st.CurrentBatchName ? ' · Batch ' + esc(st.CurrentBatchName) : '') + '</div>' +
                 (st.ParentName ? '<div class="muted" style="font-size:.82rem">Parent: ' + esc(st.ParentName) + (st.Mobile ? ' · ' + esc(st.Mobile) : '') + '</div>' : '')
               : '') +
         '</div>' +

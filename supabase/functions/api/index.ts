@@ -1794,14 +1794,19 @@ Deno.serve(async (request) => {
       const { data, error } = await query
       if (error) throw error
       const studentIds = [...new Set((data || []).map((r) => r.student_id))]
-      const { data: students, error: studentsError } = await admin.from('students').select('id,name,current_class').in('id', studentIds.length ? studentIds : ['__none__'])
+      const { data: students, error: studentsError } = await admin.from('students').select('id,name,current_class,current_batch_id').in('id', studentIds.length ? studentIds : ['__none__'])
       if (studentsError) throw studentsError
       const studentMap = new Map((students || []).map((s) => [s.id, s]))
+      const batchIds = [...new Set((students || []).map((s) => s.current_batch_id).filter(Boolean))]
+      const { data: batches, error: batchesError } = batchIds.length
+        ? await admin.from('batches').select('id,name').in('id', batchIds) : { data: [], error: null }
+      if (batchesError) throw batchesError
+      const batchNames = new Map((batches || []).map((b) => [b.id, b.name]))
       const invoiceLines = new Map((data || []).map((r) => [r.id, normalizedInvoiceLines(r).map((line) => String(line.subjectName || line.subjectId || 'Unspecified'))]))
       let rows = (data || []).map((r) => {
         const student = studentMap.get(r.student_id)
         return { InvoiceID: r.id, StudentID: r.student_id, StudentName: student?.name || r.student_id,
-          CurrentClass: student?.current_class || '', Month: r.month, MonthLabel: monthLabel(r.month),
+          CurrentClass: student?.current_class || '', CurrentBatchName: batchNames.get(student?.current_batch_id) || '', Month: r.month, MonthLabel: monthLabel(r.month),
           Classes: (invoiceLines.get(r.id) || []).join(', '),
           TotalAmount: Number(r.total_amount) || 0, PaidAmount: Number(r.paid_amount) || 0,
           BalanceAmount: Math.max(0, Number(r.total_amount) - Number(r.paid_amount)), DueDate: r.due_date,
@@ -1826,15 +1831,18 @@ Deno.serve(async (request) => {
       if (error || paymentsError) throw error || paymentsError
       if (!invoice) throw new ApiFault('NOT_FOUND', 'Invoice not found.')
       const [{ data: student }, { data: subjects }] = await Promise.all([
-        admin.from('students').select('name,current_class').eq('id', invoice.student_id).maybeSingle(),
+        admin.from('students').select('name,current_class,current_batch_id').eq('id', invoice.student_id).maybeSingle(),
         admin.from('subjects').select('id,name'),
       ])
+      const { data: currentBatch } = student?.current_batch_id
+        ? await admin.from('batches').select('name').eq('id', student.current_batch_id).maybeSingle() : { data: null }
       const subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
       const lines = normalizedInvoiceLines(invoice).map((line) => ({ ...line,
         subjectName: line.subjectName || subjectNames.get(String(line.subjectId)) || String(line.subjectId || '') }))
       const total = Number(invoice.total_amount) || 0, paid = Number(invoice.paid_amount) || 0
       return response({ ok: true, data: { invoice: { InvoiceID: invoice.id, StudentID: invoice.student_id,
-        StudentName: student?.name || invoice.student_id, CurrentClass: student?.current_class || '', Month: invoice.month,
+        StudentName: student?.name || invoice.student_id, CurrentClass: student?.current_class || '',
+        CurrentBatchName: currentBatch?.name || '', Month: invoice.month,
         MonthLabel: monthLabel(invoice.month), TotalAmount: total, PaidAmount: paid, BalanceAmount: Math.max(0, total - paid),
         DueDate: invoice.due_date, Status: invoiceStatus(total, paid, invoice.due_date, invoice.status),
         CreatedAt: invoice.created_at, UpdatedAt: invoice.updated_at }, lines,
@@ -1934,14 +1942,21 @@ Deno.serve(async (request) => {
         ? await admin.from('payments').select('id,allocations').in('id', paymentIds) : { data: [], error: null }
       if (paymentError) throw paymentError
       const ids = [...new Set((data || []).map((r) => r.student_id))]
-      const { data: students, error: studentsError } = await admin.from('students').select('id,name').in('id', ids.length ? ids : ['__none__'])
+      const { data: students, error: studentsError } = await admin.from('students').select('id,name,current_batch_id').in('id', ids.length ? ids : ['__none__'])
       if (studentsError) throw studentsError
+      const batchIds = [...new Set((students || []).map((s) => s.current_batch_id).filter(Boolean))]
+      const { data: batches, error: batchesError } = batchIds.length
+        ? await admin.from('batches').select('id,name').in('id', batchIds) : { data: [], error: null }
+      if (batchesError) throw batchesError
+      const studentMap = new Map((students || []).map((s) => [s.id, s]))
+      const batchNames = new Map((batches || []).map((b) => [b.id, b.name]))
       const names = new Map((students || []).map((s) => [s.id, s.name]))
       const rows = (data || []).filter((r) => !search || r.id.toLowerCase().includes(search) || r.student_id.toLowerCase().includes(search) ||
         String(names.get(r.student_id) || '').toLowerCase().includes(search)).slice(0, limit)
       const allocationLabels = new Map((payments || []).map((p) => [p.id, allocationsFromPayment(p.allocations).map((a) => a.subjectName).join(', ')]))
       return response({ ok: true, data: rows.map((r) => ({ ReceiptID: r.id, StudentID: r.student_id,
-        StudentName: names.get(r.student_id) || r.student_id, ReceiptDate: r.receipt_date, Amount: Number(r.amount),
+        StudentName: names.get(r.student_id) || r.student_id,
+        CurrentBatchName: batchNames.get(studentMap.get(r.student_id)?.current_batch_id) || '', ReceiptDate: r.receipt_date, Amount: Number(r.amount),
         Classes: allocationLabels.get(r.payment_id) || '', Status: r.status, CreatedBy: r.created_by || '' })) })
     }
 
@@ -1955,6 +1970,8 @@ Deno.serve(async (request) => {
         admin.from('students').select('*').eq('id', receipt.student_id).maybeSingle(),
         admin.from('settings').select('setting_key,value').in('setting_key', ['CENTRE_NAME','TAGLINE','ADDRESS','MOBILE','EMAIL','WEBSITE','ACADEMIC_YEAR']),
       ])
+      const { data: currentBatch } = student?.current_batch_id
+        ? await admin.from('batches').select('name').eq('id', student.current_batch_id).maybeSingle() : { data: null }
       const settingMap = Object.fromEntries((settings || []).map((r) => [r.setting_key, r.value]))
       let invoiceData = null
       if (payment?.invoice_id) {
@@ -1968,7 +1985,7 @@ Deno.serve(async (request) => {
         payment: payment ? { PaymentID: payment.id, Mode: payment.payment_mode, Reference: payment.transaction_reference,
           Notes: payment.notes, PaymentDate: payment.payment_date, Allocations: allocationsFromPayment(payment.allocations) } : null,
         invoice: invoiceData, student: student ? { StudentID: student.id, Name: student.name, CurrentClass: student.current_class,
-          CurrentBatch: student.current_batch_id, ParentName: student.parent_name, Mobile: student.mobile || student.parent_mobile } : null,
+          CurrentBatch: student.current_batch_id, CurrentBatchName: currentBatch?.name || '', ParentName: student.parent_name, Mobile: student.mobile || student.parent_mobile } : null,
         centre: { name: settingMap.CENTRE_NAME || 'Creative Math Zone', tagline: settingMap.TAGLINE || '', address: settingMap.ADDRESS || '',
           mobile: settingMap.MOBILE || '', email: settingMap.EMAIL || '', website: settingMap.WEBSITE || '',
           academicYear: settingMap.ACADEMIC_YEAR || '2026-27' } } })
