@@ -9,6 +9,8 @@
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <script src="./pwa.js" defer></script>
 <script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
+<script src="passkeys.js"></script>
 <title>Creative Math Zone · Student</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -384,6 +386,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" class="btn small" data-show="password">Show</button></div>
       </label>
       <button class="btn primary" style="width:100%" id="lg-btn">Sign in</button>
+      <button class="btn" style="width:100%;margin-top:.65rem" id="passkey-login" type="button">Sign in with passkey</button>
       <p style="text-align:center;margin-top:1rem" class="muted" id="lg-foot"></p>
       <p style="text-align:center;margin:.25rem 0 0" class="muted"><span id="lg-reg-wrap" class="hidden">New student? <button type="button" class="link" id="go-register">Register here</button> · </span><button type="button" class="link" id="go-status">Check request status</button></p>
     </form>
@@ -425,7 +428,8 @@ document.addEventListener('DOMContentLoaded', function () {
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
-const S = { token:null, user:null, cfg:{}, view:'dashboard' };
+const S = { token:null, refreshToken:null, user:null, cfg:{}, view:'dashboard' };
+if(window.CMZPasskey)window.CMZPasskey.watch(session=>{if(!session)return;S.token=session.access_token;S.refreshToken=session.refresh_token;try{sessionStorage.setItem('cmz_st',S.token);sessionStorage.setItem('cmz_sr',S.refreshToken)}catch(e){}});
 const $ = (s,r) => (r||document).querySelector(s);
 const $$ = (s,r) => Array.from((r||document).querySelectorAll(s));
 const esc = v => String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -513,13 +517,14 @@ document.addEventListener('click', ev => {
 /* ---- sign in/out ---- */
 function signedOut(msg) {
   if(classChangeWatcher){clearInterval(classChangeWatcher);classChangeWatcher=null;}
-  S.token=null; S.user=null; try { sessionStorage.removeItem('cmz_st'); } catch(e){}
+  S.token=null; S.refreshToken=null; S.user=null; try { sessionStorage.removeItem('cmz_st');sessionStorage.removeItem('cmz_sr'); } catch(e){}
+  if(window.CMZPasskey)window.CMZPasskey.signOut();
   closeDlg(); show('login');
   $('#lg-msg').innerHTML = msg ? '<div class="alert warn">'+esc(msg)+'</div>' : '';
 }
 function afterAuth(user, token) {
   S.token=token; S.user=user;
-  try { sessionStorage.setItem('cmz_st', token); } catch(e){}
+  try { sessionStorage.setItem('cmz_st', token); if (S.refreshToken) sessionStorage.setItem('cmz_sr', S.refreshToken); } catch(e){}
   if (user.mustChangePassword) { show('forcepw'); $('#pw-form').reset(); $('#pw-msg').innerHTML=''; return; }
   startApp();
 }
@@ -538,9 +543,26 @@ $('#login-form').addEventListener('submit', async ev => {
   try {
     const r = await api('auth.login', { username:u, password:p, portal:'STUDENT' });
     f.elements.password.value='';
+    S.refreshToken = r.refreshToken || null;
+    if (window.CMZPasskey && r.refreshToken) await window.CMZPasskey.setSession(r.token, r.refreshToken);
     if (window.cmzSplash && !r.user.mustChangePassword) cmzSplash(r.user.displayName, S.cfg.logoUrl); afterAuth(r.user, r.token);
   } catch (e) { $('#lg-msg').innerHTML='<div class="alert bad">'+esc(e.error||'Could not sign in.')+'</div>'; }
   finally { btn.disabled=false; btn.textContent='Sign in'; }
+});
+$('#passkey-login').addEventListener('click', async ev => {
+  const button=ev.currentTarget; button.disabled=true; button.textContent='Waiting for passkey…'; $('#lg-msg').innerHTML='';
+  try {
+    if (!window.CMZPasskey) throw { error:'Passkey sign-in is unavailable. Use your Student ID and password.' };
+    const result=await window.CMZPasskey.signIn(); if(result.error)throw result;
+    if(!result.session)throw {error:'No passkey session was returned. Use your Student ID and password.'};
+    const session=result.session; S.token=session.access_token; S.refreshToken=session.refresh_token;
+    const me=await api('auth.me');
+    if(me.userType!=='STUDENT'){await window.CMZPasskey.signOut();throw {error:'This passkey belongs to a different portal.'};}
+    const user={userId:me.userId,username:me.username,userType:me.userType,role:me.role,linkedId:me.linkedId,
+      displayName:(me.profile&&me.profile.Name)||me.username,mustChangePassword:me.mustChangePassword,permissions:me.permissions,profile:me.profile};
+    afterAuth(user,session.access_token);
+  } catch(e){if(window.CMZPasskey)await window.CMZPasskey.signOut();S.token=null;S.refreshToken=null;try{sessionStorage.removeItem('cmz_st');sessionStorage.removeItem('cmz_sr')}catch(x){}$('#lg-msg').innerHTML='<div class="alert bad">'+esc(e.error||e.message||'Passkey sign-in failed. Use your Student ID and password.')+'</div>';}
+  finally{button.disabled=false;button.textContent='Sign in with passkey';}
 });
 $('#pw-form').addEventListener('submit', async ev => {
   ev.preventDefault(); const f=ev.target.elements, btn=$('#pw-btn');
@@ -548,7 +570,9 @@ $('#pw-form').addEventListener('submit', async ev => {
   btn.disabled=true; $('#pw-msg').innerHTML='';
   try {
     const r = await api('auth.changePassword', { oldPassword:f.oldPassword.value, newPassword:f.newPassword.value });
-    S.token=r.token; try { sessionStorage.setItem('cmz_st', r.token); } catch(e){}
+    S.token=r.token; S.refreshToken=r.refreshToken||null;
+    if(window.CMZPasskey&&S.refreshToken)await window.CMZPasskey.setSession(S.token,S.refreshToken);
+    try { sessionStorage.setItem('cmz_st', r.token); if(S.refreshToken)sessionStorage.setItem('cmz_sr',S.refreshToken); } catch(e){}
     S.user.mustChangePassword=false; startApp(); toast('Password changed.');
   } catch (e) {
     if (SESSION_CODES.indexOf(e.code)>=0) signedOut(e.error); else $('#pw-msg').innerHTML='<div class="alert bad">'+esc(e.error)+'</div>';
@@ -839,7 +863,10 @@ VIEWS.profile = async main => {
       '<label class="f full"><span>Current password</span><input name="old" type="password" required></label>' +
       '<label class="f"><span>New password</span><input name="n1" type="password" required><small>At least 6 characters.</small></label>' +
       '<label class="f"><span>Confirm new password</span><input name="n2" type="password" required></label>' +
-    '</div><button class="btn" id="pw2-btn">Update password</button></form></div>';
+    '</div><button class="btn" id="pw2-btn">Update password</button></form></div>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Passkey sign-in</h2><p class="muted">Use your device passkey: fingerprint, face, device PIN, or a security key.</p><div id="passkey-list"></div><button class="btn primary" id="passkey-add" type="button">Add a passkey on this device</button></div>';
+
+  if(window.CMZPasskey)window.CMZPasskey.renderManager($('#passkey-list'),$('#passkey-add'),esc,toast);
 
   $('#prof-save').addEventListener('click', ev => busy(ev.target, async () => {
     const f=ev.target.form; const changes={};
@@ -854,7 +881,9 @@ VIEWS.profile = async main => {
     const f=ev.target.elements;
     if (f.n1.value !== f.n2.value) { toast('The two new passwords do not match.', true); return; }
     const r = await api('auth.changePassword', { oldPassword:f.old.value, newPassword:f.n1.value });
-    S.token=r.token; try { sessionStorage.setItem('cmz_st', r.token); } catch(e){}
+    S.token=r.token; S.refreshToken=r.refreshToken||null;
+    if(window.CMZPasskey&&S.refreshToken)await window.CMZPasskey.setSession(S.token,S.refreshToken);
+    try { sessionStorage.setItem('cmz_st', r.token); if(S.refreshToken)sessionStorage.setItem('cmz_sr',S.refreshToken); } catch(e){}
     toast('Password changed.'); ev.target.reset();
   }); });
 };
@@ -1121,9 +1150,10 @@ $('#go-status').addEventListener('click', () => openStatus());
     $('#lg-foot').textContent = 'Academic year ' + (c.academicYear||'');
     if (c.registrationEnabled) $('#lg-reg-wrap').classList.remove('hidden');
   } catch (e) {}
-  let saved = null; try { saved = sessionStorage.getItem('cmz_st'); } catch(e){}
+  let saved = null; try { saved = sessionStorage.getItem('cmz_st'); S.refreshToken=sessionStorage.getItem('cmz_sr'); } catch(e){}
   if (saved) {
     S.token = saved;
+    if(window.CMZPasskey&&S.refreshToken){const restored=await window.CMZPasskey.setSession(saved,S.refreshToken);if(restored.session){S.token=restored.session.access_token;S.refreshToken=restored.session.refresh_token;}}
     try {
       const me = await api('auth.me');
       if (me.userType !== 'STUDENT') throw { code:'SESSION_EXPIRED' };
@@ -1132,7 +1162,7 @@ $('#go-status').addEventListener('click', () => openStatus());
                  profile: me.profile };
       if (me.mustChangePassword) show('forcepw'); else startApp();
       return;
-    } catch (e) { S.token=null; try { sessionStorage.removeItem('cmz_st'); } catch(x){} }
+    } catch (e) { S.token=null; try { sessionStorage.removeItem('cmz_st');sessionStorage.removeItem('cmz_sr'); } catch(x){} }
   }
   show('login');
 })();

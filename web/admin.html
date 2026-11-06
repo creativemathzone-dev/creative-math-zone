@@ -9,6 +9,8 @@
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <script src="./pwa.js" defer></script>
 <script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
+<script src="passkeys.js"></script>
 <title>Creative Math Zone · Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -388,6 +390,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" class="btn small" data-show="password">Show</button></div>
       </label>
       <button class="btn primary" style="width:100%" id="lg-btn">Sign in</button>
+      <button class="btn" style="width:100%;margin-top:.65rem" id="passkey-login" type="button">Sign in with passkey</button>
     </form>
   </div>
 </section>
@@ -428,7 +431,11 @@ document.addEventListener('DOMContentLoaded', function () {
    Creative Math Zone — Admin portal
    The browser never touches the Sheet: every action goes through api().
    ===================================================================== */
-const S = { token: null, user: null, cfg: {}, view: 'dashboard', L: {}, perms: [] };
+const S = { token: null, refreshToken: null, user: null, cfg: {}, view: 'dashboard', L: {}, perms: [] };
+if (window.CMZPasskey) window.CMZPasskey.watch(session => {
+  if (!session) return; S.token=session.access_token; S.refreshToken=session.refresh_token;
+  try { sessionStorage.setItem('cmz_t', S.token); sessionStorage.setItem('cmz_tr', S.refreshToken); } catch(e) {}
+});
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -566,7 +573,9 @@ const activeOnly = list => L(list).filter(x => String(x.Status).toUpperCase() ==
 /* ---------- sign in / out ---------- */
 function signedOut(msg) {
   if (S.token) { try { sessionStorage.removeItem('cmz_t'); } catch (e) {} }
-  stopLive(); S.token = null; S.user = null; S.perms = []; S.L = {};
+  try { sessionStorage.removeItem('cmz_tr'); } catch(e) {}
+  if (window.CMZPasskey) window.CMZPasskey.signOut();
+  stopLive(); S.token = null; S.refreshToken=null; S.user = null; S.perms = []; S.L = {};
   closeDlg(); show('login');
   $('#lg-msg').innerHTML = msg ? '<div class="alert warn">' + esc(msg) + '</div>' : '';
 }
@@ -577,7 +586,7 @@ function startApp() {
 }
 function afterAuth(user, token) {
   S.token = token; S.user = user; S.perms = user.permissions || [];
-  try { sessionStorage.setItem('cmz_t', token); } catch (e) {}
+  try { sessionStorage.setItem('cmz_t', token); if (S.refreshToken) sessionStorage.setItem('cmz_tr', S.refreshToken); } catch (e) {}
   if (user.mustChangePassword) { show('forcepw'); $('#pw-form').reset(); $('#pw-msg').innerHTML = ''; $('#pw-form').elements.oldPassword.focus(); return; }
   startApp();
 }
@@ -589,9 +598,26 @@ $('#login-form').addEventListener('submit', async ev => {
   try {
     const r = await api('auth.login', { username: f.elements.username.value, password: f.elements.password.value, portal: 'ADMIN' });
     f.elements.password.value = '';
+    S.refreshToken = r.refreshToken || null;
+    if (window.CMZPasskey && r.refreshToken) await window.CMZPasskey.setSession(r.token, r.refreshToken);
     if (window.cmzSplash && !r.user.mustChangePassword) cmzSplash(r.user.displayName, S.cfg.logoUrl); afterAuth(r.user, r.token);
   } catch (e) { $('#lg-msg').innerHTML = '<div class="alert bad">' + esc(e.error || 'Could not sign in.') + '</div>'; }
   finally { btn.disabled = false; btn.textContent = 'Sign in'; }
+});
+$('#passkey-login').addEventListener('click', async ev => {
+  const button = ev.currentTarget; button.disabled = true; button.textContent = 'Waiting for passkey…'; $('#lg-msg').innerHTML = '';
+  try {
+    if (!window.CMZPasskey) throw { error: 'Passkey sign-in is unavailable. Use your username and password.' };
+    const result = await window.CMZPasskey.signIn(); if (result.error) throw result;
+    if (!result.session) throw { error: 'No passkey session was returned. Use your username and password.' };
+    const session = result.session; S.token = session.access_token; S.refreshToken = session.refresh_token;
+    const me = await api('auth.me');
+    if (me.userType !== 'ADMIN') { await window.CMZPasskey.signOut(); throw { error: 'This passkey belongs to a different portal.' }; }
+    const user = { userId:me.userId, username:me.username, userType:me.userType, role:me.role, linkedId:me.linkedId,
+      displayName:(me.profile && me.profile.Name)||me.username, mustChangePassword:me.mustChangePassword, permissions:me.permissions };
+    afterAuth(user, session.access_token);
+  } catch (e) { if(window.CMZPasskey)await window.CMZPasskey.signOut(); S.token=null; S.refreshToken=null; try{sessionStorage.removeItem('cmz_t');sessionStorage.removeItem('cmz_tr')}catch(x){} $('#lg-msg').innerHTML = '<div class="alert bad">' + esc(e.error || e.message || 'Passkey sign-in failed. Use your username and password.') + '</div>'; }
+  finally { button.disabled = false; button.textContent = 'Sign in with passkey'; }
 });
 document.addEventListener('click', ev => {
   const sh = ev.target.closest('[data-show]');
@@ -605,7 +631,9 @@ $('#pw-form').addEventListener('submit', async ev => {
   btn.disabled = true; $('#pw-msg').innerHTML = '';
   try {
     const r = await api('auth.changePassword', { oldPassword: f.oldPassword.value, newPassword: f.newPassword.value });
-    S.token = r.token; try { sessionStorage.setItem('cmz_t', r.token); } catch (e) {}
+    S.token = r.token; S.refreshToken = r.refreshToken || null;
+    if (window.CMZPasskey && S.refreshToken) await window.CMZPasskey.setSession(S.token, S.refreshToken);
+    try { sessionStorage.setItem('cmz_t', r.token); if (S.refreshToken) sessionStorage.setItem('cmz_tr', S.refreshToken); } catch (e) {}
     S.user.mustChangePassword = false; startApp(); toast('Password changed.');
   } catch (e) {
     if (SESSION_CODES.indexOf(e.code) >= 0) signedOut(e.error); else $('#pw-msg').innerHTML = '<div class="alert bad">' + esc(e.error) + '</div>';
@@ -794,7 +822,7 @@ VIEWS.student = async (main, id) => {
       toast('Saved.'); go('student', id);
     }); });
     $('#reset-pw').addEventListener('click', () => { if (confirm('Make a new temporary password for ' + s.Name + '? Their current password will stop working.')) busy($('#reset-pw'), async () => {
-      const r = await api('students.resetPassword', { studentId: id }); credentials('New temporary password', r.username, r.tempPassword); }); });
+      const r = await api('students.resetPassword', { studentId: id }); credentials('New temporary password', r.username, r.tempPassword, (r.sessionsRevoked === false ? 'Password reset completed, but Supabase could not confirm that every old session was revoked. ' : '') + 'Registered passkeys were removed. Give this temporary password to the student; they must set a new password, then add a passkey on their replacement device.'); }); });
     wireSubjectPanel(s, id, subjRows);
   }
 
@@ -1121,7 +1149,7 @@ VIEWS.teachers = async main => {
       '<div class="card empty"><b>No teachers yet</b>' + (can('TEACHER_EDIT') ? 'Use “Add teacher” to create the first one.' : '') + '</div>');
   $$('[data-edit]', main).forEach(b => b.addEventListener('click', () => teacherDialog(T.find(x => x.TeacherID === b.dataset.edit))));
   $$('[data-reset]', main).forEach(b => b.addEventListener('click', () => { const t = T.find(x => x.TeacherID === b.dataset.reset);
-    if (confirm('Make a new temporary password for ' + t.Name + '? Their current password will stop working.')) busy(b, async () => { const r = await api('teachers.resetPassword', { teacherId: t.TeacherID }); credentials('New temporary password', r.username, r.tempPassword); }); }));
+    if (confirm('Make a new temporary password for ' + t.Name + '? Their current password will stop working.')) busy(b, async () => { const r = await api('teachers.resetPassword', { teacherId: t.TeacherID }); credentials('New temporary password', r.username, r.tempPassword, (r.sessionsRevoked === false ? 'Password reset completed, but Supabase could not confirm that every old session was revoked. ' : '') + 'Registered passkeys were removed. Give this temporary password to the teacher; they must set a new password, then add a passkey on their replacement device.'); }); }));
 };
 
 /* ---------- subjects / batches / rooms ---------- */
@@ -2303,9 +2331,11 @@ VIEWS.settings = async main => {
     driveConnections=await api('drive.connections.list');
   }
   main.innerHTML = '<div class="head"><div><h1>Settings</h1><p>Changes apply straight away. Nothing else needs editing in the code.</p></div>' + (edit ? '<button class="btn primary" id="set-save">Save changes</button>' : '') + '</div>' +
+    '<section class="section"><h2>Passkey sign-in</h2><div class="card"><p>Use this device’s passkey (fingerprint, face, device PIN, or security key) for future sign-ins.</p><div id="passkey-list"><span class="muted">Loading passkeys…</span></div><button class="btn primary" id="passkey-add" type="button">Add a passkey on this device</button></div></section>' +
     '<div class="card"><form id="set-f">' + rows.map(r => '<label class="f"><span>' + esc(r.description || r.key) + '</span><input name="' + esc(r.key) + '" value="' + esc(r.value) + '"' + (edit ? '' : ' readonly') + '><small>' + esc(r.key) +
       (r.key === 'SUBJECT_BLOCKED_PAIRS' ? ' — subject IDs: ' + L('subjects').map(s => s.SubjectID + ' = ' + s.SubjectName).join(', ') : '') + '</small></label>').join('') + '</form></div>' +
     (superAdmin?'<section class="section"><h2>Homework file archive</h2><div class="card"><p>Connect the centre Google account used to archive homework and student submissions after deadlines. Older accounts stay connected so archived files remain available. Use transfer to move an old account’s archive to the current account; it disconnects the old account after all files move.</p><div id="drive-connections">'+(driveConnections.length?driveConnections.map(c=>'<div class="row" style="padding:.65rem 0;border-top:1px solid var(--line)"><b>'+esc(c.account_email)+'</b><span class="pill '+(c.is_primary?'ok':'')+'">'+(c.is_primary?'Current archive account':'Previous archive account')+'</span>'+(c.is_primary?'':'<button class="btn small" data-drive-transfer="'+esc(c.id)+'">Transfer archive and disconnect</button>')+'</div>').join(''):'<p class="muted">No Google Drive account connected yet.</p>')+'</div><button class="btn primary" id="drive-connect">Connect / change Google account</button><p class="muted" style="margin-bottom:0">Files remain in Supabase if Drive is not connected or an upload fails. Drive copies are kept until a teacher deletes them from the homework page.</p></div></section>':'');
+  if (window.CMZPasskey) window.CMZPasskey.renderManager($('#passkey-list'), $('#passkey-add'), esc, toast);
   if(superAdmin){
     $('#drive-connect').addEventListener('click',ev=>busy(ev.target,async()=>{const result=await api('drive.oauthStart');location.href=result.url;}));
     $$('[data-drive-transfer]',main).forEach(button=>button.addEventListener('click',()=>{const primary=driveConnections.find(c=>c.is_primary);if(!primary){fail({error:'Connect the new Google Drive account first.'});return;}if(!confirm('Copy this old account’s archived homework files into '+primary.account_email+'? The old connection will be removed after every file transfers.'))return;busy(button,async()=>{const cfg=window.CMZ_CONFIG||{},res=await fetch(cfg.supabaseUrl.replace(/\/$/,'')+'/functions/v1/homework-drive',{method:'POST',headers:{'Content-Type':'application/json',apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+S.token},body:JSON.stringify({action:'transfer',sourceConnectionId:button.dataset.driveTransfer,targetConnectionId:primary.id})}),data=await res.json();if(!res.ok)throw {error:data.error||'Transfer failed.'};toast(data.transferred+' archived file(s) transferred; '+data.remaining+' remaining.');go('settings');});}));
@@ -2333,7 +2363,7 @@ VIEWS.users = async main => {
     d => $('#ua-save', d).addEventListener('click', ev => busy(ev.target, async () => { if (!validForm(d)) return;
       const r = await api('users.createAdmin', { username: $('[name=username]', d).value.trim() }); closeDlg(); credentials('Accounts Admin login', r.username, r.tempPassword); go('users'); }))));
   $$('[data-rp]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.rp);
-    if (confirm('Make a new temporary password for ' + u.Username + '? They will be signed out.')) busy(b, async () => { const r = await api('users.resetPassword', { userId: u.UserID }); credentials('New temporary password', r.username, r.tempPassword); }); }));
+    if (confirm('Make a new temporary password for ' + u.Username + '? They will be signed out.')) busy(b, async () => { const r = await api('users.resetPassword', { userId: u.UserID }); credentials('New temporary password', r.username, r.tempPassword, (r.sessionsRevoked === false ? 'Password reset completed, but Supabase could not confirm that every old session was revoked. ' : '') + 'Registered passkeys were removed. Give this temporary password to the user; they must set a new password, then add a passkey on their replacement device.'); }); }));
   $$('[data-st]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.st), to = u.Status === 'Active' ? 'Inactive' : 'Active';
     if (confirm((to === 'Inactive' ? 'Disable ' : 'Enable ') + u.Username + '?' + (to === 'Inactive' ? ' They will be signed out immediately.' : ''))) busy(b, async () => { await api('users.setStatus', { userId: u.UserID, status: to }); toast(u.Username + (to === 'Inactive' ? ' disabled.' : ' enabled.')); go('users'); }); }));
   $$('[data-pm]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.pm), have = userExtraPermissions(u.ExtraPermissions);
@@ -2433,13 +2463,14 @@ $('#live-btn').addEventListener('click', () => busy($('#live-btn'), () => liveRe
     if (c.tagline) $('#lg-tagline').textContent = c.tagline;
     document.title = c.centreName + ' · Admin';
   } catch (e) { /* login still works if config fails */ }
-  let saved = null; try { saved = sessionStorage.getItem('cmz_t'); } catch (e) {}
+  let saved = null; try { saved = sessionStorage.getItem('cmz_t'); S.refreshToken=sessionStorage.getItem('cmz_tr'); } catch (e) {}
   if (saved) {
     S.token = saved;
+    if(window.CMZPasskey&&S.refreshToken){const restored=await window.CMZPasskey.setSession(saved,S.refreshToken);if(restored.session){S.token=restored.session.access_token;S.refreshToken=restored.session.refresh_token;}}
     try { const me = await api('auth.me'); S.user = { userId: me.userId, username: me.username, role: me.role, userType: me.userType, displayName: (me.profile && me.profile.Name) || me.username, mustChangePassword: me.mustChangePassword };
       if (me.userType !== 'ADMIN') throw { code: 'SESSION_EXPIRED' };
       S.perms = me.permissions; if (me.mustChangePassword) { show('forcepw'); } else startApp(); return; }
-    catch (e) { S.token = null; try { sessionStorage.removeItem('cmz_t'); } catch (x) {} }
+    catch (e) { S.token = null; try { sessionStorage.removeItem('cmz_t');sessionStorage.removeItem('cmz_tr'); } catch (x) {} }
   }
   show('login');
 })();

@@ -44,8 +44,36 @@ function clients() {
   if (!url || !publishable || !secret) throw new Error('Supabase function keys are not configured.')
   return {
     auth: createClient(url, publishable, { auth: { persistSession: false, autoRefreshToken: false } }),
-    admin: createClient(url, secret, { auth: { persistSession: false, autoRefreshToken: false } }),
+    admin: createClient(url, secret, { auth: { persistSession: false, autoRefreshToken: false, experimental: { passkey: true } } }),
   }
+}
+
+async function revokeUserPasskeys(admin: ReturnType<typeof clients>['admin'], authUserId: string) {
+  const passkeyAdmin = (admin.auth.admin as any).passkey
+  if (!passkeyAdmin?.listPasskeys || !passkeyAdmin?.deletePasskey) {
+    throw new ApiFault('PASSKEY_REVOCATION_FAILED', 'Could not verify or revoke this user’s device passkeys. The password was not reset; please retry or contact support.')
+  }
+  const { data, error } = await passkeyAdmin.listPasskeys({ userId: authUserId })
+  // If passkeys are disabled at the project level, none can authenticate; allow
+  // password recovery to continue. Any other listing/deletion error fails closed.
+  if (error && String(error.code || '').toLowerCase() === 'passkey_disabled') return
+  if (error) throw new ApiFault('PASSKEY_REVOCATION_FAILED', 'Could not verify this user’s registered passkeys. The password was not reset; please retry.')
+  for (const passkey of (Array.isArray(data) ? data : data?.passkeys || [])) {
+    const { error: deleteError } = await passkeyAdmin.deletePasskey({ userId: authUserId, passkeyId: passkey.id })
+    if (deleteError) throw new ApiFault('PASSKEY_REVOCATION_FAILED', 'Could not revoke every registered passkey. The password was not reset; please retry.')
+  }
+}
+
+async function revokeUserSessions(
+  auth: ReturnType<typeof clients>['auth'], admin: ReturnType<typeof clients>['admin'], email: string, password: string,
+) {
+  // Admin sign-out requires a valid JWT for the target user. Authenticate once
+  // with the newly issued temporary password, then revoke every refresh-token
+  // session, including the one created for this operation.
+  const { data, error } = await auth.auth.signInWithPassword({ email, password })
+  if (error || !data.session) return false
+  const { error: revokeError } = await (admin.auth.admin as any).signOut(data.session.access_token, 'global')
+  return !revokeError
 }
 
 function userClient(token: string) {
@@ -55,6 +83,24 @@ function userClient(token: string) {
     auth: { persistSession: false, autoRefreshToken: false },
     global: { headers: { Authorization: `Bearer ${token}` } },
   })
+}
+
+// The Auth server validates the signature and expiry in getUser(token). Read
+// only the iat claim from that already-verified JWT so a password reset can
+// invalidate this app's older access tokens immediately. JWT iat has seconds
+// precision, so tokens issued in the same second as the reset remain usable
+// for at most that one-second boundary.
+function verifiedTokenIssuedAt(token: string): number | null {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    const base64 = payload.replaceAll('-', '+').replaceAll('_', '/')
+    const claims = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')))
+    const issuedAt = Number(claims.iat)
+    return Number.isFinite(issuedAt) ? issuedAt : null
+  } catch {
+    return null
+  }
 }
 
 const cors = {
@@ -565,6 +611,13 @@ Deno.serve(async (request) => {
     if (authError || !authData.user) return response(fail('SESSION_EXPIRED', 'Your session has expired. Please sign in again.'))
     const { data: user, error: userError } = await admin.from('app_users').select('*').eq('auth_user_id', authData.user.id).maybeSingle()
     if (userError || !user || user.status.toUpperCase() !== 'ACTIVE') return response(fail('SESSION_REVOKED', 'This account is unavailable. Please contact the centre.'))
+    if (user.password_changed_at) {
+      const cutoff = Math.floor(new Date(user.password_changed_at).getTime() / 1000)
+      const issuedAt = verifiedTokenIssuedAt(token)
+      if (!Number.isFinite(cutoff) || issuedAt === null || issuedAt < cutoff) {
+        return response(fail('SESSION_REVOKED', 'Your password or account recovery details changed. Sign in again with your current password.'))
+      }
+    }
     if (user.must_change_password && action !== 'auth.me' && action !== 'auth.changePassword' && action !== 'auth.logout') {
       return response(fail('PASSWORD_CHANGE_REQUIRED', 'Please change your temporary password first.'))
     }
@@ -603,8 +656,14 @@ Deno.serve(async (request) => {
       if (verifyError) return response(fail('BAD_PASSWORD', 'Current password is incorrect.'))
       const { error: updateError } = await admin.auth.admin.updateUserById(authData.user.id, { password: newPassword })
       if (updateError) return response(fail('BAD_PASSWORD', 'Could not update the password.'))
-      await admin.from('app_users').update({ must_change_password: false, password_changed_at: new Date().toISOString() }).eq('id', user.id)
-      return response({ ok: true, data: { token, mustChangePassword: false } })
+      const changedAt = new Date().toISOString()
+      const { error: appUserUpdateError } = await admin.from('app_users').update({ must_change_password: false, password_changed_at: changedAt }).eq('id', user.id)
+      if (appUserUpdateError) throw appUserUpdateError
+      // Return a fresh token issued after the cutoff; the old token (and older
+      // tokens on other devices) will no longer pass the API's iat check.
+      const { data: refreshed, error: signInError } = await auth.auth.signInWithPassword({ email, password: newPassword })
+      if (signInError || !refreshed.session) throw new ApiFault('PASSWORD_UPDATED_SIGN_IN_FAILED', 'Password changed. Sign in again with your new password.')
+      return response({ ok: true, data: { token: refreshed.session.access_token, refreshToken: refreshed.session.refresh_token, mustChangePassword: false } })
     }
 
     if (action === 'auth.ping') return response({ ok: true, data: { alive: true, serverTime: new Date().toISOString() } })
@@ -1337,13 +1396,19 @@ Deno.serve(async (request) => {
       const { data: target, error: lookupError } = await admin.from('app_users').select('id,auth_user_id,username').eq('id', id).maybeSingle()
       if (lookupError) throw lookupError
       if (!target?.auth_user_id) throw new ApiFault('NOT_FOUND', 'User login account was not found.')
+      const { data: authTarget } = await admin.auth.admin.getUserById(target.auth_user_id)
+      const email = authTarget.user?.email
+      if (!email) throw new ApiFault('NOT_FOUND', 'User login account was not found.')
       const tempPassword = payload.password ? String(payload.password) : passwordTemp()
       if (tempPassword.length < 8 || tempPassword.length > 200) throw new ApiFault('BAD_PASSWORD', 'Password must be at least 8 characters.')
+      await revokeUserPasskeys(admin, target.auth_user_id)
       const { error } = await admin.auth.admin.updateUserById(target.auth_user_id, { password: tempPassword })
       if (error) throw new ApiFault('PASSWORD_UPDATE_FAILED', 'Could not reset this password.')
-      await admin.from('app_users').update({ must_change_password: true, password_changed_at: new Date().toISOString() }).eq('id', id)
+      const { error: appUserUpdateError } = await admin.from('app_users').update({ must_change_password: true, password_changed_at: new Date().toISOString() }).eq('id', id)
+      if (appUserUpdateError) throw appUserUpdateError
+      const sessionsRevoked = await revokeUserSessions(auth, admin, email, tempPassword)
       await logAction(admin, user, 'RESET_PASSWORD', 'USER', id, { username: target.username })
-      return response({ ok: true, data: { username: target.username, tempPassword } })
+      return response({ ok: true, data: { username: target.username, tempPassword, sessionsRevoked } })
     }
 
     if (action === 'users.setPermissions') {
@@ -2201,13 +2266,19 @@ Deno.serve(async (request) => {
         .eq('user_type', isStudent ? 'STUDENT' : 'TEACHER').eq('linked_id', linkedId).maybeSingle()
       if (userLookupError) throw userLookupError
       if (!linkedUser?.auth_user_id) throw new ApiFault('NOT_FOUND', 'No login account found for this record.')
+      const { data: authTarget } = await admin.auth.admin.getUserById(linkedUser.auth_user_id)
+      const email = authTarget.user?.email
+      if (!email) throw new ApiFault('NOT_FOUND', 'No login account found for this record.')
       const tempPassword = payload.password ? String(payload.password) : passwordTemp()
       if (tempPassword.length < 8 || tempPassword.length > 200) throw new ApiFault('BAD_PASSWORD', 'Password must be at least 8 characters.')
+      await revokeUserPasskeys(admin, linkedUser.auth_user_id)
       const { error } = await admin.auth.admin.updateUserById(linkedUser.auth_user_id, { password: tempPassword })
       if (error) throw new ApiFault('PASSWORD_UPDATE_FAILED', 'Could not reset this password.')
-      await admin.from('app_users').update({ must_change_password: true, password_changed_at: new Date().toISOString() }).eq('id', linkedUser.id)
+      const { error: appUserUpdateError } = await admin.from('app_users').update({ must_change_password: true, password_changed_at: new Date().toISOString() }).eq('id', linkedUser.id)
+      if (appUserUpdateError) throw appUserUpdateError
+      const sessionsRevoked = await revokeUserSessions(auth, admin, email, tempPassword)
       await logAction(admin, user, 'RESET_PASSWORD', isStudent ? 'STUDENT' : 'TEACHER', linkedId, { username: linkedUser.username })
-      return response({ ok: true, data: { username: linkedUser.username, tempPassword } })
+      return response({ ok: true, data: { username: linkedUser.username, tempPassword, sessionsRevoked } })
     }
 
     if (action === 'changes.list') {
