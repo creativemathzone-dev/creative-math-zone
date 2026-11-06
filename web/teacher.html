@@ -806,15 +806,23 @@ VIEWS.income = async main => {
   const d = await api('teacher.income');
   const totalFinal = d.income.reduce((a,x) => a + (Number(x.FinalPayable)||0), 0);
   const totalPaid = d.payments.reduce((a,x) => a + (Number(x.Amount)||0), 0);
+  const totalExpected = d.income.reduce((a,x) => a + (Number(x.ExpectedAmount)||0), 0);
+  const totalCollected = d.income.reduce((a,x) => a + (Number(x.CollectedAmount)||0), 0);
+  const totalDue = d.income.reduce((a,x) => a + (Number(x.OutstandingAmount)||0), 0);
+  const totalContribution = d.income.reduce((a,x) => a + (Number(x.InstituteContribution)||0), 0);
   main.innerHTML = '<div class="head"><h1>Income</h1><p>Monthly income and payments</p></div>' +
     '<div class="stats">' +
-      '<div class="card stat"><b>₹'+totalFinal.toLocaleString('en-IN')+'</b><span>Total earned</span></div>' +
-      '<div class="card stat"><b>₹'+totalPaid.toLocaleString('en-IN')+'</b><span>Total paid</span></div>' +
-      '<div class="card stat"><b>₹'+(totalFinal-totalPaid).toLocaleString('en-IN')+'</b><span>Balance</span></div>' +
+      '<div class="card stat"><b>₹'+totalExpected.toLocaleString('en-IN')+'</b><span>Expected student fees</span></div>' +
+      '<div class="card stat"><b>₹'+totalCollected.toLocaleString('en-IN')+'</b><span>Collected</span></div>' +
+      '<div class="card stat"><b>₹'+totalDue.toLocaleString('en-IN')+'</b><span>Still due from students</span></div>' +
+      '<div class="card stat"><b>₹'+totalContribution.toLocaleString('en-IN')+'</b><span>Institute contribution</span></div>' +
+      '<div class="card stat"><b>₹'+totalFinal.toLocaleString('en-IN')+'</b><span>Net payable</span></div>' +
+      '<div class="card stat"><b>₹'+totalPaid.toLocaleString('en-IN')+'</b><span>Paid to you</span></div>' +
+      '<div class="card stat"><b>₹'+Math.max(0,totalFinal-totalPaid).toLocaleString('en-IN')+'</b><span>Remaining balance</span></div>' +
     '</div>' +
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Monthly income</h2>' +
-      (d.income.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Month</th><th>Subject</th><th>Students</th><th>Rate</th><th>Gross</th><th>Adj</th><th>Final</th><th>Status</th></tr></thead><tbody>' +
-        d.income.map(x => '<tr><td data-l="Month">'+esc(x.Month)+'</td><td data-l="Subject">'+esc(x.SubjectName)+'</td><td data-l="Students">'+x.StudentCount+'</td><td data-l="Rate">₹'+x.Rate+'</td><td data-l="Gross">₹'+x.Gross+'</td><td data-l="Adj">₹'+x.Adjustment+'</td><td data-l="Final"><b>₹'+x.FinalPayable+'</b></td><td>'+pill(x.Status)+'</td></tr>').join('') + '</tbody></table></div>' : '<div class="muted">No income records yet.</div>') +
+      (d.income.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Month</th><th>Students</th><th>Expected</th><th>Collected</th><th>Still due</th><th>Institute contribution</th><th>Net payable</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>' +
+        d.income.map(x => '<tr><td data-l="Month">'+esc(x.Month)+(x.RecordType === 'LEGACY' ? '<div class="muted" style="font-size:.8rem">Earlier subject record · '+esc(x.SubjectName)+'</div>' : '')+'</td><td data-l="Students">'+x.StudentCount+(x.RecordType === 'MONTHLY' && x.StudentDetails.length ? '<details style="margin-top:.35rem"><summary>Student breakdown</summary><div class="tablewrap"><table><thead><tr><th>Student</th><th>Batch</th><th>Subject</th><th>Expected</th><th>Collected</th><th>Due</th></tr></thead><tbody>'+x.StudentDetails.map(s=>'<tr><td>'+esc(s.studentName)+'</td><td>'+esc(s.batchName||'—')+'</td><td>'+esc(s.subjectName)+'</td><td>₹'+Number(s.expectedAmount||0).toLocaleString('en-IN')+'</td><td>₹'+Number(s.collectedAmount||0).toLocaleString('en-IN')+'</td><td>₹'+Number(s.outstandingAmount||0).toLocaleString('en-IN')+'</td></tr>').join('')+'</tbody></table></div></details>' : '')+'</td><td data-l="Expected">'+(x.RecordType === 'MONTHLY' ? '₹'+Number(x.ExpectedAmount||0).toLocaleString('en-IN') : '—')+'</td><td data-l="Collected">'+(x.RecordType === 'MONTHLY' ? '₹'+Number(x.CollectedAmount||0).toLocaleString('en-IN') : '—')+'</td><td data-l="Still due">'+(x.RecordType === 'MONTHLY' ? '₹'+Number(x.OutstandingAmount||0).toLocaleString('en-IN') : '—')+'</td><td data-l="Institute contribution">'+(x.RecordType === 'MONTHLY' ? '₹'+Number(x.InstituteContribution||0).toLocaleString('en-IN') : '—')+'</td><td data-l="Net payable"><b>₹'+Number(x.FinalPayable||0).toLocaleString('en-IN')+'</b></td><td data-l="Paid">₹'+Number(x.PaidAmount||0).toLocaleString('en-IN')+'</td><td data-l="Balance">₹'+Number(x.BalanceAmount||0).toLocaleString('en-IN')+'</td><td>'+pill(x.Status)+'</td></tr>').join('') + '</tbody></table></div>' : '<div class="muted">No income records yet.</div>') +
     '</div>' +
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Payments received</h2>' +
       (d.payments.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Date</th><th>Amount</th><th>Mode</th><th>Notes</th></tr></thead><tbody>' +

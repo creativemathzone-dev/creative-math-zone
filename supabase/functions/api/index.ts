@@ -33,7 +33,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   MASTER_VIEW: 'View subjects, batches, rooms', MASTER_EDIT: 'Edit subjects, batches, rooms',
   SETTINGS_VIEW: 'View settings', SETTINGS_EDIT: 'Change settings', USER_MANAGE: 'Manage users',
   LOG_VIEW: 'View activity log', FINANCE_VIEW: 'View finance', FINANCE_EDIT: 'Record payments and fees',
-  TEACHER_INCOME_MANAGE: 'Manage teacher pay rates', TEACHER_INCOME_GRANT: 'Allow teachers to see their income',
+  TEACHER_INCOME_MANAGE: 'Manage teacher monthly statements and contributions', TEACHER_INCOME_GRANT: 'Allow teachers to see their income',
   REPORT_VIEW: 'View reports', NOTICE_EDIT: 'Post notices', ATTENDANCE_CORRECT: 'Correct attendance',
 }
 
@@ -315,6 +315,13 @@ function invoiceLines(row: Record<string, unknown>) {
   if (Array.isArray(value)) return value as Array<Record<string, unknown>>
   if (typeof value === 'string') { try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : [] } catch { return [] } }
   return []
+}
+
+function invoiceLinesForIncome(value: unknown) {
+  let lines: Array<Record<string, unknown>> = []
+  if (Array.isArray(value)) lines = value as Array<Record<string, unknown>>
+  else if (typeof value === 'string') { try { const parsed = JSON.parse(value); if (Array.isArray(parsed)) lines = parsed } catch { /* Ignore malformed legacy snapshots. */ } }
+  return lines.map((line) => ({ ...line, subjectId: String(line.subjectId || ''), finalAmount: Number(line.finalAmount) || 0 }))
 }
 
 function normalizedInvoiceLines(row: Record<string, unknown>) {
@@ -1766,6 +1773,7 @@ Deno.serve(async (request) => {
           const standard = feeOverride ? Number(feeOverride.standard_amount) : a.fee_override !== null ? Number(a.fee_override) : standardByKey.get(a.subject_id) || 0
           const discount = feeOverride ? Number(feeOverride.discount_amount) : 0
           return { subjectId: a.subject_id, subjectName: subjectNames.get(a.subject_id) || a.subject_id,
+            teacherId: a.teacher_id || '', batchId: a.batch_id || '',
             standardAmount: standard, discountAmount: discount, finalAmount: Math.max(0, standard - discount), paidAmount: 0 }
         }).filter((line) => line.finalAmount > 0)
         if (!lines.length) { result.skippedEmpty++; continue }
@@ -2895,45 +2903,127 @@ Deno.serve(async (request) => {
         const month = requireText(payload.month, 'Month', 7, true)
         if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new ApiFault('BAD_REQUEST', 'Pick a valid month (YYYY-MM).')
         const monthStart = `${month}-01`, monthEnd = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).toISOString().slice(0, 10)
-        const [{ data: teachers, error: tError }, { data: assignments, error: aError }, { data: students, error: sError }, { data: settings }] = await Promise.all([
-          admin.from('teachers').select('id,default_rate_per_student,status').eq('status', 'Active'),
-          admin.from('student_subjects').select('*').eq('status', 'ACTIVE'), admin.from('students').select('id,status'),
+        const [{ data: teachers, error: tError }, { data: assignments, error: aError }, { data: students, error: sError },
+          { data: feeRows, error: feeError }, { data: studentFees, error: studentFeeError }, { data: settings }] = await Promise.all([
+          admin.from('teachers').select('id,status').eq('status', 'Active'),
+          admin.from('student_subjects').select('*'), admin.from('students').select('id,name,status'),
+          admin.from('fee_structure').select('subject_id,amount,academic_year,status').eq('item_type', 'SUBJECT').eq('status', 'Active'),
+          admin.from('student_fees').select('*').eq('status', 'Active'),
           admin.from('settings').select('setting_key,value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle(),
         ])
         if (tError) throw tError; if (aError) throw aError; if (sError) throw sError
-        const activeStudentIds = new Set((students || []).filter((s) => s.status.toUpperCase() === 'ACTIVE').map((s) => s.id))
-        const teacherById = new Map((teachers || []).map((t) => [t.id, t]))
-        const counts = new Map<string, { teacherId: string; subjectId: string; students: Set<string>; rate: number }>()
-        for (const a of assignments || []) {
-          if (!a.teacher_id || !a.subject_id || !activeStudentIds.has(a.student_id) || !teacherById.has(a.teacher_id)) continue
-          if (a.start_date && a.start_date > monthEnd) continue
-          if (a.end_date && a.end_date < monthStart) continue
-          const key = `${a.teacher_id}|${a.subject_id}`, t = teacherById.get(a.teacher_id)!
-          const g = counts.get(key) || { teacherId: a.teacher_id, subjectId: a.subject_id, students: new Set<string>(), rate: Number(a.teacher_rate_override ?? t.default_rate_per_student) || 0 }
-          g.students.add(a.student_id); counts.set(key, g)
-        }
+        if (feeError) throw feeError; if (studentFeeError) throw studentFeeError
         const academicYear = String(settings?.value || `${month.slice(0, 4)}-${Number(month.slice(0, 4)) + 1}`)
-        const [{ data: existing, error: eError }, { data: subjects, error: subError }] = await Promise.all([
-          admin.from('teacher_income').select('*').eq('month', month).eq('academic_year', academicYear), admin.from('subjects').select('id,name'),
+        const [{ data: existing, error: eError }, { data: subjects, error: subError }, { data: batches, error: batchError }, { data: invoices, error: invoiceError }] = await Promise.all([
+          admin.from('teacher_income').select('*').eq('month', month).eq('academic_year', academicYear),
+          admin.from('subjects').select('id,name'), admin.from('batches').select('id,name'),
+          admin.from('invoices').select('id,student_id,line_items,status').eq('month', month).eq('academic_year', academicYear),
         ])
-        if (eError) throw eError; if (subError) throw subError
-        const oldRows = existing || [], oldByKey = new Map(oldRows.map((r) => [`${r.teacher_id}|${r.subject_id}`, r]))
-        const payments = await paidMap(oldRows.map((r) => r.id)), subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
-        let created = 0, refreshed = 0, skippedLocked = 0, skippedNoRate = 0
-        const rows: Record<string, unknown>[] = []
-        for (const [key, g] of counts) {
-          if (g.rate <= 0) { skippedNoRate++; continue }
-          const studentCount = g.students.size, gross = Math.round(studentCount * g.rate * 100) / 100, old = oldByKey.get(key)
-          if (old && (payments.get(old.id) || 0) > 0) { skippedLocked++; continue }
-          rows.push({ id: old?.id || await newId(admin, 'teacher_income', 'TI-', 5), teacher_id: g.teacherId, subject_id: g.subjectId,
-            month, student_count: studentCount, rate_per_student: g.rate, gross_income: gross,
-            adjustment: old?.adjustment || 0, adjustment_reason: old?.adjustment_reason || '', final_payable: Math.max(0, gross + (Number(old?.adjustment) || 0)),
-            status: 'Pending', academic_year: academicYear })
-          if (old) refreshed++; else created++
+        if (eError) throw eError; if (subError) throw subError; if (batchError) throw batchError; if (invoiceError) throw invoiceError
+        const activeStudentIds = new Set((students || []).filter((s) => String(s.status).toUpperCase() === 'ACTIVE').map((s) => s.id))
+        const teacherIds = new Set((teachers || []).map((t) => t.id))
+        const studentNames = new Map((students || []).map((s) => [s.id, s.name]))
+        const subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
+        const batchNames = new Map((batches || []).map((b) => [b.id, b.name]))
+        const standardBySubject = new Map((feeRows || []).filter((r) => r.academic_year === academicYear).map((r) => [r.subject_id, Number(r.amount) || 0]))
+        const studentFeeByKey = new Map<string, any>()
+        for (const fee of studentFees || []) {
+          if (fee.effective_from > monthEnd || (fee.effective_to && fee.effective_to < monthStart)) continue
+          const key = `${fee.student_id}|${fee.subject_id}`, prior = studentFeeByKey.get(key)
+          if (!prior || String(fee.effective_from) > String(prior.effective_from)) studentFeeByKey.set(key, fee)
         }
-        for (let i = 0; i < rows.length; i += 200) { const { error } = await admin.from('teacher_income').upsert(rows.slice(i, i + 200), { onConflict: 'teacher_id,subject_id,month,academic_year' }); if (error) throw error }
-        await logAction(admin, user, 'GENERATE_TEACHER_INCOME', 'TEACHER_INCOME', month, { created, refreshed, skippedLocked, skippedNoRate })
-        return response({ ok: true, data: { created, refreshed, skippedLocked, skippedNoRate } })
+        const candidates = (assignments || []).filter((a) => a.teacher_id && a.subject_id && activeStudentIds.has(a.student_id) && teacherIds.has(a.teacher_id) &&
+          (!a.start_date || a.start_date <= monthEnd) && (!a.end_date || a.end_date >= monthStart))
+        // When a subject was reassigned during a month, attribute the monthly fee
+        // once to the latest assignment overlapping that month.
+        const assignmentByKey = new Map<string, any>()
+        for (const a of candidates) {
+          const key = `${a.student_id}|${a.subject_id}`, prior = assignmentByKey.get(key)
+          if (!prior || String(a.start_date || '') > String(prior.start_date || '')) assignmentByKey.set(key, a)
+        }
+        const invoiceRows = (invoices || []).filter((r) => String(r.status).toUpperCase() !== 'CANCELLED')
+        const invoiceByStudent = new Map(invoiceRows.map((r) => [r.student_id, r]))
+        const invoiceIds = invoiceRows.map((r) => r.id)
+        const { data: studentPayments, error: studentPaymentsError } = invoiceIds.length
+          ? await admin.from('payments').select('invoice_id,allocations,status').in('invoice_id', invoiceIds)
+          : { data: [], error: null }
+        if (studentPaymentsError) throw studentPaymentsError
+        const subjectCollections = new Map<string, number>()
+        for (const payment of studentPayments || []) {
+          if (String(payment.status).toUpperCase() !== 'ACTIVE') continue
+          const invoice = invoiceRows.find((r) => r.id === payment.invoice_id)
+          if (!invoice) continue
+          const invoiceLines = new Map(invoiceLinesForIncome(invoice.line_items).map((line) => [line.subjectId, line]))
+          for (const allocation of allocationsFromPayment(payment.allocations)) {
+            const line: any = invoiceLines.get(allocation.subjectId)
+            const assigned = assignmentByKey.get(`${invoice.student_id}|${allocation.subjectId}`)
+            const teacherId = String(line?.teacherId || assigned?.teacher_id || '')
+            if (!teacherId) continue
+            const key = `${teacherId}|${invoice.student_id}|${allocation.subjectId}`
+            subjectCollections.set(key, (subjectCollections.get(key) || 0) + allocation.amount)
+          }
+        }
+        const groups = new Map<string, { details: any[]; students: Set<string>; expected: number; collected: number }>()
+        for (const [key, a] of assignmentByKey) {
+          const studentFee = studentFeeByKey.get(key)
+          const assignedFee = studentFee ? Number(studentFee.final_amount) || 0 : a.fee_override !== null && a.fee_override !== undefined
+            ? Number(a.fee_override) || 0 : standardBySubject.get(a.subject_id) || 0
+          const invoice = invoiceByStudent.get(a.student_id)
+          const invoiceLine: any = invoice ? invoiceLinesForIncome(invoice.line_items).find((line) => line.subjectId === a.subject_id) : null
+          const teacherId = String(invoiceLine?.teacherId || a.teacher_id)
+          const expected = invoiceLine ? Number(invoiceLine.finalAmount) || 0 : assignedFee
+          const collected = subjectCollections.get(`${teacherId}|${a.student_id}|${a.subject_id}`) || 0
+          const group = groups.get(teacherId) || { details: [], students: new Set<string>(), expected: 0, collected: 0 }
+          group.students.add(a.student_id)
+          group.expected += expected
+          group.collected += Math.min(expected, collected)
+          group.details.push({ studentId: a.student_id, studentName: studentNames.get(a.student_id) || a.student_id,
+            subjectId: a.subject_id, subjectName: subjectNames.get(a.subject_id) || a.subject_id,
+            batchId: a.batch_id || '', batchName: batchNames.get(a.batch_id) || '',
+            expectedAmount: Math.round(expected * 100) / 100, collectedAmount: Math.round(Math.min(expected, collected) * 100) / 100,
+            outstandingAmount: Math.max(0, Math.round((expected - Math.min(expected, collected)) * 100) / 100) })
+          groups.set(teacherId, group)
+        }
+        const oldRows = existing || [], oldMonthly = new Map(oldRows.filter((r) => !r.subject_id).map((r) => [r.teacher_id, r]))
+        const legacyByTeacher = new Map<string, any[]>()
+        for (const row of oldRows.filter((r) => r.subject_id)) legacyByTeacher.set(row.teacher_id, [...(legacyByTeacher.get(row.teacher_id) || []), row])
+        let created = 0, refreshed = 0
+        const monthlyIds = new Map<string, string>()
+        for (const [teacherId, g] of groups) {
+          const old = oldMonthly.get(teacherId), id = old?.id || await newId(admin, 'teacher_income', 'TI-', 5)
+          const expected = Math.round(g.expected * 100) / 100, collected = Math.round(g.collected * 100) / 100
+          const contribution = Number(old?.institute_contribution) || 0
+          const { error } = old
+            ? await admin.from('teacher_income').update({ student_count: g.students.size, rate_per_student: 0, gross_income: expected,
+                expected_amount: expected, collected_amount: collected, outstanding_amount: Math.max(0, expected - collected),
+                institute_contribution: contribution, adjustment: -contribution, adjustment_reason: contribution ? 'Institute contribution' : '',
+                final_payable: Math.max(0, collected - contribution), student_details: g.details, status: 'Pending' }).eq('id', id)
+            : await admin.from('teacher_income').insert({ id, teacher_id: teacherId, subject_id: null, month,
+                student_count: g.students.size, rate_per_student: 0, gross_income: expected, expected_amount: expected,
+                collected_amount: collected, outstanding_amount: Math.max(0, expected - collected), institute_contribution: 0,
+                adjustment: 0, adjustment_reason: '', final_payable: collected, student_details: g.details,
+                status: 'Pending', academic_year: academicYear })
+          if (error) throw error
+          monthlyIds.set(teacherId, id)
+          if (old) refreshed++; else created++
+          // Keep historical teacher payments intact while moving them under the
+          // single monthly record so they count against its remaining balance.
+          const legacyIds = (legacyByTeacher.get(teacherId) || []).map((r) => r.id)
+          if (legacyIds.length) {
+            const { error: moveError } = await admin.from('teacher_payments').update({ income_id: id }).in('income_id', legacyIds)
+            if (moveError) throw moveError
+            await admin.from('teacher_income').update({ status: 'SUPERSEDED' }).in('id', legacyIds)
+          }
+          const { data: teacherPaymentRows, error: teacherPaymentError } = await admin.from('teacher_payments').select('amount').eq('income_id', id)
+          if (teacherPaymentError) throw teacherPaymentError
+          const alreadyPaid = (teacherPaymentRows || []).reduce((sum, p) => sum + Number(p.amount || 0), 0)
+          const net = Math.max(alreadyPaid, Math.max(0, collected - contribution))
+          const { error: payableError } = await admin.from('teacher_income').update({ final_payable: net,
+            status: alreadyPaid >= net ? 'Paid' : alreadyPaid > 0 ? 'Partial' : 'Pending' }).eq('id', id)
+          if (payableError) throw payableError
+        }
+        await logAction(admin, user, 'GENERATE_TEACHER_INCOME', 'TEACHER_INCOME', month, { created, refreshed, model: 'STUDENT_FEES_LESS_INSTITUTE_CONTRIBUTION' })
+        return response({ ok: true, data: { created, refreshed, statementCount: monthlyIds.size } })
       }
       if (action === 'teacherIncome.list') {
         const month = requireText(payload.month, 'Month', 7), teacherId = requireText(payload.teacherId, 'Teacher ID', 60)
@@ -2943,12 +3033,49 @@ Deno.serve(async (request) => {
         const incomeRows = rows || [], ids = incomeRows.map((r) => r.id), paid = await paidMap(ids)
         const [{ data: teachers }, { data: subjects }] = await Promise.all([admin.from('teachers').select('id,name'), admin.from('subjects').select('id,name')])
         const tm = new Map((teachers || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name]))
-        let payable = 0, paidTotal = 0
-        const result = incomeRows.map((r) => { const p = paid.get(r.id) || 0, f = Number(r.final_payable) || 0, balance = Math.max(0, f - p); payable += f; paidTotal += p
-          return { IncomeID: r.id, TeacherID: r.teacher_id, TeacherName: tm.get(r.teacher_id) || r.teacher_id, SubjectID: r.subject_id, SubjectName: sm.get(r.subject_id) || r.subject_id,
-            Month: r.month, MonthLabel: monthLabel(r.month), StudentCount: r.student_count, RatePerStudent: r.rate_per_student, GrossIncome: r.gross_income,
-            Adjustment: r.adjustment, AdjustmentReason: r.adjustment_reason, FinalPayable: f, PaidAmount: p, BalanceAmount: balance, Status: balance <= 0 ? 'PAID' : p > 0 ? 'PARTIAL' : 'PENDING' } })
-        return response({ ok: true, data: { rows: result, totals: { count: result.length, payable, paid: paidTotal, balance: Math.max(0, payable - paidTotal) } } })
+        const monthlyKeys = new Set(incomeRows.filter((r) => !r.subject_id).map((r) => `${r.teacher_id}|${r.month}|${r.academic_year}`))
+        const visibleRows = incomeRows.filter((r) => !r.subject_id || !monthlyKeys.has(`${r.teacher_id}|${r.month}|${r.academic_year}`))
+        let payable = 0, paidTotal = 0, expectedTotal = 0, collectedTotal = 0, outstandingTotal = 0, contributionTotal = 0, projectedNetTotal = 0
+        const result = visibleRows.map((r) => {
+          const isMonthly = !r.subject_id, p = paid.get(r.id) || 0, f = Number(r.final_payable) || 0, balance = Math.max(0, f - p)
+          const expected = isMonthly ? Number(r.expected_amount) || 0 : Number(r.gross_income) || 0
+          const collected = isMonthly ? Number(r.collected_amount) || 0 : 0
+          const outstanding = isMonthly ? Number(r.outstanding_amount) || 0 : 0
+          const contribution = isMonthly ? Number(r.institute_contribution) || 0 : 0
+          const projectedNet = Math.max(0, expected - contribution)
+          payable += f; paidTotal += p
+          if (isMonthly) { expectedTotal += expected; collectedTotal += collected; outstandingTotal += outstanding; contributionTotal += contribution; projectedNetTotal += projectedNet }
+          return { IncomeID: r.id, TeacherID: r.teacher_id, TeacherName: tm.get(r.teacher_id) || r.teacher_id,
+            SubjectID: r.subject_id, SubjectName: r.subject_id ? (sm.get(r.subject_id) || r.subject_id) : 'Monthly statement',
+            RecordType: isMonthly ? 'MONTHLY' : 'LEGACY', Month: r.month, MonthLabel: monthLabel(r.month), StudentCount: r.student_count,
+            RatePerStudent: r.rate_per_student, GrossIncome: r.gross_income, ExpectedAmount: expected, CollectedAmount: collected,
+            OutstandingAmount: outstanding, InstituteContribution: contribution, NetCollected: Math.max(0, collected - contribution),
+            ProjectedNet: projectedNet, Adjustment: r.adjustment, AdjustmentReason: r.adjustment_reason,
+            FinalPayable: f, PaidAmount: p, BalanceAmount: balance, Status: balance <= 0 ? 'PAID' : p > 0 ? 'PARTIAL' : 'PENDING' }
+        })
+        return response({ ok: true, data: { rows: result, totals: { count: result.length, payable, paid: paidTotal, balance: Math.max(0, payable - paidTotal),
+          expected: expectedTotal, collected: collectedTotal, outstanding: outstandingTotal, contribution: contributionTotal, projectedNet: projectedNetTotal } } })
+      }
+      if (action === 'teacherIncome.contribution') {
+        const teacherId = requireText(payload.teacherId, 'Teacher ID', 60, true)
+        const month = requireText(payload.month, 'Month', 7, true)
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new ApiFault('BAD_REQUEST', 'Pick a valid month (YYYY-MM).')
+        const contribution = Number(payload.amount)
+        if (!Number.isFinite(contribution) || contribution < 0 || contribution > 10000000) throw new ApiFault('BAD_REQUEST', 'Enter a valid contribution amount; 0 is allowed.')
+        const { data: statement, error } = await admin.from('teacher_income').select('*').eq('teacher_id', teacherId).eq('month', month).is('subject_id', null).maybeSingle()
+        if (error) throw error
+        if (!statement) throw new ApiFault('NOT_FOUND', 'Generate this month’s statement before recording the institute contribution.')
+        const { data: payments, error: paymentError } = await admin.from('teacher_payments').select('amount').eq('income_id', statement.id)
+        if (paymentError) throw paymentError
+        const alreadyPaid = (payments || []).reduce((sum, row) => sum + Number(row.amount || 0), 0)
+        const netCollected = Math.max(0, (Number(statement.collected_amount) || 0) - contribution)
+        if (alreadyPaid > netCollected) throw new ApiFault('BAD_REQUEST', 'This contribution would make the net lower than the amount already paid to the teacher.')
+        const { error: updateError } = await admin.from('teacher_income').update({ institute_contribution: contribution,
+          adjustment: -contribution, adjustment_reason: contribution ? 'Institute contribution' : '', final_payable: netCollected,
+          status: netCollected <= alreadyPaid ? 'Paid' : alreadyPaid > 0 ? 'Partial' : 'Pending' }).eq('id', statement.id)
+        if (updateError) throw updateError
+        await logAction(admin, user, 'SET_TEACHER_INSTITUTE_CONTRIBUTION', 'TEACHER_INCOME', statement.id, { teacherId, month, contribution })
+        return response({ ok: true, data: { contribution, netCollected } })
       }
       const incomeId = requireText(payload.incomeId, 'Income ID', 60, true)
       const { data: income, error: incomeError } = await admin.from('teacher_income').select('*').eq('id', incomeId).maybeSingle()
@@ -2958,7 +3085,22 @@ Deno.serve(async (request) => {
       if (payError) throw payError
       const paid = (payRows || []).reduce((sum, p) => sum + Number(p.amount), 0), balance = Math.max(0, Number(income.final_payable) - paid)
       if (action === 'teacherIncome.get') {
+        if (String(income.status).toUpperCase() === 'SUPERSEDED') throw new ApiFault('NOT_FOUND', 'This older income record has been replaced by the monthly statement.')
         const userIds = [...new Set((payRows || []).map((p) => p.paid_by).filter(Boolean))]
+        if (!income.subject_id) {
+          const { data: monthlyTeacher } = await admin.from('teachers').select('name').eq('id', income.teacher_id).maybeSingle()
+          return response({ ok: true, data: { income: { IncomeID: income.id, TeacherID: income.teacher_id, TeacherName: monthlyTeacher?.name || income.teacher_id,
+            Month: income.month, MonthLabel: monthLabel(income.month), RecordType: 'MONTHLY', StudentCount: income.student_count,
+            ExpectedAmount: Number(income.expected_amount) || 0, CollectedAmount: Number(income.collected_amount) || 0,
+            OutstandingAmount: Number(income.outstanding_amount) || 0, InstituteContribution: Number(income.institute_contribution) || 0,
+            NetCollected: Math.max(0, (Number(income.collected_amount) || 0) - (Number(income.institute_contribution) || 0)),
+            ProjectedNet: Math.max(0, (Number(income.expected_amount) || 0) - (Number(income.institute_contribution) || 0)),
+            FinalPayable: Number(income.final_payable) || 0, PaidAmount: paid, BalanceAmount: balance,
+            Status: balance <= 0 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'PENDING' },
+            students: Array.isArray(income.student_details) ? income.student_details : [],
+            payments: (payRows || []).map((p) => ({ PaymentID: p.id, PaymentDate: p.payment_date, Amount: p.amount,
+              PaymentMode: p.payment_mode, UPIReference: p.upi_reference, PaidBy: '' })) } })
+        }
         const [{ data: teacher }, { data: subject }, { data: users }] = await Promise.all([admin.from('teachers').select('name').eq('id', income.teacher_id).maybeSingle(),
           admin.from('subjects').select('name').eq('id', income.subject_id).maybeSingle(), userIds.length ? admin.from('app_users').select('id,username').in('id', userIds) : Promise.resolve({ data: [], error: null })])
         const un = new Map((users || []).map((u) => [u.id, u.username]))
@@ -2969,6 +3111,8 @@ Deno.serve(async (request) => {
           payments: (payRows || []).map((p) => ({ PaymentID: p.id, PaymentDate: p.payment_date, Amount: p.amount, PaymentMode: p.payment_mode, UPIReference: p.upi_reference, PaidBy: un.get(p.paid_by) || '' })) } })
       }
       if (action === 'teacherIncome.adjust') {
+        if (!income.subject_id) throw new ApiFault('BAD_REQUEST', 'Use Institute contribution for a monthly teacher statement.')
+        if (String(income.status).toUpperCase() === 'SUPERSEDED') throw new ApiFault('NOT_FOUND', 'This older income record has been replaced by the monthly statement.')
         const adjustment = Number(payload.adjustment), reason = requireText(payload.reason, 'Reason', 200, true)
         if (!Number.isFinite(adjustment) || Math.abs(adjustment) > 10000000) throw new ApiFault('BAD_REQUEST', 'Enter a valid adjustment amount.')
         if (Number(income.gross_income) + adjustment < paid) throw new ApiFault('BAD_REQUEST', 'The payable amount cannot be less than what has already been paid.')
@@ -2979,6 +3123,7 @@ Deno.serve(async (request) => {
         return response({ ok: true, data: { updated: true } })
       }
       if (action === 'teacherIncome.pay') {
+        if (String(income.status).toUpperCase() === 'SUPERSEDED') throw new ApiFault('NOT_FOUND', 'This older income record has been replaced by the monthly statement.')
         const amount = Math.round(Number(payload.amount) * 100) / 100, mode = requireText(payload.mode, 'Payment mode', 20, true).toUpperCase()
         const paymentDate = requireText(payload.paymentDate || todayDate(), 'Payment date', 10, true), reference = requireText(payload.reference, 'Reference', 100), notes = requireText(payload.notes, 'Notes', 500)
         if (!Number.isFinite(amount) || amount <= 0 || amount > balance) throw new ApiFault('BAD_REQUEST', `Enter an amount up to the remaining balance (${balance}).`)
@@ -3008,9 +3153,26 @@ Deno.serve(async (request) => {
       if (subjectsError) throw subjectsError
       if (!teacher) throw new ApiFault('NOT_FOUND', 'Teacher record not found.')
       const names = new Map((subjects || []).map((x) => [x.id, x.name]))
-      return response({ ok: true, data: { teacher: { Name: teacher.name, Rate: teacher.default_rate_per_student, Method: teacher.income_method },
-        income: (income || []).map((r) => ({ IncomeID: r.id, Month: r.month, SubjectName: names.get(r.subject_id) || r.subject_id,
-          StudentCount: r.student_count, Rate: r.rate_per_student, Gross: r.gross_income, Adjustment: r.adjustment, FinalPayable: r.final_payable, Status: r.status })),
+      const monthlyKeys = new Set((income || []).filter((r) => !r.subject_id).map((r) => `${r.month}|${r.academic_year}`))
+      const visibleIncome = (income || []).filter((r) => !r.subject_id || !monthlyKeys.has(`${r.month}|${r.academic_year}`))
+      const paidByIncome = new Map<string, number>()
+      for (const payment of payments || []) if (payment.income_id) paidByIncome.set(payment.income_id, (paidByIncome.get(payment.income_id) || 0) + Number(payment.amount || 0))
+      return response({ ok: true, data: { teacher: { Name: teacher.name },
+        income: visibleIncome.map((r) => {
+          const monthly = !r.subject_id
+          const paid = paidByIncome.get(r.id) || 0, payable = Number(r.final_payable) || 0
+          return { IncomeID: r.id, RecordType: monthly ? 'MONTHLY' : 'LEGACY', Month: r.month,
+            SubjectName: monthly ? 'Monthly statement' : names.get(r.subject_id) || r.subject_id,
+            StudentCount: r.student_count, Rate: r.rate_per_student, Gross: Number(r.gross_income) || 0,
+            ExpectedAmount: monthly ? Number(r.expected_amount) || 0 : Number(r.gross_income) || 0,
+            CollectedAmount: monthly ? Number(r.collected_amount) || 0 : 0,
+            OutstandingAmount: monthly ? Number(r.outstanding_amount) || 0 : 0,
+            InstituteContribution: monthly ? Number(r.institute_contribution) || 0 : 0,
+            NetCollected: monthly ? Math.max(0, (Number(r.collected_amount) || 0) - (Number(r.institute_contribution) || 0)) : Number(r.final_payable) || 0,
+            ProjectedNet: monthly ? Math.max(0, (Number(r.expected_amount) || 0) - (Number(r.institute_contribution) || 0)) : Number(r.final_payable) || 0,
+            Adjustment: r.adjustment, FinalPayable: payable, PaidAmount: paid, BalanceAmount: Math.max(0, payable - paid),
+            StudentDetails: monthly && Array.isArray(r.student_details) ? r.student_details : [], Status: r.status }
+        }),
         payments: (payments || []).map((p) => ({ PaymentID: p.id, Date: p.payment_date, Amount: p.amount, Mode: p.payment_mode, Notes: p.notes })) } })
     }
 

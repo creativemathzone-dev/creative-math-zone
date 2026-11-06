@@ -438,7 +438,7 @@ const PERM_LABELS = {
   STUDENT_VIEW: 'View students', STUDENT_EDIT: 'Add and edit students', TEACHER_VIEW: 'View teachers', TEACHER_EDIT: 'Add and edit teachers',
   MASTER_VIEW: 'View subjects, batches, rooms', MASTER_EDIT: 'Edit subjects, batches, rooms', SETTINGS_VIEW: 'View settings', SETTINGS_EDIT: 'Change settings',
   USER_MANAGE: 'Manage users', LOG_VIEW: 'View activity log', FINANCE_VIEW: 'View finance', FINANCE_EDIT: 'Record payments and fees',
-  TEACHER_INCOME_MANAGE: 'Manage teacher pay rates', TEACHER_INCOME_GRANT: 'Allow teachers to see their income', REPORT_VIEW: 'View reports',
+  TEACHER_INCOME_MANAGE: 'Manage teacher monthly statements and contributions', TEACHER_INCOME_GRANT: 'Allow teachers to see their income', REPORT_VIEW: 'View reports',
   NOTICE_EDIT: 'Post notices', ATTENDANCE_CORRECT: 'Correct attendance'
 };
 const userExtraPermissions = value => (Array.isArray(value) ? value : String(value || '').split(','))
@@ -1086,7 +1086,9 @@ function teacherFields(isNew) {
   if (isNew) f.push({ n: 'Username', l: 'Login username', req: 1, hint: 'Letters and numbers, 3–30 characters. Cannot be changed later.' });
   f.push({ n: 'Mobile', l: 'Mobile', type: 'tel' }, { n: 'Email', l: 'Email', type: 'email' }, { n: 'Qualification', l: 'Qualification' }, { n: 'JoiningDate', l: 'Joining date', type: 'date' }, { n: 'Address', l: 'Address', full: 1 });
   if (!isNew) f.push({ n: 'Status', l: 'Status', type: 'select', req: 1, options: [['Active', 'Active'], ['Inactive', 'Inactive']] });
-  if (can('TEACHER_INCOME_MANAGE')) f.push({ n: 'DefaultRatePerStudent', l: 'Pay per student per month (₹)', type: 'number', step: 'any' });
+  // Teacher income is based on each assigned student's own subject fee.
+  // Keep the legacy database field intact for old statements, but no longer
+  // offer a misleading single default rate in the teacher editor.
   if (can('TEACHER_INCOME_GRANT')) f.push({ n: 'IncomeVisibleToTeacher', l: 'Teacher can see their own income', type: 'check', full: 1, hint: 'Off by default. The teacher is signed out so the change applies right away.' });
   return f;
 }
@@ -1807,7 +1809,7 @@ VIEWS.teacherincome = async main => {
   const fmt = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
 
   main.innerHTML =
-    '<div class="head"><div><h1>Teacher income</h1><p>Monthly pay worked out from active students per teacher and subject.</p></div>' +
+    '<div class="head"><div><h1>Teacher income</h1><p>Monthly student fees, collections, institute contribution, and teacher net.</p></div>' +
       '<button class="btn primary" id="ti-gen">Generate month</button></div>' +
     '<div class="toolbar">' +
       '<input id="ti-month" type="month" value="' + esc(st.month) + '" style="max-width:180px">' +
@@ -1821,21 +1823,26 @@ VIEWS.teacherincome = async main => {
     const r = await api('teacherIncome.list', { month: st.month, teacherId: st.teacherId });
     const t = r.totals;
     $('#ti-summary').innerHTML =
-      '<div class="card stat"><b>' + t.count + '</b><span>Records</span></div>' +
-      '<div class="card stat"><b>' + fmt(t.payable) + '</b><span>Payable</span></div>' +
-      '<div class="card stat"><b>' + fmt(t.paid) + '</b><span>Paid</span></div>' +
-      '<div class="card stat"><b>' + fmt(t.balance) + '</b><span>Still to pay</span></div>';
+      '<div class="card stat"><b>' + fmt(t.expected) + '</b><span>Expected student fees</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.collected) + '</b><span>Collected from students</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.outstanding) + '</b><span>Still due from students</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.contribution) + '</b><span>Institute contributions</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.payable) + '</b><span>Net from collections</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.paid) + '</b><span>Paid to teachers</span></div>' +
+      '<div class="card stat"><b>' + fmt(t.balance) + '</b><span>Still to pay teachers</span></div>';
     $('#ti-list').innerHTML = r.rows.length
-      ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Teacher</th><th>Subject</th><th>Students</th><th>Rate</th><th>Adjust</th><th>Payable</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>' +
+      ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Teacher</th><th>Students</th><th>Expected</th><th>Collected</th><th>Still due</th><th>Institute contribution</th><th>Net from collections</th><th>Paid to teacher</th><th>Balance</th><th>Status</th></tr></thead><tbody>' +
         r.rows.map(x =>
           '<tr class="click" data-ti="' + esc(x.IncomeID) + '">' +
-          '<td data-l="Teacher"><b>' + esc(x.TeacherName) + '</b></td>' +
-          '<td data-l="Subject">' + esc(x.SubjectName) + '</td>' +
+          '<td data-l="Teacher"><b>' + esc(x.TeacherName) + '</b>' + (x.RecordType === 'LEGACY' ? '<div class="muted" style="font-size:.8rem">Earlier calculation · ' + esc(x.SubjectName) + '</div>' : '') + '</td>' +
           '<td data-l="Students">' + x.StudentCount + '</td>' +
-          '<td data-l="Rate">' + fmt(x.RatePerStudent) + '</td>' +
-          '<td data-l="Adjust">' + (x.Adjustment ? (x.Adjustment > 0 ? '+' : '−') + fmt(Math.abs(x.Adjustment)) : '—') + '</td>' +
-          '<td data-l="Payable"><b>' + fmt(x.FinalPayable) + '</b></td>' +
-          '<td data-l="Paid">' + fmt(x.PaidAmount) + '</td>' +
+          '<td data-l="Expected">' + (x.RecordType === 'MONTHLY' ? fmt(x.ExpectedAmount) : '—') + '</td>' +
+          '<td data-l="Collected">' + (x.RecordType === 'MONTHLY' ? fmt(x.CollectedAmount) : '—') + '</td>' +
+          '<td data-l="Still due">' + (x.RecordType === 'MONTHLY' ? fmt(x.OutstandingAmount) : '—') + '</td>' +
+          '<td data-l="Institute contribution">' + (x.RecordType === 'MONTHLY' ? fmt(x.InstituteContribution) : '—') + '</td>' +
+          '<td data-l="Net from collections"><b>' + (x.RecordType === 'MONTHLY' ? fmt(x.NetCollected) : fmt(x.FinalPayable)) + '</b>' +
+            (x.RecordType === 'MONTHLY' ? '<div class="muted" style="font-size:.78rem">Projected: ' + fmt(x.ProjectedNet) + '</div>' : '') + '</td>' +
+          '<td data-l="Paid to teacher">' + fmt(x.PaidAmount) + '</td>' +
           '<td data-l="Balance">' + fmt(x.BalanceAmount) + '</td>' +
           '<td>' + tiPill(x.Status) + '</td></tr>').join('') + '</tbody></table></div>'
       : '<div class="card empty"><b>No income records for this month</b>Click “Generate month” to work them out.</div>';
@@ -1845,13 +1852,28 @@ VIEWS.teacherincome = async main => {
   const detail = async id => {
     const d = await api('teacherIncome.get', { incomeId: id });
     const i = d.income;
-    openDlg(i.TeacherName + ' · ' + i.SubjectName + ' · ' + i.MonthLabel,
-      '<dl class="kv">' +
-        '<dt>Students</dt><dd>' + i.StudentCount + ' × ' + fmt(i.RatePerStudent) + ' = ' + fmt(i.GrossIncome) + '</dd>' +
+    const monthly = i.RecordType === 'MONTHLY';
+    const monthlyDetails = monthly
+      ? '<dl class="kv"><dt>Expected student fees</dt><dd>' + fmt(i.ExpectedAmount) + '</dd>' +
+        '<dt>Collected from students</dt><dd>' + fmt(i.CollectedAmount) + '</dd>' +
+        '<dt>Still due from students</dt><dd>' + fmt(i.OutstandingAmount) + '</dd>' +
+        '<dt>Institute contribution</dt><dd>' + fmt(i.InstituteContribution) + '</dd>' +
+        '<dt>Net from collections</dt><dd><b>' + fmt(i.NetCollected) + '</b></dd>' +
+        '<dt>Projected net if all fees are collected</dt><dd>' + fmt(i.ProjectedNet) + '</dd>' +
+        '<dt>Paid to teacher</dt><dd>' + fmt(i.PaidAmount) + '</dd>' +
+        '<dt>Still to pay teacher</dt><dd><b>' + fmt(i.BalanceAmount) + '</b> ' + tiPill(i.Status) + '</dd></dl>' +
+        '<div class="section"><h2>Student fee breakdown</h2>' + (d.students.length
+          ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Student</th><th>Batch</th><th>Subject</th><th>Expected</th><th>Collected</th><th>Due</th></tr></thead><tbody>' +
+            d.students.map(s => '<tr><td data-l="Student">' + esc(s.studentName) + '</td><td data-l="Batch">' + esc(s.batchName || '—') + '</td><td data-l="Subject">' + esc(s.subjectName) + '</td><td data-l="Expected">' + fmt(s.expectedAmount) + '</td><td data-l="Collected">' + fmt(s.collectedAmount) + '</td><td data-l="Due">' + fmt(s.outstandingAmount) + '</td></tr>').join('') +
+            '</tbody></table></div>' : '<p class="muted">No assigned student fees were found for this month.</p>') + '</div>'
+      : '<dl class="kv"><dt>Earlier subject-level record</dt><dd>' + esc(i.SubjectName) + '</dd>' +
+        '<dt>Students × recorded rate</dt><dd>' + i.StudentCount + ' × ' + fmt(i.RatePerStudent) + ' = ' + fmt(i.GrossIncome) + '</dd>' +
         '<dt>Adjustment</dt><dd>' + (i.Adjustment ? fmt(i.Adjustment) + ' · ' + esc(i.AdjustmentReason) : '—') + '</dd>' +
         '<dt>Payable</dt><dd><b>' + fmt(i.FinalPayable) + '</b></dd>' +
         '<dt>Paid</dt><dd>' + fmt(i.PaidAmount) + '</dd>' +
-        '<dt>Balance</dt><dd><b>' + fmt(i.BalanceAmount) + '</b> ' + tiPill(i.Status) + '</dd></dl>' +
+        '<dt>Balance</dt><dd><b>' + fmt(i.BalanceAmount) + '</b> ' + tiPill(i.Status) + '</dd></dl>';
+    openDlg(i.TeacherName + ' · ' + (monthly ? 'Monthly statement' : i.SubjectName) + ' · ' + i.MonthLabel,
+      monthlyDetails +
       '<div class="section"><h2>Payments</h2>' +
       (d.payments.length
         ? '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Mode</th><th>By</th></tr></thead><tbody>' +
@@ -1860,12 +1882,28 @@ VIEWS.teacherincome = async main => {
           '</tbody></table></div>'
         : '<p class="muted">No payments yet.</p>') + '</div>',
       '<button class="btn" type="button" data-close>Close</button>' +
-      '<button class="btn" id="ti-adj">Adjust</button>' +
+      (monthly ? '<button class="btn" id="ti-contribution">Set institute contribution</button>' : '<button class="btn" id="ti-adj">Adjust</button>') +
       (i.BalanceAmount > 0 ? '<button class="btn primary" id="ti-pay">Pay teacher</button>' : ''),
       dlg => {
-        $('#ti-adj', dlg).addEventListener('click', () => adjustDlg(i));
+        const contribution = $('#ti-contribution', dlg);
+        if (contribution) contribution.addEventListener('click', () => contributionDlg(i));
+        const adjust = $('#ti-adj', dlg); if (adjust) adjust.addEventListener('click', () => adjustDlg(i));
         const pay = $('#ti-pay', dlg); if (pay) pay.addEventListener('click', () => payDlg(i));
       });
+  };
+
+  const contributionDlg = i => {
+    openDlg('Institute contribution · ' + i.TeacherName,
+      '<p class="muted">Enter the amount the teacher contributes to the institute from this month’s collected fees. Enter 0 when no contribution applies. The payable amount cannot be reduced below payments already recorded.</p>' +
+      '<form><label class="f"><span>Institute contribution (₹)</span><input name="contribution" type="number" min="0" step="0.01" value="' + Number(i.InstituteContribution || 0) + '" required></label></form>',
+      '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="contribution-save">Save contribution</button>',
+      dlg => $('#contribution-save', dlg).addEventListener('click', ev => busy(ev.target, async () => {
+        if (!validForm(dlg)) return;
+        const amount = Number($('[name=contribution]', dlg).value);
+        if (!Number.isFinite(amount) || amount < 0) { toast('Enter a valid amount (0 is allowed).', true); return; }
+        await api('teacherIncome.contribution', { teacherId: i.TeacherID, month: i.Month, amount });
+        closeDlg(); toast('Institute contribution saved.'); await load();
+      })));
   };
 
   const adjustDlg = i => {
@@ -1912,16 +1950,16 @@ VIEWS.teacherincome = async main => {
   $('#ti-teacher').addEventListener('change', e => { st.teacherId = e.target.value; load().catch(fail); });
   $('#ti-gen').addEventListener('click', () => {
     openDlg('Generate teacher income',
-      '<p>Counts each teacher’s active students per subject for the month and multiplies by the pay rate (the student’s special rate if set, otherwise the teacher’s default).</p>' +
+      '<p>Builds one statement per teacher using each assigned student’s own subject fee. It shows expected fees, collected fees, amounts still due, institute contribution, and net teacher income.</p>' +
       '<label class="f"><span>Month</span><input id="gen-m" type="month" value="' + esc(st.month) + '"></label>' +
-      '<p class="muted" style="font-size:.85rem">Records that already have payments are left alone. Unpaid ones are refreshed. Teachers with no pay rate set are skipped.</p>',
+      '<p class="muted" style="font-size:.85rem">Generating again refreshes student fee and collection totals, keeps the saved institute contribution, and retains recorded teacher payments.</p>',
       '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="gen-run">Generate</button>',
       dlg => $('#gen-run', dlg).addEventListener('click', ev => busy(ev.target, async () => {
         const m = $('#gen-m', dlg).value;
         if (!/^\d{4}-\d{2}$/.test(m)) { toast('Pick a valid month.', true); return; }
         const r = await api('teacherIncome.generate', { month: m });
         closeDlg();
-        toast(r.created + ' created · ' + r.refreshed + ' refreshed' + (r.skippedLocked ? ' · ' + r.skippedLocked + ' locked' : '') + (r.skippedNoRate ? ' · ' + r.skippedNoRate + ' with no pay rate' : ''));
+        toast(r.created + ' statement(s) created · ' + r.refreshed + ' refreshed');
         st.month = m; $('#ti-month').value = m; await load();
       })));
   });
