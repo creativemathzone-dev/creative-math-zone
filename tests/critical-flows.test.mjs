@@ -1,0 +1,58 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const api = await readFile(new URL('../supabase/functions/api/index.ts', import.meta.url), 'utf8');
+const financeMigration = await readFile(new URL('../supabase/migrations/20261013040000_finance_transactions.sql', import.meta.url), 'utf8');
+const rescheduleMigration = await readFile(new URL('../supabase/migrations/20261105010000_one_day_class_reschedules.sql', import.meta.url), 'utf8');
+
+function actionBlock(start, end) {
+  const startAt = api.indexOf(start);
+  assert.notEqual(startAt, -1, `Missing API handler: ${start}`);
+  const endAt = api.indexOf(end, startAt + start.length);
+  assert.notEqual(endAt, -1, `Missing end marker for handler: ${start}`);
+  return api.slice(startAt, endAt);
+}
+
+test('notice posting validates input, defaults new notices to Active, and persists them', () => {
+  assert.match(api, /'notices\.add':\s*'NOTICE_EDIT'/);
+  const block = actionBlock("if (action === 'notices.add' || action === 'notices.update')", "if (action === 'notices.setStatus')");
+  assert.match(block, /if \(!\['STUDENTS','TEACHERS','BATCH','ALL'\]\.includes\(audience\)\)/);
+  assert.match(block, /if \(!\['Active','Inactive'\]\.includes\(status\)\)/);
+  assert.match(block, /row\.status = row\.status \|\| 'Active'/);
+  assert.match(block, /admin\.from\('notices'\)\.insert\(row\)\.select\('\*'\)\.single\(\)/);
+  assert.match(block, /return response\(\{ ok: true, data: \{ NoticeID: saved\.id/);
+});
+
+test('payment recording rejects invalid or excessive allocations and uses an atomic transaction', () => {
+  assert.match(api, /'payments\.record':\s*'FINANCE_EDIT'/);
+  const block = actionBlock("if (action === 'payments.record')", "if (action === 'receipts.list')");
+  assert.match(block, /if \(balance <= 0\) throw new ApiFault\('BAD_REQUEST', 'This invoice is already fully paid\.'/);
+  assert.match(block, /if \(amount < 1 \|\| amount > balance \+ 0\.005\)/);
+  assert.match(block, /admin\.rpc\('record_payment_transaction'/);
+  assert.match(financeMigration, /from public\.invoices where id = p_invoice_id for update/i);
+  assert.match(financeMigration, /insert into public\.payments/i);
+  assert.match(financeMigration, /insert into public\.receipts/i);
+  assert.match(financeMigration, /update public\.invoices set line_items = next_lines, paid_amount = new_paid/i);
+});
+
+test('one-day class rescheduling is teacher-owned, date-scoped, and leaves the weekly timetable intact', () => {
+  assert.match(api, /'teacher\.rescheduleClass':\s*'CLASS_RUN'/);
+  const block = actionBlock("if (action === 'teacher.rescheduleClass')", "if (action === 'student.classChanges')");
+  assert.match(block, /slot\.teacher_id !== user\.linked_id/);
+  assert.match(block, /original_date: originalDate, rescheduled_date: rescheduledDate/);
+  assert.match(block, /admin\.from\('class_reschedules'\)\.upsert\(row, \{ onConflict: 'timetable_id,original_date' \}\)/);
+  assert.match(rescheduleMigration, /create table if not exists public\.class_reschedules/i);
+  assert.match(rescheduleMigration, /unique \(timetable_id, original_date\)/i);
+  assert.doesNotMatch(block, /admin\.from\('timetable'\)\.update\(/);
+});
+
+test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {
+  assert.match(api, /'teacherIncome\.generate':\s*'TEACHER_INCOME_MANAGE'/);
+  const block = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");
+  assert.match(block, /expected_amount: expected, collected_amount: collected, outstanding_amount: Math\.max\(0, expected - collected\)/);
+  assert.match(block, /final_payable: Math\.max\(0, collected - contribution\)/);
+  assert.match(block, /const net = Math\.max\(alreadyPaid, Math\.max\(0, collected - contribution\)\)/);
+  assert.match(block, /status: teacherIncomeStatus\(expected, collected, contribution, net, alreadyPaid\)/);
+  assert.match(block, /student_details: g\.details/);
+});

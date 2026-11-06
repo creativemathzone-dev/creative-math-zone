@@ -16,6 +16,9 @@ jobs:
       - name: Get the code
         uses: actions/checkout@v4
 
+      - name: Check critical application flows
+        run: node --test tests/critical-flows.test.mjs
+
       - name: Install Supabase CLI
         uses: supabase/setup-cli@v3
         with:

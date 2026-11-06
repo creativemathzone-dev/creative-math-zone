@@ -22,6 +22,9 @@ jobs:
       - name: Get the code
         uses: actions/checkout@v6
 
+      - name: Check critical application flows
+        run: node --test tests/critical-flows.test.mjs
+
       - name: Prepare the website files
         run: |
           mkdir -p _site/web _site/downloads _site/.well-known
