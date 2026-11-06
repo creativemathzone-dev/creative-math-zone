@@ -1797,10 +1797,12 @@ Deno.serve(async (request) => {
       const { data: students, error: studentsError } = await admin.from('students').select('id,name,current_class').in('id', studentIds.length ? studentIds : ['__none__'])
       if (studentsError) throw studentsError
       const studentMap = new Map((students || []).map((s) => [s.id, s]))
+      const invoiceLines = new Map((data || []).map((r) => [r.id, normalizedInvoiceLines(r).map((line) => String(line.subjectName || line.subjectId || 'Unspecified'))]))
       let rows = (data || []).map((r) => {
         const student = studentMap.get(r.student_id)
         return { InvoiceID: r.id, StudentID: r.student_id, StudentName: student?.name || r.student_id,
           CurrentClass: student?.current_class || '', Month: r.month, MonthLabel: monthLabel(r.month),
+          Classes: (invoiceLines.get(r.id) || []).join(', '),
           TotalAmount: Number(r.total_amount) || 0, PaidAmount: Number(r.paid_amount) || 0,
           BalanceAmount: Math.max(0, Number(r.total_amount) - Number(r.paid_amount)), DueDate: r.due_date,
           Status: invoiceStatus(r.total_amount, r.paid_amount, r.due_date, r.status), StoredStatus: r.status }
@@ -1921,21 +1923,26 @@ Deno.serve(async (request) => {
       const search = String(payload.search || '').trim().toLowerCase().slice(0, 100)
       const from = requireText(payload.from, 'From date', 10), to = requireText(payload.to, 'To date', 10)
       const limit = Math.min(Math.max(Number.parseInt(payload.limit, 10) || 200, 1), 1000)
-      let query = admin.from('receipts').select('id,student_id,receipt_date,amount,status,created_by')
+      let query = admin.from('receipts').select('id,payment_id,student_id,receipt_date,amount,status,created_by')
         .order('receipt_date', { ascending: false }).order('id', { ascending: false }).limit(5000)
       if (from) query = query.gte('receipt_date', from)
       if (to) query = query.lte('receipt_date', to)
       const { data, error } = await query
       if (error) throw error
+      const paymentIds = [...new Set((data || []).map((r) => r.payment_id).filter(Boolean))]
+      const { data: payments, error: paymentError } = paymentIds.length
+        ? await admin.from('payments').select('id,allocations').in('id', paymentIds) : { data: [], error: null }
+      if (paymentError) throw paymentError
       const ids = [...new Set((data || []).map((r) => r.student_id))]
       const { data: students, error: studentsError } = await admin.from('students').select('id,name').in('id', ids.length ? ids : ['__none__'])
       if (studentsError) throw studentsError
       const names = new Map((students || []).map((s) => [s.id, s.name]))
       const rows = (data || []).filter((r) => !search || r.id.toLowerCase().includes(search) || r.student_id.toLowerCase().includes(search) ||
         String(names.get(r.student_id) || '').toLowerCase().includes(search)).slice(0, limit)
+      const allocationLabels = new Map((payments || []).map((p) => [p.id, allocationsFromPayment(p.allocations).map((a) => a.subjectName).join(', ')]))
       return response({ ok: true, data: rows.map((r) => ({ ReceiptID: r.id, StudentID: r.student_id,
         StudentName: names.get(r.student_id) || r.student_id, ReceiptDate: r.receipt_date, Amount: Number(r.amount),
-        Status: r.status, CreatedBy: r.created_by || '' })) })
+        Classes: allocationLabels.get(r.payment_id) || '', Status: r.status, CreatedBy: r.created_by || '' })) })
     }
 
     if (action === 'receipts.get') {

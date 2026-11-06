@@ -1500,12 +1500,13 @@ VIEWS.invoices = async main => {
 
     $('#inv-list').innerHTML = r.rows.length
       ? '<div class="tablewrap"><table class="stack"><thead><tr>' +
-          '<th>Invoice</th><th>Student</th><th>Month</th><th>Total</th><th>Paid</th><th>Balance</th><th>Due</th><th>Status</th>' +
+          '<th>Invoice</th><th>Student</th><th>Class / subjects</th><th>Month</th><th>Total</th><th>Paid</th><th>Balance</th><th>Due</th><th>Status</th>' +
         '</tr></thead><tbody>' +
         r.rows.map(inv =>
           '<tr class="click" data-inv="' + esc(inv.InvoiceID) + '">' +
           '<td data-l="Invoice"><b>' + esc(inv.InvoiceID) + '</b></td>' +
           '<td data-l="Student">' + esc(inv.StudentName) + '<div class="muted" style="font-size:.82rem">' + esc(inv.StudentID) + '</div></td>' +
+          '<td data-l="Class / subjects">' + esc(inv.Classes || 'No subject details') + '</td>' +
           '<td data-l="Month">' + esc(inv.MonthLabel) + '</td>' +
           '<td data-l="Total">₹' + inv.TotalAmount.toLocaleString('en-IN') + '</td>' +
           '<td data-l="Paid">₹' + inv.PaidAmount.toLocaleString('en-IN') + '</td>' +
@@ -1655,13 +1656,14 @@ VIEWS.receipts = async main => {
     const rows = await api('receipts.list', { search: st.search, from: st.from, to: st.to });
     $('#rc-list').innerHTML = rows.length
       ? '<div class="tablewrap"><table class="stack"><thead><tr>' +
-          '<th>Receipt</th><th>Date</th><th>Student</th><th>Amount</th><th>Status</th>' +
+          '<th>Receipt</th><th>Date</th><th>Student</th><th>Class / subjects</th><th>Amount</th><th>Status</th>' +
         '</tr></thead><tbody>' +
         rows.map(r =>
           '<tr class="click" data-rc="' + esc(r.ReceiptID) + '">' +
           '<td data-l="Receipt"><b>' + esc(r.ReceiptID) + '</b></td>' +
           '<td data-l="Date">' + esc(fmtDate(r.ReceiptDate)) + '</td>' +
           '<td data-l="Student">' + esc(r.StudentName) + '<div class="muted" style="font-size:.82rem">' + esc(r.StudentID) + '</div></td>' +
+          '<td data-l="Class / subjects">' + esc(r.Classes || 'Unallocated / advance') + '</td>' +
           '<td data-l="Amount"><b>₹' + r.Amount.toLocaleString('en-IN') + '</b></td>' +
           '<td>' + pill(r.Status) + '</td>' +
           '</tr>').join('') + '</tbody></table></div>'
