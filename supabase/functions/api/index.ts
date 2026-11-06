@@ -324,6 +324,16 @@ function invoiceLinesForIncome(value: unknown) {
   return lines.map((line) => ({ ...line, subjectId: String(line.subjectId || ''), finalAmount: Number(line.finalAmount) || 0 }))
 }
 
+function teacherIncomeStatus(expectedValue: unknown, collectedValue: unknown, contributionValue: unknown, payableValue: unknown, paidValue: unknown) {
+  const expected = Number(expectedValue) || 0, collected = Number(collectedValue) || 0
+  const contribution = Number(contributionValue) || 0, payable = Number(payableValue) || 0, paid = Number(paidValue) || 0
+  if (paid > 0.005) return paid + 0.005 >= payable ? 'PAID' : 'PARTIAL'
+  if (payable > 0.005) return 'PENDING'
+  if (collected > 0.005 && contribution + 0.005 >= collected) return 'NO_PAYOUT_DUE'
+  if (expected > collected + 0.005) return 'AWAITING_COLLECTION'
+  return 'NO_PAYOUT_DUE'
+}
+
 function normalizedInvoiceLines(row: Record<string, unknown>) {
   const lines = invoiceLines(row)
   const tracksPaid = lines.some((line) => line.paidAmount !== undefined && line.paidAmount !== null)
@@ -2943,24 +2953,18 @@ Deno.serve(async (request) => {
         }
         const invoiceRows = (invoices || []).filter((r) => String(r.status).toUpperCase() !== 'CANCELLED')
         const invoiceByStudent = new Map(invoiceRows.map((r) => [r.student_id, r]))
-        const invoiceIds = invoiceRows.map((r) => r.id)
-        const { data: studentPayments, error: studentPaymentsError } = invoiceIds.length
-          ? await admin.from('payments').select('invoice_id,allocations,status').in('invoice_id', invoiceIds)
-          : { data: [], error: null }
-        if (studentPaymentsError) throw studentPaymentsError
         const subjectCollections = new Map<string, number>()
-        for (const payment of studentPayments || []) {
-          if (String(payment.status).toUpperCase() !== 'ACTIVE') continue
-          const invoice = invoiceRows.find((r) => r.id === payment.invoice_id)
-          if (!invoice) continue
-          const invoiceLines = new Map(invoiceLinesForIncome(invoice.line_items).map((line) => [line.subjectId, line]))
-          for (const allocation of allocationsFromPayment(payment.allocations)) {
-            const line: any = invoiceLines.get(allocation.subjectId)
-            const assigned = assignmentByKey.get(`${invoice.student_id}|${allocation.subjectId}`)
-            const teacherId = String(line?.teacherId || assigned?.teacher_id || '')
-            if (!teacherId) continue
-            const key = `${teacherId}|${invoice.student_id}|${allocation.subjectId}`
-            subjectCollections.set(key, (subjectCollections.get(key) || 0) + allocation.amount)
+        for (const invoice of invoiceRows) {
+          // Invoice line paid amounts are the accounting source of truth. This
+          // includes the app's PAID payment status and already reflects voids.
+          for (const line of normalizedInvoiceLines(invoice as Record<string, unknown>)) {
+            const subjectId = String(line.subjectId || '')
+            const assigned = assignmentByKey.get(`${invoice.student_id}|${subjectId}`)
+            const teacherId = String(line.teacherId || assigned?.teacher_id || '')
+            if (!teacherId || !subjectId) continue
+            const key = `${teacherId}|${invoice.student_id}|${subjectId}`
+            const amount = Math.min(Number(line.finalAmount) || 0, Number(line.paidAmount) || 0)
+            subjectCollections.set(key, (subjectCollections.get(key) || 0) + amount)
           }
         }
         const groups = new Map<string, { details: any[]; students: Set<string>; expected: number; collected: number }>()
@@ -3019,7 +3023,7 @@ Deno.serve(async (request) => {
           const alreadyPaid = (teacherPaymentRows || []).reduce((sum, p) => sum + Number(p.amount || 0), 0)
           const net = Math.max(alreadyPaid, Math.max(0, collected - contribution))
           const { error: payableError } = await admin.from('teacher_income').update({ final_payable: net,
-            status: alreadyPaid >= net ? 'Paid' : alreadyPaid > 0 ? 'Partial' : 'Pending' }).eq('id', id)
+            status: teacherIncomeStatus(expected, collected, contribution, net, alreadyPaid) }).eq('id', id)
           if (payableError) throw payableError
         }
         await logAction(admin, user, 'GENERATE_TEACHER_INCOME', 'TEACHER_INCOME', month, { created, refreshed, model: 'STUDENT_FEES_LESS_INSTITUTE_CONTRIBUTION' })
@@ -3051,7 +3055,8 @@ Deno.serve(async (request) => {
             RatePerStudent: r.rate_per_student, GrossIncome: r.gross_income, ExpectedAmount: expected, CollectedAmount: collected,
             OutstandingAmount: outstanding, InstituteContribution: contribution, NetCollected: Math.max(0, collected - contribution),
             ProjectedNet: projectedNet, Adjustment: r.adjustment, AdjustmentReason: r.adjustment_reason,
-            FinalPayable: f, PaidAmount: p, BalanceAmount: balance, Status: balance <= 0 ? 'PAID' : p > 0 ? 'PARTIAL' : 'PENDING' }
+            FinalPayable: f, PaidAmount: p, BalanceAmount: balance,
+            Status: isMonthly ? teacherIncomeStatus(expected, collected, contribution, f, p) : balance <= 0 ? 'PAID' : p > 0 ? 'PARTIAL' : 'PENDING' }
         })
         return response({ ok: true, data: { rows: result, totals: { count: result.length, payable, paid: paidTotal, balance: Math.max(0, payable - paidTotal),
           expected: expectedTotal, collected: collectedTotal, outstanding: outstandingTotal, contribution: contributionTotal, projectedNet: projectedNetTotal } } })
@@ -3072,7 +3077,7 @@ Deno.serve(async (request) => {
         if (alreadyPaid > netCollected) throw new ApiFault('BAD_REQUEST', 'This contribution would make the net lower than the amount already paid to the teacher.')
         const { error: updateError } = await admin.from('teacher_income').update({ institute_contribution: contribution,
           adjustment: -contribution, adjustment_reason: contribution ? 'Institute contribution' : '', final_payable: netCollected,
-          status: netCollected <= alreadyPaid ? 'Paid' : alreadyPaid > 0 ? 'Partial' : 'Pending' }).eq('id', statement.id)
+          status: teacherIncomeStatus(statement.expected_amount, statement.collected_amount, contribution, netCollected, alreadyPaid) }).eq('id', statement.id)
         if (updateError) throw updateError
         await logAction(admin, user, 'SET_TEACHER_INSTITUTE_CONTRIBUTION', 'TEACHER_INCOME', statement.id, { teacherId, month, contribution })
         return response({ ok: true, data: { contribution, netCollected } })
@@ -3096,7 +3101,7 @@ Deno.serve(async (request) => {
             NetCollected: Math.max(0, (Number(income.collected_amount) || 0) - (Number(income.institute_contribution) || 0)),
             ProjectedNet: Math.max(0, (Number(income.expected_amount) || 0) - (Number(income.institute_contribution) || 0)),
             FinalPayable: Number(income.final_payable) || 0, PaidAmount: paid, BalanceAmount: balance,
-            Status: balance <= 0 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'PENDING' },
+            Status: teacherIncomeStatus(income.expected_amount, income.collected_amount, income.institute_contribution, income.final_payable, paid) },
             students: Array.isArray(income.student_details) ? income.student_details : [],
             payments: (payRows || []).map((p) => ({ PaymentID: p.id, PaymentDate: p.payment_date, Amount: p.amount,
               PaymentMode: p.payment_mode, UPIReference: p.upi_reference, PaidBy: '' })) } })
@@ -3171,7 +3176,8 @@ Deno.serve(async (request) => {
             NetCollected: monthly ? Math.max(0, (Number(r.collected_amount) || 0) - (Number(r.institute_contribution) || 0)) : Number(r.final_payable) || 0,
             ProjectedNet: monthly ? Math.max(0, (Number(r.expected_amount) || 0) - (Number(r.institute_contribution) || 0)) : Number(r.final_payable) || 0,
             Adjustment: r.adjustment, FinalPayable: payable, PaidAmount: paid, BalanceAmount: Math.max(0, payable - paid),
-            StudentDetails: monthly && Array.isArray(r.student_details) ? r.student_details : [], Status: r.status }
+            StudentDetails: monthly && Array.isArray(r.student_details) ? r.student_details : [],
+            Status: monthly ? teacherIncomeStatus(r.expected_amount, r.collected_amount, r.institute_contribution, payable, paid) : r.status }
         }),
         payments: (payments || []).map((p) => ({ PaymentID: p.id, Date: p.payment_date, Amount: p.amount, Mode: p.payment_mode, Notes: p.notes })) } })
     }

@@ -1797,8 +1797,9 @@ VIEWS.receipt = async (main, receiptId) => {
 /* ---------- teacher income ---------- */
 function tiPill(s) {
   const k = String(s || '').toUpperCase();
-  const c = k === 'PAID' ? 'ok' : (k === 'PARTIAL' ? 'warn' : '');
-  return '<span class="pill ' + c + '">' + esc(k || '—') + '</span>';
+  const labels = { AWAITING_COLLECTION: 'AWAITING STUDENT FEES', NO_PAYOUT_DUE: 'NO PAYOUT DUE' };
+  const c = k === 'PAID' ? 'ok' : (k === 'PARTIAL' || k === 'AWAITING_COLLECTION' ? 'warn' : '');
+  return '<span class="pill ' + c + '">' + esc(labels[k] || k || '—') + '</span>';
 }
 
 VIEWS.teacherincome = async main => {
