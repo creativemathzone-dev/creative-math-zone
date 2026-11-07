@@ -2034,21 +2034,27 @@ Deno.serve(async (request) => {
         if (error) throw error
         const { data: assigned, error: assignedError } = await admin.from('student_subjects').select('subject_id').eq('teacher_id', user.linked_id).ilike('status', 'active')
         if (assignedError) throw assignedError
-        const subjectIds = [...new Set([...(rows || []).map((r) => r.subject_id), ...(assigned || []).map((r) => r.subject_id)])]
+        const subjectIds = [...new Set([...(rows || []).flatMap((r) => Array.isArray(r.subject_ids) && r.subject_ids.length ? r.subject_ids : [r.subject_id]), ...(assigned || []).map((r) => r.subject_id)])]
         const { data: subjects } = subjectIds.length ? await admin.from('subjects').select('id,name').in('id', subjectIds) : { data: [] }
         const subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
         const result = await Promise.all((rows || []).map(async (r) => {
           const signed = r.qr_path ? await admin.storage.from('teacher-payment-qr').createSignedUrl(r.qr_path, 3600) : { data: null }
-          return { MethodID: r.id, SubjectID: r.subject_id, SubjectName: subjectNames.get(r.subject_id) || r.subject_id,
+          const methodSubjectIds = Array.isArray(r.subject_ids) && r.subject_ids.length ? r.subject_ids : [r.subject_id]
+          const methodSubjectNames = methodSubjectIds.map((id) => subjectNames.get(id) || id)
+          return { MethodID: r.id, SubjectID: r.subject_id, SubjectName: methodSubjectNames[0] || r.subject_id,
+            SubjectIDs: methodSubjectIds, SubjectNames: methodSubjectNames,
             UpiID: r.upi_id, PaymentLink: r.payment_link, QRPath: r.qr_path, QRUrl: signed.data?.signedUrl || '',
             Status: r.status, ReviewNote: r.review_note, CreatedAt: r.created_at }
         }))
         return response({ ok: true, data: { subjects: (subjects || []).map((s) => ({ SubjectID: s.id, SubjectName: s.name })), methods: result } })
       }
-      const subjectId = requireText(payload.subjectId, 'Subject', 40, true)
-      const { data: assignment, error: assignmentError } = await admin.from('student_subjects').select('id').eq('teacher_id', user.linked_id).eq('subject_id', subjectId).ilike('status', 'active').limit(1).maybeSingle()
+      const rawSubjectIds = Array.isArray(payload.subjectIds) ? payload.subjectIds : [payload.subjectId]
+      const subjectIds = [...new Set(rawSubjectIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      if (!subjectIds.length || subjectIds.length > 50 || subjectIds.some((id) => id.length > 40)) throw new ApiFault('BAD_REQUEST', 'Select one or more subjects.')
+      const { data: assignments, error: assignmentError } = await admin.from('student_subjects').select('subject_id').eq('teacher_id', user.linked_id).in('subject_id', subjectIds).ilike('status', 'active')
       if (assignmentError) throw assignmentError
-      if (!assignment) throw new ApiFault('BAD_REQUEST', 'You can add payment details only for a subject currently assigned to you.')
+      const assignedIds = new Set((assignments || []).map((row) => row.subject_id))
+      if (subjectIds.some((id) => !assignedIds.has(id))) throw new ApiFault('BAD_REQUEST', 'Choose only subjects currently assigned to you.')
       const upiId = String(payload.upiId || '').trim().slice(0, 100)
       const paymentLink = String(payload.paymentLink || '').trim().slice(0, 500)
       if (paymentLink && !/^(https:\/\/|upi:\/\/)/i.test(paymentLink)) throw new ApiFault('BAD_REQUEST', 'Payment link must start with https:// or upi://.')
@@ -2062,22 +2068,22 @@ Deno.serve(async (request) => {
         let bytes: Uint8Array
         try { bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)) } catch { throw new ApiFault('BAD_REQUEST', 'The QR image could not be read.') }
         if (bytes.length > 1572864) throw new ApiFault('BAD_REQUEST', 'QR image must be 1.5 MB or smaller.')
-        qrPath = `${user.linked_id}/${subjectId}/${crypto.randomUUID()}.${ext}`
+        qrPath = `${user.linked_id}/${crypto.randomUUID()}.${ext}`
         const { error: uploadError } = await admin.storage.from('teacher-payment-qr').upload(qrPath, bytes, { contentType: mime, upsert: false })
         if (uploadError) throw uploadError
       }
       if (!upiId && !paymentLink && !qrPath) throw new ApiFault('BAD_REQUEST', 'Enter a UPI ID, payment link, or upload a QR image.')
-      const { data, error } = await admin.from('teacher_payment_methods').insert({ teacher_id: user.linked_id, subject_id: subjectId,
+      const { data, error } = await admin.from('teacher_payment_methods').insert({ teacher_id: user.linked_id, subject_id: subjectIds[0], subject_ids: subjectIds,
         upi_id: upiId, payment_link: paymentLink, qr_path: qrPath, status: 'PENDING' }).select('id,status').single()
       if (error) throw error
-      await logAction(admin, user, 'SUBMIT_PAYMENT_METHOD', 'TEACHER_PAYMENT_METHOD', data.id, { subjectId })
+      await logAction(admin, user, 'SUBMIT_PAYMENT_METHOD', 'TEACHER_PAYMENT_METHOD', data.id, { subjectIds })
       return response({ ok: true, data: { MethodID: data.id, Status: data.status } })
     }
 
     if (action === 'paymentMethods.adminList') {
       const { data: rows, error } = await admin.from('teacher_payment_methods').select('*').order('created_at', { ascending: false }).limit(500)
       if (error) throw error
-      const teacherIds = [...new Set((rows || []).map((r) => r.teacher_id))], subjectIds = [...new Set((rows || []).map((r) => r.subject_id))]
+      const teacherIds = [...new Set((rows || []).map((r) => r.teacher_id))], subjectIds = [...new Set((rows || []).flatMap((r) => Array.isArray(r.subject_ids) && r.subject_ids.length ? r.subject_ids : [r.subject_id]))]
       const [{ data: teachers }, { data: subjects }] = await Promise.all([
         teacherIds.length ? admin.from('teachers').select('id,name').in('id', teacherIds) : { data: [] },
         subjectIds.length ? admin.from('subjects').select('id,name').in('id', subjectIds) : { data: [] },
@@ -2085,8 +2091,10 @@ Deno.serve(async (request) => {
       const tm = new Map((teachers || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name]))
       const result = await Promise.all((rows || []).map(async (r) => {
         const signed = r.qr_path ? await admin.storage.from('teacher-payment-qr').createSignedUrl(r.qr_path, 3600) : { data: null }
+        const methodSubjectIds = Array.isArray(r.subject_ids) && r.subject_ids.length ? r.subject_ids : [r.subject_id]
+        const methodSubjectNames = methodSubjectIds.map((id) => sm.get(id) || id)
         return { MethodID: r.id, TeacherID: r.teacher_id, TeacherName: tm.get(r.teacher_id) || r.teacher_id,
-          SubjectID: r.subject_id, SubjectName: sm.get(r.subject_id) || r.subject_id, UpiID: r.upi_id,
+          SubjectID: r.subject_id, SubjectName: methodSubjectNames[0] || r.subject_id, SubjectIDs: methodSubjectIds, SubjectNames: methodSubjectNames, UpiID: r.upi_id,
           PaymentLink: r.payment_link, QRUrl: signed.data?.signedUrl || '', Status: r.status,
           ReviewNote: r.review_note, CreatedAt: r.created_at }
       }))
@@ -2096,7 +2104,7 @@ Deno.serve(async (request) => {
     if (action === 'paymentMethods.review') {
       const id = requireText(payload.methodId, 'Payment option', 60, true), decision = String(payload.decision || '').toUpperCase()
       if (!['APPROVED','REJECTED'].includes(decision)) throw new ApiFault('BAD_REQUEST', 'Choose approve or reject.')
-      const { data: method, error: methodError } = await admin.from('teacher_payment_methods').select('teacher_id,subject_id').eq('id', id).eq('status', 'PENDING').maybeSingle()
+      const { data: method, error: methodError } = await admin.from('teacher_payment_methods').select('teacher_id,subject_id,subject_ids').eq('id', id).eq('status', 'PENDING').maybeSingle()
       if (methodError) throw methodError
       if (!method) throw new ApiFault('CONFLICT', 'This payment option has already been reviewed. Refresh the list.')
       const { data, error } = await admin.from('teacher_payment_methods').update({ status: decision, review_note: String(payload.note || '').trim().slice(0, 300), reviewed_by: user.id, reviewed_at: new Date().toISOString() })
@@ -2104,9 +2112,19 @@ Deno.serve(async (request) => {
       if (error) throw error
       if (!data) throw new ApiFault('CONFLICT', 'This payment option has already been reviewed. Refresh the list.')
       if (decision === 'APPROVED') {
-        const { error: supersedeError } = await admin.from('teacher_payment_methods').update({ status: 'REJECTED', review_note: 'Replaced by a newer approved option.', reviewed_by: user.id, reviewed_at: new Date().toISOString() })
-          .eq('teacher_id', method.teacher_id).eq('subject_id', method.subject_id).eq('status', 'APPROVED').neq('id', id)
-        if (supersedeError) throw supersedeError
+        const coveredSubjectIds = Array.isArray(method.subject_ids) && method.subject_ids.length ? method.subject_ids : [method.subject_id]
+        const { data: overlapping, error: overlapError } = await admin.from('teacher_payment_methods').select('id,subject_id,subject_ids')
+          .eq('teacher_id', method.teacher_id).overlaps('subject_ids', coveredSubjectIds).eq('status', 'APPROVED').neq('id', id)
+        if (overlapError) throw overlapError
+        for (const previous of overlapping || []) {
+          const previousSubjects = Array.isArray(previous.subject_ids) && previous.subject_ids.length ? previous.subject_ids : [previous.subject_id]
+          const remainingSubjects = previousSubjects.filter((subjectId) => !coveredSubjectIds.includes(subjectId))
+          const replacement = remainingSubjects.length
+            ? { subject_ids: remainingSubjects, subject_id: remainingSubjects[0] }
+            : { status: 'REJECTED', review_note: 'Replaced by a newer approved option.', reviewed_by: user.id, reviewed_at: new Date().toISOString() }
+          const { error: updateError } = await admin.from('teacher_payment_methods').update(replacement).eq('id', previous.id).eq('status', 'APPROVED')
+          if (updateError) throw updateError
+        }
       }
       await logAction(admin, user, `PAYMENT_METHOD_${decision}`, 'TEACHER_PAYMENT_METHOD', id, {})
       return response({ ok: true, data: { ok: true } })
@@ -2120,11 +2138,12 @@ Deno.serve(async (request) => {
       if (!Number.isFinite(amount) || amount < 1) throw new ApiFault('BAD_REQUEST', 'Enter a valid amount.')
       const [{ data: invoice }, { data: method }, { data: pending }] = await Promise.all([
         admin.from('invoices').select('*').eq('id', invoiceId).eq('student_id', user.linked_id).maybeSingle(),
-        admin.from('teacher_payment_methods').select('id,teacher_id,subject_id,status').eq('id', methodId).maybeSingle(),
+        admin.from('teacher_payment_methods').select('id,teacher_id,subject_id,subject_ids,status').eq('id', methodId).maybeSingle(),
         admin.from('payment_submissions').select('id,allocations').eq('invoice_id', invoiceId).eq('student_id', user.linked_id).eq('status', 'PENDING').limit(100),
       ])
       if (!invoice || String(invoice.status).toUpperCase() === 'CANCELLED') throw new ApiFault('NOT_FOUND', 'Invoice not found.')
-      if (!method || method.status !== 'APPROVED' || method.subject_id !== subjectId) throw new ApiFault('BAD_REQUEST', 'This payment option is no longer available. Refresh the invoice.')
+      const methodSubjectIds = method && Array.isArray(method.subject_ids) && method.subject_ids.length ? method.subject_ids : (method ? [method.subject_id] : [])
+      if (!method || method.status !== 'APPROVED' || !methodSubjectIds.includes(subjectId)) throw new ApiFault('BAD_REQUEST', 'This payment option is no longer available. Refresh the invoice.')
       const { data: assignment } = await admin.from('student_subjects').select('id').eq('student_id', user.linked_id).eq('subject_id', subjectId).eq('teacher_id', method.teacher_id).ilike('status', 'active').limit(1).maybeSingle()
       if (!assignment) throw new ApiFault('BAD_REQUEST', 'That subject is not currently assigned to this teacher for you.')
       if ((pending || []).some((claim) => allocationsFromPayment(claim.allocations).some((allocation) => String(allocation.subjectId) === subjectId)))
@@ -2355,16 +2374,17 @@ Deno.serve(async (request) => {
       if (assignmentError) throw assignmentError
       const pairs = [...new Map((assignments || []).filter((a) => a.teacher_id).map((a) => [`${a.teacher_id}:${a.subject_id}`, a])).values()]
       const { data: methods, error: methodsError } = pairs.length
-        ? await admin.from('teacher_payment_methods').select('id,teacher_id,subject_id,upi_id,payment_link,qr_path,status').eq('status', 'APPROVED')
-          .in('teacher_id', [...new Set(pairs.map((a) => a.teacher_id))]).in('subject_id', [...new Set(pairs.map((a) => a.subject_id))])
+        ? await admin.from('teacher_payment_methods').select('id,teacher_id,subject_id,subject_ids,upi_id,payment_link,qr_path,status').eq('status', 'APPROVED')
+          .in('teacher_id', [...new Set(pairs.map((a) => a.teacher_id))]).overlaps('subject_ids', [...new Set(pairs.map((a) => a.subject_id))])
         : { data: [], error: null }
       if (methodsError) throw methodsError
       const pairSet = new Set(pairs.map((a) => `${a.teacher_id}:${a.subject_id}`))
       const { data: teachers } = pairs.length ? await admin.from('teachers').select('id,name').in('id', [...new Set(pairs.map((a) => a.teacher_id))]) : { data: [] }
       const teacherNames = new Map((teachers || []).map((t) => [t.id, t.name]))
-      const paymentOptions = await Promise.all((methods || []).filter((m) => pairSet.has(`${m.teacher_id}:${m.subject_id}`)).map(async (m) => {
+      const paymentOptions = await Promise.all((methods || []).filter((m) => (Array.isArray(m.subject_ids) && m.subject_ids.length ? m.subject_ids : [m.subject_id]).some((subjectId) => pairSet.has(`${m.teacher_id}:${subjectId}`))).map(async (m) => {
         const signed = m.qr_path ? await admin.storage.from('teacher-payment-qr').createSignedUrl(m.qr_path, 3600) : { data: null }
-        return { MethodID: m.id, SubjectID: m.subject_id, TeacherName: teacherNames.get(m.teacher_id) || '',
+        const coveredSubjectIds = Array.isArray(m.subject_ids) && m.subject_ids.length ? m.subject_ids : [m.subject_id]
+        return { MethodID: m.id, SubjectID: m.subject_id, SubjectIDs: coveredSubjectIds, TeacherID: m.teacher_id, TeacherName: teacherNames.get(m.teacher_id) || '',
           UpiID: m.upi_id, PaymentLink: m.payment_link, QRUrl: signed.data?.signedUrl || '' }
       }))
       return response({ ok: true, data: { invoice: { InvoiceID: invoice.id, Month: invoice.month, MonthLabel: monthLabel(invoice.month),

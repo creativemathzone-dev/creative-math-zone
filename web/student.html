@@ -982,15 +982,18 @@ function showInvoiceDoc(d, subjectId) {
       esc(mine.map(a => a.subjectName).join(', ') || 'All subjects') + '</td><td class="r"><b>' + money(amt) + '</b></td></tr>';
   }).filter(Boolean);
   const only = subjectId ? lines[0].subjectName : '';
-  const options=(d.paymentOptions||[]).filter(o=>lines.some(l=>String(l.subjectId)===String(o.SubjectID)));
+  const options=(d.paymentOptions||[]).filter(o=>(o.SubjectIDs||[o.SubjectID]).some(id=>lines.some(l=>String(l.subjectId)===String(id)&&Number(l.balanceAmount)>0)));
   const optionRows=options.length?'<section class="payment-instructions" style="margin-top:1rem"><h2 style="font-size:1.05rem">Payment options</h2><p class="muted" style="font-size:.82rem">Use the approved details for the matching subject. A staff member must verify payment before it appears as paid.</p>'+options.map(o=>{
-    const line=lines.find(l=>String(l.subjectId)===String(o.SubjectID));if(!line||Number(line.balanceAmount)<=0)return '';
-    const pending=(d.pendingSubmissions||[]).find(p=>(p.Allocations||[]).some(a=>String(a.subjectId)===String(o.SubjectID)));
-    return '<div class="pay-option"><b>'+esc(line.subjectName)+'</b><div class="muted">Payment details approved for '+esc(o.TeacherName||'your teacher')+'</div>'+
+    const coveredIds=o.SubjectIDs||[o.SubjectID];
+    const coveredLines=lines.filter(l=>coveredIds.some(id=>String(id)===String(l.subjectId))&&Number(l.balanceAmount)>0);
+    if(!coveredLines.length)return '';
+    return '<div class="pay-option"><b>'+esc(coveredLines.map(l=>l.subjectName).join(', '))+'</b><div class="muted">One approved payment option for these subjects · '+esc(o.TeacherName||'your teacher')+'</div>'+
       (o.QRUrl?'<img src="'+esc(o.QRUrl)+'" alt="Approved payment QR">':'')+(o.UpiID?'<div>UPI ID: <b>'+esc(o.UpiID)+'</b></div>':'')+
       (o.PaymentLink?'<div>Payment link: <a href="'+esc(o.PaymentLink)+'" target="_blank" rel="noopener">'+esc(o.PaymentLink)+'</a></div>':'')+
-      (pending?'<div class="pill warn">Payment submitted · awaiting staff verification</div><div class="muted no-print">₹'+Number(pending.Amount).toLocaleString('en-IN')+' · Ref: '+esc(pending.Reference)+'</div>':
-        '<form class="no-print" data-student-payment data-invoice="'+esc(inv.InvoiceID)+'" data-method="'+esc(o.MethodID)+'" data-subject="'+esc(o.SubjectID)+'" data-balance="'+esc(line.balanceAmount)+'" style="margin-top:.5rem"><div class="grid2"><label class="f"><span>Amount paid</span><input name="amount" type="number" min="1" step=".01" max="'+esc(line.balanceAmount)+'" value="'+esc(line.balanceAmount)+'" required></label><label class="f"><span>Payment mode</span><select name="mode"><option value="UPI">UPI</option><option value="BANK_TRANSFER">Bank transfer</option></select></label><label class="f full"><span>Transaction reference / UTR</span><input name="reference" maxlength="100" required></label></div><button class="btn primary">Submit for verification</button></form>')+'</div>';
+      coveredLines.map(line=>{
+        const pending=(d.pendingSubmissions||[]).find(p=>(p.Allocations||[]).some(a=>String(a.subjectId)===String(line.subjectId)));
+        return '<div style="border-top:1px solid var(--line);padding-top:.6rem;margin-top:.6rem"><b>'+esc(line.subjectName)+'</b> · Balance '+money(line.balanceAmount)+(pending?'<div class="pill warn">Payment submitted · awaiting staff verification</div><div class="muted no-print">₹'+Number(pending.Amount).toLocaleString('en-IN')+' · Ref: '+esc(pending.Reference)+'</div>':'<form class="no-print" data-student-payment data-invoice="'+esc(inv.InvoiceID)+'" data-method="'+esc(o.MethodID)+'" data-subject="'+esc(line.subjectId)+'" data-balance="'+esc(line.balanceAmount)+'" style="margin-top:.5rem"><div class="grid2"><label class="f"><span>Amount paid</span><input name="amount" type="number" min="1" step=".01" max="'+esc(line.balanceAmount)+'" value="'+esc(line.balanceAmount)+'" required></label><label class="f"><span>Payment mode</span><select name="mode"><option value="UPI">UPI</option><option value="BANK_TRANSFER">Bank transfer</option></select></label><label class="f full"><span>Transaction reference / UTR</span><input name="reference" maxlength="100" required></label></div><button class="btn primary">Submit for verification</button></form>')+'</div>';
+      }).join('')+'</div>';
   }).join('')+'</section>':'<p class="muted no-print" style="margin-top:1rem">No approved online payment option is available for these subjects yet. Contact the centre to pay.</p>';
   docShell(docHead(c) +
     (bal <= 0 ? '<div style="position:absolute;top:40%;left:50%;transform:translate(-50%,-50%) rotate(-20deg);font:900 5rem/1 var(--display);color:rgba(31,122,85,.15);border:6px solid rgba(31,122,85,.15);padding:.1em .3em;border-radius:12px;pointer-events:none;user-select:none">PAID</div>' : '') +

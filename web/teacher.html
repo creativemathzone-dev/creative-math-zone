@@ -870,11 +870,11 @@ VIEWS.profile = async main => {
       '<label class="f"><span>Confirm</span><input name="n2" type="password" required></label>' +
     '</div><button class="btn primary" id="pw2-btn">Update password</button></form></div>' +
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Passkey sign-in</h2><p class="muted">Use your device passkey: fingerprint, face, device PIN, or a security key.</p><div id="passkey-list"></div><button class="btn primary" id="passkey-add" type="button">Add a passkey on this device</button></div>' +
-    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.4rem">Student payment details</h2><p class="muted">Submit a UPI ID, payment link, or QR image for each subject. Students can see it only after an admin approves it.</p>' +
-      (paymentSetup.subjects.length ? '<form id="teacher-payment-form"><label class="f"><span>Subject</span><select name="subjectId" required>'+paymentSetup.subjects.map(s=>'<option value="'+esc(s.SubjectID)+'">'+esc(s.SubjectName)+'</option>').join('')+'</select></label>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.4rem">Student payment details</h2><p class="muted">Select every subject that uses the same UPI ID, payment link, or QR image. Students can see the details only after an admin approves them. Submit another option for subjects using a different account.</p>' +
+      (paymentSetup.subjects.length ? '<form id="teacher-payment-form"><fieldset class="f" style="border:0;padding:0;margin:0 0 1rem"><legend style="font-weight:600;margin-bottom:.4rem">Subjects covered by this payment option</legend><div class="grid2">'+paymentSetup.subjects.map(s=>'<label style="display:flex;align-items:center;gap:.5rem;padding:.45rem .6rem;border:1px solid var(--line);border-radius:8px"><input type="checkbox" name="subjectIds" value="'+esc(s.SubjectID)+'">'+esc(s.SubjectName)+'</label>').join('')+'</div></fieldset>' +
         '<div class="grid2"><label class="f"><span>UPI ID (optional)</span><input name="upiId" maxlength="100" placeholder="name@bank"></label><label class="f"><span>Payment link (optional)</span><input name="paymentLink" type="url" maxlength="500" placeholder="https://… or UPI link"></label></div>' +
         '<label class="f"><span>QR image (PNG, JPG, WebP; max 1.5 MB)</span><input name="qr" type="file" accept="image/png,image/jpeg,image/webp"></label><button class="btn primary" id="teacher-payment-save">Submit for admin approval</button></form>' : '<p class="muted">No subjects are currently assigned to your account.</p>') +
-      '<div id="teacher-payment-methods" style="margin-top:1rem">'+(paymentSetup.methods.length ? paymentSetup.methods.map(m=>'<div style="border-top:1px solid var(--line);padding:.65rem 0"><b>'+esc(m.SubjectName)+'</b> · '+pill(m.Status)+(m.UpiID?'<div>UPI: '+esc(m.UpiID)+'</div>':'')+(m.PaymentLink?'<div><a href="'+esc(m.PaymentLink)+'" target="_blank" rel="noopener">Payment link</a></div>':'')+(m.ReviewNote?'<div class="muted">Admin: '+esc(m.ReviewNote)+'</div>':'')+'</div>').join(''):'<p class="muted">No payment details submitted yet.</p>')+'</div></div>';
+      '<div id="teacher-payment-methods" style="margin-top:1rem">'+(paymentSetup.methods.length ? paymentSetup.methods.map(m=>'<div style="border-top:1px solid var(--line);padding:.65rem 0"><b>'+esc((m.SubjectNames||[m.SubjectName]).join(', '))+'</b> · '+pill(m.Status)+(m.UpiID?'<div>UPI: '+esc(m.UpiID)+'</div>':'')+(m.PaymentLink?'<div><a href="'+esc(m.PaymentLink)+'" target="_blank" rel="noopener">Payment link</a></div>':'')+(m.ReviewNote?'<div class="muted">Admin: '+esc(m.ReviewNote)+'</div>':'')+'</div>').join(''):'<p class="muted">No payment details submitted yet.</p>')+'</div></div>';
   if(window.CMZPasskey)window.CMZPasskey.renderManager($('#passkey-list'),$('#passkey-add'),esc,toast);
   $('#pw2-f').addEventListener('submit', ev => { ev.preventDefault(); busy($('#pw2-btn'), async () => {
     const f=ev.target.elements;
@@ -887,11 +887,13 @@ VIEWS.profile = async main => {
   }); });
   const paymentForm = $('#teacher-payment-form');
   if (paymentForm) paymentForm.addEventListener('submit', ev => { ev.preventDefault(); busy($('#teacher-payment-save'), async () => {
+    const subjectIds = [...paymentForm.querySelectorAll('[name="subjectIds"]:checked')].map(input => input.value);
+    if (!subjectIds.length) throw { error: 'Select at least one subject for this payment option.' };
     const file = paymentForm.elements.qr.files[0];
     if (file && file.size > 1572864) throw { error: 'QR image must be 1.5 MB or smaller.' };
     let qrBase64 = '';
     if (file) { const dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); qrBase64 = String(dataUrl).split(',')[1] || ''; }
-    await api('teacher.paymentMethods.save', { subjectId: paymentForm.elements.subjectId.value, upiId: paymentForm.elements.upiId.value.trim(),
+    await api('teacher.paymentMethods.save', { subjectIds, upiId: paymentForm.elements.upiId.value.trim(),
       paymentLink: paymentForm.elements.paymentLink.value.trim(), qrBase64, qrMime: file ? file.type : '' });
     toast('Payment details sent to the admin for approval.'); go('profile');
   }); });
