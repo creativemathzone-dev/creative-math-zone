@@ -851,7 +851,7 @@ VIEWS.income = async main => {
 
 /* ---- profile / change password ---- */
 VIEWS.profile = async main => {
-  const me = await api('auth.me');
+  const [me, paymentSetup] = await Promise.all([api('auth.me'), api('teacher.paymentMethods.list')]);
   const p = me.profile || {};
   main.innerHTML = '<div class="head"><h1>My profile</h1></div>' +
     '<div class="card"><dl class="kv" style="display:grid;grid-template-columns:150px 1fr;gap:.35rem 1rem;margin:0">' +
@@ -869,7 +869,12 @@ VIEWS.profile = async main => {
       '<label class="f"><span>New password</span><input name="n1" type="password" required></label>' +
       '<label class="f"><span>Confirm</span><input name="n2" type="password" required></label>' +
     '</div><button class="btn primary" id="pw2-btn">Update password</button></form></div>' +
-    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Passkey sign-in</h2><p class="muted">Use your device passkey: fingerprint, face, device PIN, or a security key.</p><div id="passkey-list"></div><button class="btn primary" id="passkey-add" type="button">Add a passkey on this device</button></div>';
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Passkey sign-in</h2><p class="muted">Use your device passkey: fingerprint, face, device PIN, or a security key.</p><div id="passkey-list"></div><button class="btn primary" id="passkey-add" type="button">Add a passkey on this device</button></div>' +
+    '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.4rem">Student payment details</h2><p class="muted">Submit a UPI ID, payment link, or QR image for each subject. Students can see it only after an admin approves it.</p>' +
+      (paymentSetup.subjects.length ? '<form id="teacher-payment-form"><label class="f"><span>Subject</span><select name="subjectId" required>'+paymentSetup.subjects.map(s=>'<option value="'+esc(s.SubjectID)+'">'+esc(s.SubjectName)+'</option>').join('')+'</select></label>' +
+        '<div class="grid2"><label class="f"><span>UPI ID (optional)</span><input name="upiId" maxlength="100" placeholder="name@bank"></label><label class="f"><span>Payment link (optional)</span><input name="paymentLink" type="url" maxlength="500" placeholder="https://… or UPI link"></label></div>' +
+        '<label class="f"><span>QR image (PNG, JPG, WebP; max 1.5 MB)</span><input name="qr" type="file" accept="image/png,image/jpeg,image/webp"></label><button class="btn primary" id="teacher-payment-save">Submit for admin approval</button></form>' : '<p class="muted">No subjects are currently assigned to your account.</p>') +
+      '<div id="teacher-payment-methods" style="margin-top:1rem">'+(paymentSetup.methods.length ? paymentSetup.methods.map(m=>'<div style="border-top:1px solid var(--line);padding:.65rem 0"><b>'+esc(m.SubjectName)+'</b> · '+pill(m.Status)+(m.UpiID?'<div>UPI: '+esc(m.UpiID)+'</div>':'')+(m.PaymentLink?'<div><a href="'+esc(m.PaymentLink)+'" target="_blank" rel="noopener">Payment link</a></div>':'')+(m.ReviewNote?'<div class="muted">Admin: '+esc(m.ReviewNote)+'</div>':'')+'</div>').join(''):'<p class="muted">No payment details submitted yet.</p>')+'</div></div>';
   if(window.CMZPasskey)window.CMZPasskey.renderManager($('#passkey-list'),$('#passkey-add'),esc,toast);
   $('#pw2-f').addEventListener('submit', ev => { ev.preventDefault(); busy($('#pw2-btn'), async () => {
     const f=ev.target.elements;
@@ -879,6 +884,16 @@ VIEWS.profile = async main => {
     if(window.CMZPasskey&&S.refreshToken)await window.CMZPasskey.setSession(S.token,S.refreshToken);
     try { sessionStorage.setItem('cmz_tt', r.token); if(S.refreshToken)sessionStorage.setItem('cmz_trt',S.refreshToken); } catch(e){}
     toast('Password changed.'); ev.target.reset();
+  }); });
+  const paymentForm = $('#teacher-payment-form');
+  if (paymentForm) paymentForm.addEventListener('submit', ev => { ev.preventDefault(); busy($('#teacher-payment-save'), async () => {
+    const file = paymentForm.elements.qr.files[0];
+    if (file && file.size > 1572864) throw { error: 'QR image must be 1.5 MB or smaller.' };
+    let qrBase64 = '';
+    if (file) { const dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); qrBase64 = String(dataUrl).split(',')[1] || ''; }
+    await api('teacher.paymentMethods.save', { subjectId: paymentForm.elements.subjectId.value, upiId: paymentForm.elements.upiId.value.trim(),
+      paymentLink: paymentForm.elements.paymentLink.value.trim(), qrBase64, qrMime: file ? file.type : '' });
+    toast('Payment details sent to the admin for approval.'); go('profile');
   }); });
 };
 

@@ -697,6 +697,9 @@ Deno.serve(async (request) => {
       'invoices.generate': 'FINANCE_EDIT', 'invoices.cancel': 'FINANCE_EDIT',
       'payments.record': 'FINANCE_EDIT', 'receipts.list': 'FINANCE_VIEW',
       'receipts.get': 'FINANCE_VIEW', 'receipts.void': 'FINANCE_EDIT',
+      'teacher.paymentMethods.list': 'SELF_VIEW', 'teacher.paymentMethods.save': 'SELF_VIEW',
+      'paymentMethods.adminList': 'FINANCE_VIEW', 'paymentMethods.review': 'FINANCE_EDIT',
+      'student.paymentSubmit': 'SELF_VIEW', 'paymentSubmissions.adminList': 'FINANCE_VIEW', 'paymentSubmissions.review': 'FINANCE_EDIT',
       'student.invoices': 'SELF_VIEW', 'student.receipt': 'SELF_VIEW', 'student.invoiceDoc': 'SELF_VIEW',
       'teacher.homework.list': 'SELF_VIEW', 'teacher.homework.create': 'CLASS_RUN', 'teacher.homework.review': 'CLASS_RUN',
       'student.homework.list': 'SELF_VIEW', 'student.homework.submit': 'SELF_VIEW',
@@ -1993,6 +1996,15 @@ Deno.serve(async (request) => {
       }
       const amount = Math.round(allocations.reduce((sum, a) => sum + a.amount, 0) * 100) / 100
       if (amount < 1 || amount > balance + 0.005) throw new ApiFault('BAD_REQUEST', 'Payment total is outside the invoice balance.')
+      let reissueOf = ''
+      if (payload.reissueReceiptId) {
+        reissueOf = requireText(payload.reissueReceiptId, 'Previous receipt', 60, true)
+        const { data: previous, error: previousError } = await admin.from('receipts').select('id,student_id,payment_id,status').eq('id', reissueOf).maybeSingle()
+        if (previousError) throw previousError
+        if (!previous || String(previous.status).toUpperCase() !== 'VOID' || previous.student_id !== invoice.student_id) throw new ApiFault('BAD_REQUEST', 'Choose a voided receipt for this student.')
+        const { data: previousPayment } = await admin.from('payments').select('invoice_id').eq('id', previous.payment_id).maybeSingle()
+        if (previousPayment?.invoice_id !== invoiceId) throw new ApiFault('BAD_REQUEST', 'The voided receipt belongs to a different invoice.')
+      }
       const paymentId = await newId(admin, 'payments', 'PAY-', 5)
       const receiptId = await newId(admin, 'receipts', `CMZ-${paymentDate.replaceAll('-', '')}-`, 3)
       const { data, error } = await admin.rpc('record_payment_transaction', { p_payment_id: paymentId, p_receipt_id: receiptId,
@@ -2005,9 +2017,173 @@ Deno.serve(async (request) => {
         if (error.message.includes('balance') || error.message.includes('paid')) throw new ApiFault('BAD_REQUEST', 'The invoice balance changed. Refresh the invoice and try again.')
         throw error
       }
+      if (reissueOf) {
+        const { error: linkError } = await admin.from('receipts').update({ reissue_of: reissueOf }).eq('id', receiptId)
+        if (linkError) throw linkError
+        await admin.from('receipts').update({ reissued_by: receiptId }).eq('id', reissueOf)
+      }
       await logAction(admin, user, 'ADD_PAYMENT', 'PAYMENT', paymentId, { invoiceId, amount, mode, receiptId, allocations })
       await logAction(admin, user, 'CREATE_RECEIPT', 'RECEIPT', receiptId, { paymentId, amount })
       return response({ ok: true, data })
+    }
+
+    if (action === 'teacher.paymentMethods.list' || action === 'teacher.paymentMethods.save') {
+      if (user.user_type !== 'TEACHER' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only available in the teacher portal.')
+      if (action === 'teacher.paymentMethods.list') {
+        const { data: rows, error } = await admin.from('teacher_payment_methods').select('*').eq('teacher_id', user.linked_id).order('created_at', { ascending: false })
+        if (error) throw error
+        const { data: assigned, error: assignedError } = await admin.from('student_subjects').select('subject_id').eq('teacher_id', user.linked_id).ilike('status', 'active')
+        if (assignedError) throw assignedError
+        const subjectIds = [...new Set([...(rows || []).map((r) => r.subject_id), ...(assigned || []).map((r) => r.subject_id)])]
+        const { data: subjects } = subjectIds.length ? await admin.from('subjects').select('id,name').in('id', subjectIds) : { data: [] }
+        const subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
+        const result = await Promise.all((rows || []).map(async (r) => {
+          const signed = r.qr_path ? await admin.storage.from('teacher-payment-qr').createSignedUrl(r.qr_path, 3600) : { data: null }
+          return { MethodID: r.id, SubjectID: r.subject_id, SubjectName: subjectNames.get(r.subject_id) || r.subject_id,
+            UpiID: r.upi_id, PaymentLink: r.payment_link, QRPath: r.qr_path, QRUrl: signed.data?.signedUrl || '',
+            Status: r.status, ReviewNote: r.review_note, CreatedAt: r.created_at }
+        }))
+        return response({ ok: true, data: { subjects: (subjects || []).map((s) => ({ SubjectID: s.id, SubjectName: s.name })), methods: result } })
+      }
+      const subjectId = requireText(payload.subjectId, 'Subject', 40, true)
+      const { data: assignment, error: assignmentError } = await admin.from('student_subjects').select('id').eq('teacher_id', user.linked_id).eq('subject_id', subjectId).ilike('status', 'active').limit(1).maybeSingle()
+      if (assignmentError) throw assignmentError
+      if (!assignment) throw new ApiFault('BAD_REQUEST', 'You can add payment details only for a subject currently assigned to you.')
+      const upiId = String(payload.upiId || '').trim().slice(0, 100)
+      const paymentLink = String(payload.paymentLink || '').trim().slice(0, 500)
+      if (paymentLink && !/^(https:\/\/|upi:\/\/)/i.test(paymentLink)) throw new ApiFault('BAD_REQUEST', 'Payment link must start with https:// or upi://.')
+      let qrPath = ''
+      if (payload.qrBase64) {
+        const mime = String(payload.qrMime || '').toLowerCase()
+        const ext = ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' } as Record<string, string>)[mime]
+        if (!ext) throw new ApiFault('BAD_REQUEST', 'QR image must be PNG, JPG, or WebP.')
+        const encoded = String(payload.qrBase64).replace(/^data:[^,]+,/, '')
+        if (encoded.length > 2100000) throw new ApiFault('BAD_REQUEST', 'QR image must be 1.5 MB or smaller.')
+        let bytes: Uint8Array
+        try { bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)) } catch { throw new ApiFault('BAD_REQUEST', 'The QR image could not be read.') }
+        if (bytes.length > 1572864) throw new ApiFault('BAD_REQUEST', 'QR image must be 1.5 MB or smaller.')
+        qrPath = `${user.linked_id}/${subjectId}/${crypto.randomUUID()}.${ext}`
+        const { error: uploadError } = await admin.storage.from('teacher-payment-qr').upload(qrPath, bytes, { contentType: mime, upsert: false })
+        if (uploadError) throw uploadError
+      }
+      if (!upiId && !paymentLink && !qrPath) throw new ApiFault('BAD_REQUEST', 'Enter a UPI ID, payment link, or upload a QR image.')
+      const { data, error } = await admin.from('teacher_payment_methods').insert({ teacher_id: user.linked_id, subject_id: subjectId,
+        upi_id: upiId, payment_link: paymentLink, qr_path: qrPath, status: 'PENDING' }).select('id,status').single()
+      if (error) throw error
+      await logAction(admin, user, 'SUBMIT_PAYMENT_METHOD', 'TEACHER_PAYMENT_METHOD', data.id, { subjectId })
+      return response({ ok: true, data: { MethodID: data.id, Status: data.status } })
+    }
+
+    if (action === 'paymentMethods.adminList') {
+      const { data: rows, error } = await admin.from('teacher_payment_methods').select('*').order('created_at', { ascending: false }).limit(500)
+      if (error) throw error
+      const teacherIds = [...new Set((rows || []).map((r) => r.teacher_id))], subjectIds = [...new Set((rows || []).map((r) => r.subject_id))]
+      const [{ data: teachers }, { data: subjects }] = await Promise.all([
+        teacherIds.length ? admin.from('teachers').select('id,name').in('id', teacherIds) : { data: [] },
+        subjectIds.length ? admin.from('subjects').select('id,name').in('id', subjectIds) : { data: [] },
+      ])
+      const tm = new Map((teachers || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name]))
+      const result = await Promise.all((rows || []).map(async (r) => {
+        const signed = r.qr_path ? await admin.storage.from('teacher-payment-qr').createSignedUrl(r.qr_path, 3600) : { data: null }
+        return { MethodID: r.id, TeacherID: r.teacher_id, TeacherName: tm.get(r.teacher_id) || r.teacher_id,
+          SubjectID: r.subject_id, SubjectName: sm.get(r.subject_id) || r.subject_id, UpiID: r.upi_id,
+          PaymentLink: r.payment_link, QRUrl: signed.data?.signedUrl || '', Status: r.status,
+          ReviewNote: r.review_note, CreatedAt: r.created_at }
+      }))
+      return response({ ok: true, data: result })
+    }
+
+    if (action === 'paymentMethods.review') {
+      const id = requireText(payload.methodId, 'Payment option', 60, true), decision = String(payload.decision || '').toUpperCase()
+      if (!['APPROVED','REJECTED'].includes(decision)) throw new ApiFault('BAD_REQUEST', 'Choose approve or reject.')
+      const { data: method, error: methodError } = await admin.from('teacher_payment_methods').select('teacher_id,subject_id').eq('id', id).eq('status', 'PENDING').maybeSingle()
+      if (methodError) throw methodError
+      if (!method) throw new ApiFault('CONFLICT', 'This payment option has already been reviewed. Refresh the list.')
+      const { data, error } = await admin.from('teacher_payment_methods').update({ status: decision, review_note: String(payload.note || '').trim().slice(0, 300), reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+        .eq('id', id).eq('status', 'PENDING').select('id').maybeSingle()
+      if (error) throw error
+      if (!data) throw new ApiFault('CONFLICT', 'This payment option has already been reviewed. Refresh the list.')
+      if (decision === 'APPROVED') {
+        const { error: supersedeError } = await admin.from('teacher_payment_methods').update({ status: 'REJECTED', review_note: 'Replaced by a newer approved option.', reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+          .eq('teacher_id', method.teacher_id).eq('subject_id', method.subject_id).eq('status', 'APPROVED').neq('id', id)
+        if (supersedeError) throw supersedeError
+      }
+      await logAction(admin, user, `PAYMENT_METHOD_${decision}`, 'TEACHER_PAYMENT_METHOD', id, {})
+      return response({ ok: true, data: { ok: true } })
+    }
+
+    if (action === 'student.paymentSubmit') {
+      if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only available in the student portal.')
+      const invoiceId = requireText(payload.invoiceId, 'Invoice', 60, true), methodId = requireText(payload.methodId, 'Payment option', 60, true)
+      const subjectId = requireText(payload.subjectId, 'Subject', 40, true), reference = requireText(payload.reference, 'Transaction reference', 100, true)
+      const amount = Math.round(Number(payload.amount) * 100) / 100
+      if (!Number.isFinite(amount) || amount < 1) throw new ApiFault('BAD_REQUEST', 'Enter a valid amount.')
+      const [{ data: invoice }, { data: method }, { data: pending }] = await Promise.all([
+        admin.from('invoices').select('*').eq('id', invoiceId).eq('student_id', user.linked_id).maybeSingle(),
+        admin.from('teacher_payment_methods').select('id,teacher_id,subject_id,status').eq('id', methodId).maybeSingle(),
+        admin.from('payment_submissions').select('id,allocations').eq('invoice_id', invoiceId).eq('student_id', user.linked_id).eq('status', 'PENDING').limit(100),
+      ])
+      if (!invoice || String(invoice.status).toUpperCase() === 'CANCELLED') throw new ApiFault('NOT_FOUND', 'Invoice not found.')
+      if (!method || method.status !== 'APPROVED' || method.subject_id !== subjectId) throw new ApiFault('BAD_REQUEST', 'This payment option is no longer available. Refresh the invoice.')
+      const { data: assignment } = await admin.from('student_subjects').select('id').eq('student_id', user.linked_id).eq('subject_id', subjectId).eq('teacher_id', method.teacher_id).ilike('status', 'active').limit(1).maybeSingle()
+      if (!assignment) throw new ApiFault('BAD_REQUEST', 'That subject is not currently assigned to this teacher for you.')
+      if ((pending || []).some((claim) => allocationsFromPayment(claim.allocations).some((allocation) => String(allocation.subjectId) === subjectId)))
+        throw new ApiFault('CONFLICT', 'A payment for this subject is already awaiting review.')
+      const line = normalizedInvoiceLines(invoice).find((x) => String(x.subjectId) === subjectId)
+      if (!line || amount > Number(line.balanceAmount) + 0.005) throw new ApiFault('BAD_REQUEST', 'Amount exceeds the selected subject balance.')
+      const allocations = [{ subjectId, subjectName: String(line.subjectName || subjectId), amount }]
+      const { data, error } = await admin.from('payment_submissions').insert({ invoice_id: invoiceId, student_id: user.linked_id,
+        amount, payment_mode: String(payload.mode || 'UPI').toUpperCase() === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : 'UPI',
+        transaction_reference: reference, allocations, status: 'PENDING' }).select('id').single()
+      if (error) throw error
+      return response({ ok: true, data: { SubmissionID: data.id, Status: 'PENDING' } })
+    }
+
+    if (action === 'paymentSubmissions.adminList') {
+      let query = admin.from('payment_submissions').select('*').order('created_at', { ascending: false }).limit(500)
+      if (payload.status) query = query.eq('status', String(payload.status).toUpperCase())
+      const { data: rows, error } = await query
+      if (error) throw error
+      const studentIds = [...new Set((rows || []).map((r) => r.student_id))], invoiceIds = [...new Set((rows || []).map((r) => r.invoice_id))]
+      const [{ data: students }, { data: invoices }] = await Promise.all([
+        studentIds.length ? admin.from('students').select('id,name,current_class,current_batch_id').in('id', studentIds) : { data: [] },
+        invoiceIds.length ? admin.from('invoices').select('id,month').in('id', invoiceIds) : { data: [] },
+      ])
+      const batchIds = [...new Set((students || []).map((s) => s.current_batch_id).filter(Boolean))]
+      const { data: batches } = batchIds.length ? await admin.from('batches').select('id,name').in('id', batchIds) : { data: [] }
+      const sm = new Map((students || []).map((x) => [x.id, x])), im = new Map((invoices || []).map((x) => [x.id, x])), bm = new Map((batches || []).map((x) => [x.id, x.name]))
+      return response({ ok: true, data: (rows || []).map((r) => { const s = sm.get(r.student_id); return { SubmissionID: r.id,
+        InvoiceID: r.invoice_id, Month: im.get(r.invoice_id)?.month || '', StudentID: r.student_id, StudentName: s?.name || r.student_id,
+        Class: s?.current_class || '', BatchName: bm.get(s?.current_batch_id) || '', Amount: Number(r.amount), Mode: r.payment_mode,
+        Reference: r.transaction_reference, Allocations: allocationsFromPayment(r.allocations), Status: r.status, ReviewNote: r.review_note, CreatedAt: r.created_at } }) })
+    }
+
+    if (action === 'paymentSubmissions.review') {
+      const id = requireText(payload.submissionId, 'Submission', 60, true), decision = String(payload.decision || '').toUpperCase()
+      if (!['APPROVED','REJECTED'].includes(decision)) throw new ApiFault('BAD_REQUEST', 'Choose approve or reject.')
+      const { data: claim, error: claimError } = await admin.from('payment_submissions').update({ status: decision === 'APPROVED' ? 'PROCESSING' : 'REJECTED',
+        review_note: String(payload.note || '').trim().slice(0, 300), reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+        .eq('id', id).eq('status', 'PENDING').select('*').maybeSingle()
+      if (claimError) throw claimError
+      if (!claim) throw new ApiFault('CONFLICT', 'This submission has already been reviewed. Refresh the list.')
+      if (decision === 'REJECTED') return response({ ok: true, data: { Status: 'REJECTED' } })
+      try {
+        const { data: invoice } = await admin.from('invoices').select('academic_year').eq('id', claim.invoice_id).maybeSingle()
+        const paymentId = await newId(admin, 'payments', 'PAY-', 5), receiptId = await newId(admin, 'receipts', `CMZ-${todayDate().replaceAll('-', '')}-`, 3)
+        const { data: result, error } = await admin.rpc('record_payment_transaction', { p_payment_id: paymentId, p_receipt_id: receiptId,
+          p_invoice_id: claim.invoice_id, p_payment_date: todayDate(), p_payment_mode: claim.payment_mode,
+          p_transaction_reference: claim.transaction_reference, p_notes: '', p_academic_year: invoice?.academic_year || '2026-27',
+          p_received_by: user.id, p_allocations: claim.allocations, p_receipt_format: 'A5' })
+        if (error) throw error
+        const { error: updateError } = await admin.from('payment_submissions').update({ status: 'APPROVED', payment_id: paymentId,
+          reviewed_at: new Date().toISOString() }).eq('id', id).eq('status', 'PROCESSING')
+        if (updateError) throw updateError
+        await logAction(admin, user, 'VERIFY_STUDENT_PAYMENT', 'PAYMENT_SUBMISSION', id, { paymentId, receiptId })
+        return response({ ok: true, data: { Status: 'APPROVED', PaymentID: paymentId, ReceiptID: receiptId, ...result } })
+      } catch (error) {
+        await admin.from('payment_submissions').update({ status: 'PENDING', reviewed_by: null, reviewed_at: null }).eq('id', id).eq('status', 'PROCESSING')
+        throw error
+      }
     }
 
     if (action === 'receipts.list') {
@@ -2071,9 +2247,14 @@ Deno.serve(async (request) => {
         if (inv) invoiceData = { InvoiceID: inv.id, Month: inv.month, MonthLabel: monthLabel(inv.month),
           LineItems: normalizedInvoiceLines(inv), TotalAmount: Number(inv.total_amount), PaidAmount: Number(inv.paid_amount), BalanceAmount: Number(inv.balance_amount) }
       }
+      const [{ data: replacement }, { data: original }] = await Promise.all([
+        admin.from('receipts').select('id').eq('reissue_of', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+        receipt.reissue_of ? admin.from('receipts').select('id').eq('id', receipt.reissue_of).maybeSingle() : Promise.resolve({ data: null }),
+      ])
       return response({ ok: true, data: { receipt: { ReceiptID: receipt.id, ReceiptDate: receipt.receipt_date,
         Amount: Number(receipt.amount), Status: receipt.status, Format: receipt.format, CreatedBy: creatorName,
-        CreatedAt: receipt.created_at, VoidedBy: receipt.voided_by, VoidDate: receipt.void_date, VoidReason: receipt.void_reason },
+        CreatedAt: receipt.created_at, VoidedBy: receipt.voided_by, VoidDate: receipt.void_date, VoidReason: receipt.void_reason,
+        ReissueOf: original?.id || '', ReissuedBy: replacement?.id || '' },
         payment: payment ? { PaymentID: payment.id, Mode: payment.payment_mode, Reference: payment.transaction_reference,
           Notes: payment.notes, PaymentDate: payment.payment_date, Allocations: allocationsFromPayment(payment.allocations) } : null,
         invoice: invoiceData, student: student ? { StudentID: student.id, Name: student.name, CurrentClass: student.current_class,
@@ -2146,7 +2327,7 @@ Deno.serve(async (request) => {
       return response({ ok: true, data: { receipt: { ReceiptID: receipt.id, ReceiptDate: receipt.receipt_date,
         Amount: Number(receipt.amount), Status: receipt.status, Format: receipt.format, CreatedBy: '', CreatedAt: receipt.created_at,
         VoidedBy: '', VoidDate: '', VoidReason: '' }, payment: payment ? { PaymentID: payment.id,
-          Mode: payment.payment_mode, Reference: payment.transaction_reference, Notes: payment.notes,
+          Mode: payment.payment_mode, Reference: payment.transaction_reference,
           PaymentDate: payment.payment_date, Allocations: allocationsFromPayment(payment.allocations) } : null,
         invoice, student: student ? { StudentID: student.id, Name: student.name, CurrentClass: student.current_class,
           CurrentBatch: student.current_batch_id, ParentName: student.parent_name, Mobile: student.mobile || student.parent_mobile } : null,
@@ -2157,21 +2338,43 @@ Deno.serve(async (request) => {
     if (action === 'student.invoiceDoc') {
       if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only available in the student portal.')
       const id = requireText(payload.invoiceId, 'Invoice ID', 60, true)
-      const [{ data: invoice, error }, { data: payments, error: paymentsError }, { data: student }, { data: settings }] = await Promise.all([
+      const [{ data: invoice, error }, { data: payments, error: paymentsError }, { data: student }, { data: settings }, { data: pendingSubmissions, error: pendingError }] = await Promise.all([
         admin.from('invoices').select('*').eq('id', id).eq('student_id', user.linked_id).maybeSingle(),
         admin.from('payments').select('*').eq('invoice_id', id).eq('student_id', user.linked_id).neq('status', 'VOID').order('payment_date'),
         admin.from('students').select('id,name,current_class,parent_name').eq('id', user.linked_id).maybeSingle(),
         admin.from('settings').select('setting_key,value').in('setting_key', ['CENTRE_NAME','TAGLINE','ADDRESS','MOBILE','EMAIL','WEBSITE','ACADEMIC_YEAR']),
+        admin.from('payment_submissions').select('allocations,amount,transaction_reference,created_at').eq('invoice_id', id).eq('student_id', user.linked_id).eq('status', 'PENDING'),
       ])
-      if (error || paymentsError) throw error || paymentsError
+      if (error || paymentsError || pendingError) throw error || paymentsError || pendingError
       if (!invoice || String(invoice.status).toUpperCase() === 'CANCELLED') throw new ApiFault('NOT_FOUND', 'Invoice not found.')
       const total = Number(invoice.total_amount) || 0, paid = Number(invoice.paid_amount) || 0
       const values = Object.fromEntries((settings || []).map((r) => [r.setting_key, r.value]))
+      const subjectIds = normalizedInvoiceLines(invoice).map((l) => String(l.subjectId)).filter(Boolean)
+      const { data: assignments, error: assignmentError } = await admin.from('student_subjects').select('subject_id,teacher_id')
+        .eq('student_id', user.linked_id).in('subject_id', subjectIds.length ? subjectIds : ['__none__']).ilike('status', 'active')
+      if (assignmentError) throw assignmentError
+      const pairs = [...new Map((assignments || []).filter((a) => a.teacher_id).map((a) => [`${a.teacher_id}:${a.subject_id}`, a])).values()]
+      const { data: methods, error: methodsError } = pairs.length
+        ? await admin.from('teacher_payment_methods').select('id,teacher_id,subject_id,upi_id,payment_link,qr_path,status').eq('status', 'APPROVED')
+          .in('teacher_id', [...new Set(pairs.map((a) => a.teacher_id))]).in('subject_id', [...new Set(pairs.map((a) => a.subject_id))])
+        : { data: [], error: null }
+      if (methodsError) throw methodsError
+      const pairSet = new Set(pairs.map((a) => `${a.teacher_id}:${a.subject_id}`))
+      const { data: teachers } = pairs.length ? await admin.from('teachers').select('id,name').in('id', [...new Set(pairs.map((a) => a.teacher_id))]) : { data: [] }
+      const teacherNames = new Map((teachers || []).map((t) => [t.id, t.name]))
+      const paymentOptions = await Promise.all((methods || []).filter((m) => pairSet.has(`${m.teacher_id}:${m.subject_id}`)).map(async (m) => {
+        const signed = m.qr_path ? await admin.storage.from('teacher-payment-qr').createSignedUrl(m.qr_path, 3600) : { data: null }
+        return { MethodID: m.id, SubjectID: m.subject_id, TeacherName: teacherNames.get(m.teacher_id) || '',
+          UpiID: m.upi_id, PaymentLink: m.payment_link, QRUrl: signed.data?.signedUrl || '' }
+      }))
       return response({ ok: true, data: { invoice: { InvoiceID: invoice.id, Month: invoice.month, MonthLabel: monthLabel(invoice.month),
         DueDate: invoice.due_date, Status: invoiceStatus(total, paid, invoice.due_date, invoice.status), TotalAmount: total,
         PaidAmount: paid, BalanceAmount: Math.max(0, total - paid) }, lines: normalizedInvoiceLines(invoice),
         payments: (payments || []).map((p) => ({ PaymentDate: p.payment_date, Amount: Number(p.amount) || 0,
           PaymentMode: p.payment_mode, ReceiptID: p.receipt_id, Allocations: allocationsFromPayment(p.allocations) })),
+        pendingSubmissions: (pendingSubmissions || []).map((p) => ({ Amount: Number(p.amount) || 0, Reference: p.transaction_reference,
+          CreatedAt: p.created_at, Allocations: allocationsFromPayment(p.allocations) })),
+        paymentOptions,
         student: student ? { StudentID: student.id, Name: student.name, CurrentClass: student.current_class, ParentName: student.parent_name } : null,
         centre: { name: values.CENTRE_NAME || 'Creative Math Zone', tagline: values.TAGLINE || '', address: values.ADDRESS || '',
           mobile: values.MOBILE || '', email: values.EMAIL || '', website: values.WEBSITE || '', academicYear: values.ACADEMIC_YEAR || '2026-27' } } })

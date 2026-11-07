@@ -141,13 +141,22 @@ th{font-size:.85rem;color:var(--ink-2);font-weight:600;background:#f1f5fa}
 #doc-paper{position:relative;max-width:800px;margin:0 auto;padding:1.5rem}
 #doc-paper table{font-size:.9rem}
 #doc-paper .r{text-align:right}
+#doc-paper .pay-option{border:1px solid var(--line);border-radius:10px;padding:.75rem;margin:.65rem 0}
+#doc-paper .pay-option img{width:150px;height:150px;object-fit:contain}
 @media print{
   html,body{background:#fff!important;overflow:visible!important}
   body>*:not(#doc-overlay){display:none!important}
   #doc-overlay{position:static;padding:0;overflow:visible;background:#fff}
   .doc-bar{display:none!important}
   #doc-paper{box-shadow:none;border:0;margin:0;max-width:100%;padding:0}
-  @page{margin:8mm}
+  @page{size:A5 portrait;margin:7mm}
+  .no-print{display:none!important}
+  #doc-paper{font-size:9pt!important;line-height:1.25!important}
+  #doc-paper h1,#doc-paper h2{break-after:avoid}
+  #doc-paper table{font-size:8pt!important;break-inside:auto}
+  #doc-paper tr{break-inside:avoid}
+  #doc-paper .pay-option{break-inside:avoid;border-color:#cbd5e1}
+  #doc-paper .pay-option img{width:105px;height:105px}
 }
 
 /* online registration */
@@ -896,6 +905,16 @@ function fieldHtml(f, val) {
 
 /* ---- downloadable receipt and invoice (Print / Save as PDF) ---- */
 const money = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
+function amountWords(value) {
+  const small=['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const under100=n=>n<20?small[n]:tens[Math.floor(n/10)]+(n%10?' '+small[n%10]:'');
+  const under1000=n=>(n>=100?small[Math.floor(n/100)]+' Hundred'+(n%100?' '+under100(n%100):''):under100(n));
+  let n=Math.floor(Math.abs(Number(value)||0)), parts=[];
+  for(const [unit,size] of [['Crore',10000000],['Lakh',100000],['Thousand',1000]]){if(n>=size){const q=Math.floor(n/size);parts.push(under1000(q)+' '+unit);n%=size;}}
+  if(n)parts.push(under1000(n));
+  return 'Rupees '+(parts.join(' ')||'Zero')+' Only';
+}
 
 function docHead(c) {
   const logoUrl = S.cfg && S.cfg.logoUrl || './icons/creative-math-zone-logo.png';
@@ -909,9 +928,10 @@ function docHead(c) {
 function docShell(inner) {
   let o = $('#doc-overlay');
   if (!o) { o = document.createElement('div'); o.id = 'doc-overlay'; document.body.appendChild(o); }
-  o.innerHTML = '<div class="doc-bar"><button class="btn" data-doc-close>← Back</button><button class="btn primary" data-doc-print>Print / Save as PDF</button></div>' +
+  o.innerHTML = '<div class="doc-bar"><button class="btn" data-doc-close>← Back</button><label class="f" style="margin:0;min-width:100px"><span>Paper</span><select id="doc-size"><option value="A5">A5</option><option value="A4">A4</option></select></label><button class="btn primary" data-doc-print>Print / Save as PDF</button></div>' +
     '<div id="doc-paper" class="card">' + inner + '</div>';
   o.scrollTop = 0;
+  $('#doc-size').addEventListener('change',e=>{let style=$('#doc-page-style');if(!style){style=document.createElement('style');style.id='doc-page-style';document.head.appendChild(style);}style.textContent='@media print{@page{size:'+e.target.value+' portrait;margin:'+(e.target.value==='A5'?'7mm':'10mm')+'}}';});
   document.body.style.overflow = 'hidden';
 }
 function closeDoc() { const o = $('#doc-overlay'); if (o) o.remove(); document.body.style.overflow = ''; }
@@ -938,6 +958,7 @@ function showReceiptDoc(d) {
     '<table><thead><tr><th>Subject</th><th class="r">Fee</th><th class="r">Paid now</th></tr></thead><tbody>' + rows + '</tbody></table>' +
     '<div style="border-top:2px solid var(--navy);padding-top:.6rem;margin-top:1rem">' +
       '<div style="display:flex;justify-content:space-between;font-size:1.1rem"><b>Amount received</b><b>' + money(r.Amount) + '</b></div>' +
+      '<div style="margin-top:.25rem;font-weight:600">'+esc(amountWords(r.Amount))+'</div>' +
       (inv ? '<div style="display:flex;justify-content:space-between;margin-top:.4rem"><span class="muted">Invoice total</span><span>' + money(inv.TotalAmount) + '</span></div>' +
              '<div style="display:flex;justify-content:space-between;margin-top:.2rem"><span class="muted">Invoice balance today</span><span>' + money(inv.BalanceAmount) + '</span></div>' : '') +
     '</div>' +
@@ -961,6 +982,16 @@ function showInvoiceDoc(d, subjectId) {
       esc(mine.map(a => a.subjectName).join(', ') || 'All subjects') + '</td><td class="r"><b>' + money(amt) + '</b></td></tr>';
   }).filter(Boolean);
   const only = subjectId ? lines[0].subjectName : '';
+  const options=(d.paymentOptions||[]).filter(o=>lines.some(l=>String(l.subjectId)===String(o.SubjectID)));
+  const optionRows=options.length?'<section class="payment-instructions" style="margin-top:1rem"><h2 style="font-size:1.05rem">Payment options</h2><p class="muted" style="font-size:.82rem">Use the approved details for the matching subject. A staff member must verify payment before it appears as paid.</p>'+options.map(o=>{
+    const line=lines.find(l=>String(l.subjectId)===String(o.SubjectID));if(!line||Number(line.balanceAmount)<=0)return '';
+    const pending=(d.pendingSubmissions||[]).find(p=>(p.Allocations||[]).some(a=>String(a.subjectId)===String(o.SubjectID)));
+    return '<div class="pay-option"><b>'+esc(line.subjectName)+'</b><div class="muted">Payment details approved for '+esc(o.TeacherName||'your teacher')+'</div>'+
+      (o.QRUrl?'<img src="'+esc(o.QRUrl)+'" alt="Approved payment QR">':'')+(o.UpiID?'<div>UPI ID: <b>'+esc(o.UpiID)+'</b></div>':'')+
+      (o.PaymentLink?'<div>Payment link: <a href="'+esc(o.PaymentLink)+'" target="_blank" rel="noopener">'+esc(o.PaymentLink)+'</a></div>':'')+
+      (pending?'<div class="pill warn">Payment submitted · awaiting staff verification</div><div class="muted no-print">₹'+Number(pending.Amount).toLocaleString('en-IN')+' · Ref: '+esc(pending.Reference)+'</div>':
+        '<form class="no-print" data-student-payment data-invoice="'+esc(inv.InvoiceID)+'" data-method="'+esc(o.MethodID)+'" data-subject="'+esc(o.SubjectID)+'" data-balance="'+esc(line.balanceAmount)+'" style="margin-top:.5rem"><div class="grid2"><label class="f"><span>Amount paid</span><input name="amount" type="number" min="1" step=".01" max="'+esc(line.balanceAmount)+'" value="'+esc(line.balanceAmount)+'" required></label><label class="f"><span>Payment mode</span><select name="mode"><option value="UPI">UPI</option><option value="BANK_TRANSFER">Bank transfer</option></select></label><label class="f full"><span>Transaction reference / UTR</span><input name="reference" maxlength="100" required></label></div><button class="btn primary">Submit for verification</button></form>')+'</div>';
+  }).join('')+'</section>':'<p class="muted no-print" style="margin-top:1rem">No approved online payment option is available for these subjects yet. Contact the centre to pay.</p>';
   docShell(docHead(c) +
     (bal <= 0 ? '<div style="position:absolute;top:40%;left:50%;transform:translate(-50%,-50%) rotate(-20deg);font:900 5rem/1 var(--display);color:rgba(31,122,85,.15);border:6px solid rgba(31,122,85,.15);padding:.1em .3em;border-radius:12px;pointer-events:none;user-select:none">PAID</div>' : '') +
     '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1rem">' +
@@ -976,7 +1007,8 @@ function showInvoiceDoc(d, subjectId) {
     (pays.length ? '<div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin:1.2rem 0 .35rem">Payments received</div>' +
       '<table><thead><tr><th>Date</th><th>Receipt</th><th>Mode</th><th>For</th><th class="r">Amount</th></tr></thead><tbody>' + pays.join('') + '</tbody></table>'
       : '<p class="muted" style="margin:1.2rem 0 0">No payment received yet.</p>') +
-    '<p class="muted" style="margin:1.6rem 0 0;font-size:.8rem">Amounts shown are up to ' + esc(fmtDate(today)) + '. This is a computer-generated invoice.</p>');
+    optionRows +
+    '<p class="muted" style="margin:1.2rem 0 0;font-size:.8rem">Amounts shown are up to ' + esc(fmtDate(today)) + '. This is a computer-generated invoice.</p>');
 }
 
 document.addEventListener('click', ev => {
@@ -987,6 +1019,7 @@ document.addEventListener('click', ev => {
   if (ev.target.closest('[data-doc-close]')) closeDoc();
   if (ev.target.closest('[data-doc-print]')) window.print();
 });
+document.addEventListener('submit',ev=>{const f=ev.target.closest('[data-student-payment]');if(!f)return;ev.preventDefault();busy(f.querySelector('button'),async()=>{const amount=Number(f.elements.amount.value);if(!(amount>0)||amount>Number(f.dataset.balance)+.005)throw {error:'Amount exceeds the subject balance.'};await api('student.paymentSubmit',{invoiceId:f.dataset.invoice,methodId:f.dataset.method,subjectId:f.dataset.subject,amount,mode:f.elements.mode.value,reference:f.elements.reference.value.trim()});const ref=f.elements.reference.value.trim();f.innerHTML='<div class="pill warn">Submitted · Awaiting staff verification</div><div class="muted" style="margin-top:.35rem">Reference: '+esc(ref)+'</div>';toast('Payment reference submitted. It will show as paid after staff verification.');});});
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeDoc(); });
 
 /* ---- online registration (public, no login) ---- */

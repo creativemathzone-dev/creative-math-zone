@@ -172,7 +172,9 @@ dialog::backdrop{background:rgba(16,28,48,.55)}
     page-break-after: avoid;
   }
   @page { size: A5; margin: 6mm; }
+  .print-only { display: inline !important; }
 }
+.print-only { display: none; }
 
 @media (max-width:900px){
   #login{grid-template-columns:1fr}
@@ -655,6 +657,8 @@ const NAV = [
   ['notices', 'Notices', 'NOTICE_VIEW'],
   ['fees', 'Fee structure', 'FINANCE_VIEW'],
   ['invoices', 'Invoices', 'FINANCE_VIEW'],
+  ['paymentreview', 'Student payment review', 'FINANCE_VIEW'],
+  ['paymentmethods', 'Teacher payment methods', 'FINANCE_VIEW'],
   ['receipts', 'Receipts', 'FINANCE_VIEW'],
   ['teacherincome', 'Teacher income', 'TEACHER_INCOME_MANAGE'],
   ['reports', 'Reports', 'REPORT_VIEW'],
@@ -1399,7 +1403,7 @@ VIEWS.timetable = async (main) => {
 
 /* ---------- payment recording ---------- */
 /* ---------- payment recording ---------- */
-function paymentDialog(invoice, lines, onDone) {
+function paymentDialog(invoice, lines, onDone, reissueReceiptId) {
   const today = new Date().toISOString().slice(0, 10);
   const fmt = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
   const open = (lines || []).filter(l => l.balanceAmount > 0);
@@ -1464,6 +1468,7 @@ function paymentDialog(invoice, lines, onDone) {
           invoiceId: invoice.InvoiceID, mode: md, reference: ref,
           paymentDate: d.querySelector('[name=paymentDate]').value, notes: d.querySelector('[name=notes]').value.trim()
         };
+        if (reissueReceiptId) payload.reissueReceiptId = reissueReceiptId;
         if (md !== 'CASH' && !ref) { toast('Please enter the transaction reference.', true); return; }
         if (lump) {
           const amt = Number(d.querySelector('[name=amount]').value);
@@ -1591,6 +1596,20 @@ VIEWS.invoices = async main => {
   await load();
 };
 
+VIEWS.paymentmethods = async main => {
+  const rows = await api('paymentMethods.adminList');
+  main.innerHTML = '<div class="head"><div><h1>Teacher payment methods</h1><p>Only approved UPI details and QR images are shown on student invoices.</p></div></div>' +
+    (rows.length ? '<div class="card">'+rows.map(r=>'<section style="padding:.9rem 0;border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap"><div><b>'+esc(r.TeacherName)+'</b> · '+esc(r.SubjectName)+' · '+pill(r.Status)+'<div class="muted" style="font-size:.85rem">Submitted '+esc(fmtTime(r.CreatedAt))+'</div>'+(r.UpiID?'<div>UPI ID: <b>'+esc(r.UpiID)+'</b></div>':'')+(r.PaymentLink?'<div><a href="'+esc(r.PaymentLink)+'" target="_blank" rel="noopener">Open payment link</a></div>':'')+(r.QRUrl?'<div style="margin-top:.5rem"><img src="'+esc(r.QRUrl)+'" alt="Teacher payment QR" style="width:180px;height:180px;object-fit:contain;border:1px solid var(--line);border-radius:8px"></div>':'')+(r.ReviewNote?'<div class="muted">Review note: '+esc(r.ReviewNote)+'</div>':'')+'</div>'+(r.Status==='PENDING'&&can('FINANCE_EDIT')?'<div style="display:flex;gap:.5rem;align-items:flex-start"><button class="btn primary" data-method-review="APPROVED" data-id="'+esc(r.MethodID)+'">Approve</button><button class="btn danger" data-method-review="REJECTED" data-id="'+esc(r.MethodID)+'">Reject</button></div>':'')+'</div></section>').join('')+'</div>' : '<div class="card empty">No teacher payment details have been submitted.</div>');
+  $$('[data-method-review]',main).forEach(b=>b.addEventListener('click',()=>busy(b,async()=>{const note=b.dataset.methodReview==='REJECTED'?prompt('Reason for rejection?')||'':'Approved by admin';if(b.dataset.methodReview==='REJECTED'&&!note)return;await api('paymentMethods.review',{methodId:b.dataset.id,decision:b.dataset.methodReview,note});toast('Payment option '+b.dataset.methodReview.toLowerCase()+'.');go('paymentmethods');})));
+};
+
+VIEWS.paymentreview = async main => {
+  const rows = await api('paymentSubmissions.adminList',{status:'PENDING'});
+  main.innerHTML = '<div class="head"><div><h1>Student payment review</h1><p>References remain pending until staff confirms them. Approval records the payment and creates a receipt.</p></div></div>' +
+    (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Student / batch</th><th>Invoice</th><th>Subject allocation</th><th>Amount</th><th>Mode / reference</th><th>Submitted</th><th>Review</th></tr></thead><tbody>'+rows.map(r=>'<tr><td data-l="Student"><b>'+esc(r.StudentName)+'</b><div class="muted">'+esc(r.StudentID)+' · Class '+esc(r.Class)+' · '+esc(r.BatchName||'—')+'</div></td><td data-l="Invoice">'+esc(r.InvoiceID)+'<div class="muted">'+esc(r.Month)+'</div></td><td data-l="Subject">'+esc((r.Allocations||[]).map(a=>a.subjectName).join(', '))+'</td><td data-l="Amount"><b>₹'+Number(r.Amount).toLocaleString('en-IN')+'</b></td><td data-l="Mode">'+esc(r.Mode)+'<div><b>'+esc(r.Reference)+'</b></div></td><td data-l="Submitted">'+esc(fmtTime(r.CreatedAt))+'</td><td><button class="btn small primary" data-submission-review="APPROVED" data-id="'+esc(r.SubmissionID)+'">Verify & record</button> <button class="btn small danger" data-submission-review="REJECTED" data-id="'+esc(r.SubmissionID)+'">Reject</button></td></tr>').join('')+'</tbody></table></div>' : '<div class="card empty"><b>No payment references awaiting review</b>Student submissions will appear here.</div>');
+  $$('[data-submission-review]',main).forEach(b=>b.addEventListener('click',()=>busy(b,async()=>{const decision=b.dataset.submissionReview;const note=decision==='REJECTED'?prompt('Reason for rejection?')||'':'Verified against the transaction';if(decision==='REJECTED'&&!note)return;if(decision==='APPROVED'&&!confirm('Confirm this transaction and record it as a payment?'))return;const res=await api('paymentSubmissions.review',{submissionId:b.dataset.id,decision,note});toast(decision==='APPROVED'?'Payment verified · Receipt '+res.ReceiptID:'Payment reference rejected.');go('paymentreview');})));
+};
+
 VIEWS.invoice = async (main, invoiceId) => {
   if (!invoiceId) { go('invoices'); return; }
   const d = await api('invoices.get', { invoiceId: invoiceId });
@@ -1649,7 +1668,8 @@ VIEWS.invoice = async (main, invoiceId) => {
             '<td>' + esc(p.PaymentMode || '') + (p.TransactionReference ? ' · <span class="muted">' + esc(p.TransactionReference) + '</span>' : '') + '</td>' +
             '<td>' + esc((p.Allocations || []).map(a => a.subjectName + ' ₹' + a.amount.toLocaleString('en-IN')).join(', ') || 'All subjects') + '</td>' +
             '<td>' + pill(p.Status) + '</td>' +
-            '<td><button class="btn small" data-receipt="' + esc(p.ReceiptID) + '">View receipt</button></td>' +
+            '<td><button class="btn small" data-receipt="' + esc(p.ReceiptID) + '">View receipt</button>' +
+              (canEdit && String(p.Status).toUpperCase() === 'VOID' ? ' <button class="btn small primary" data-reissue="' + esc(p.ReceiptID) + '">Record replacement</button>' : '') + '</td>' +
             '</tr>').join('') +
           '</tbody></table></div>'
         : '') +
@@ -1658,6 +1678,10 @@ VIEWS.invoice = async (main, invoiceId) => {
   $('[data-back]', main).addEventListener('click', () => go('invoices'));
 
     $$('[data-receipt]', main).forEach(b => b.addEventListener('click', () => { console.log('>>> clicked receipt button, id =', JSON.stringify(b.dataset.receipt)); go('receipt', b.dataset.receipt); }));
+  $$('[data-reissue]', main).forEach(b => b.addEventListener('click', () => {
+    if (!confirm('Record a replacement payment for this voided receipt? The new receipt will link back to ' + b.dataset.reissue + '.')) return;
+    paymentDialog(inv, d.lines, () => go('invoice', inv.InvoiceID), b.dataset.reissue);
+  }));
   if (canEdit && !isCancelled && inv.BalanceAmount > 0) {
     $('#rec-pay').addEventListener('click', () => paymentDialog(inv, d.lines, () => go('invoice', inv.InvoiceID)));
   }
@@ -1728,6 +1752,16 @@ VIEWS.receipt = async (main, receiptId) => {
   const r = d.receipt, pay = d.payment, inv = d.invoice, st = d.student, c = d.centre;
   const isVoid = String(r.Status).toUpperCase() === 'VOID';
   const fmt = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
+  const amountWords = value => {
+    const small=['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+    const tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+    const under100=n=>n<20?small[n]:tens[Math.floor(n/10)]+(n%10?' '+small[n%10]:'');
+    const under1000=n=>n>=100?small[Math.floor(n/100)]+' Hundred'+(n%100?' '+under100(n%100):''):under100(n);
+    let n=Math.floor(Math.abs(Number(value)||0)), parts=[];
+    for(const [unit,size] of [['Crore',10000000],['Lakh',100000],['Thousand',1000]])if(n>=size){const q=Math.floor(n/size);parts.push(under1000(q)+' '+unit);n%=size;}
+    if(n)parts.push(under1000(n));
+    return 'Rupees '+(parts.join(' ')||'Zero')+' Only';
+  };
 
   const alloc = {}; ((pay && pay.Allocations) || []).forEach(a => { alloc[a.subjectId] = a.amount; });
   const hasAlloc = Object.keys(alloc).length > 0;
@@ -1745,7 +1779,7 @@ VIEWS.receipt = async (main, receiptId) => {
     '<div class="head no-print"><div><h1>Receipt ' + esc(r.ReceiptID) + '</h1>' +
       '<p>' + esc(fmtDate(r.ReceiptDate)) + ' · ' + esc(st ? st.Name : '') + ' · ' + pill(r.Status) + '</p></div>' +
       '<div>' +
-        '<button class="btn" id="rc-print">Print / Save PDF</button>' +
+        '<label class="f no-print" style="display:inline-flex;align-items:center;gap:.4rem;margin:0 .5rem 0 0"><span>Paper</span><select id="rc-paper"><option value="A5">A5</option><option value="A4">A4</option></select></label><button class="btn" id="rc-print">Print / Save PDF</button>' +
         (can('FINANCE_EDIT') && !isVoid ? ' <button class="btn danger" id="rc-void">Void receipt</button>' : '') +
       '</div></div>' +
 
@@ -1795,11 +1829,14 @@ VIEWS.receipt = async (main, receiptId) => {
         (inv ? '<div style="display:flex;justify-content:space-between;margin:.15rem 0"><span class="muted">Invoice total</span><span>' + fmt(inv.TotalAmount) + '</span></div>' : '') +
         '<div style="display:flex;justify-content:space-between;margin:.15rem 0"><span class="muted">Paid today</span><span>' + fmt(r.Amount) + '</span></div>' +
         (inv ? '<div style="display:flex;justify-content:space-between;margin:.4rem 0 0;padding-top:.35rem;border-top:1px solid var(--line);font-size:1.05rem"><b>Amount received</b><b>' + fmt(r.Amount) + '</b></div>' : '') +
+        '<div style="margin-top:.25rem;font-weight:600">' + esc(amountWords(r.Amount)) + '</div>' +
         (inv ? '<div style="display:flex;justify-content:space-between;margin-top:.4rem"><span class="muted">Invoice balance after this payment</span><span>' + fmt(inv.BalanceAmount) + '</span></div>' : '') +
       '</div>' +
 
       (isVoid ? '<div style="margin-top:1rem;padding:.6rem .8rem;background:var(--bad-bg);color:var(--bad);border-radius:8px;font-size:.85rem">' +
         'Voided on ' + esc(fmtTime(r.VoidDate)) + ' by ' + esc(r.VoidedBy) + '. Reason: ' + esc(r.VoidReason) + '</div>' : '') +
+      (r.ReissueOf ? '<div style="margin-top:.6rem;padding:.55rem .7rem;background:#f1f5fa;border-radius:8px;font-size:.85rem">Replacement for voided receipt <button class="link no-print" data-related-receipt="' + esc(r.ReissueOf) + '">' + esc(r.ReissueOf) + '</button><span class="print-only">' + esc(r.ReissueOf) + '</span></div>' : '') +
+      (r.ReissuedBy ? '<div style="margin-top:.6rem;padding:.55rem .7rem;background:#f1f5fa;border-radius:8px;font-size:.85rem">Replaced by receipt <button class="link no-print" data-related-receipt="' + esc(r.ReissuedBy) + '">' + esc(r.ReissuedBy) + '</button><span class="print-only">' + esc(r.ReissuedBy) + '</span></div>' : '') +
 
       '<div style="margin-top:2.2rem;display:flex;justify-content:space-between;align-items:flex-end">' +
         '<div class="muted" style="font-size:.8rem">Thank you.</div>' +
@@ -1808,7 +1845,13 @@ VIEWS.receipt = async (main, receiptId) => {
     '</div>';
 
   $('[data-back]', main).addEventListener('click', () => go('receipts'));
+  $('#rc-paper').addEventListener('change', e => {
+    let style = $('#rc-page-size-style');
+    if (!style) { style = document.createElement('style'); style.id = 'rc-page-size-style'; document.head.appendChild(style); }
+    style.textContent = '@media print{@page{size:' + e.target.value + ' portrait;margin:6mm}}';
+  });
   $('#rc-print').addEventListener('click', () => window.print());
+  $$('[data-related-receipt]', main).forEach(b => b.addEventListener('click', () => go('receipt', b.dataset.relatedReceipt)));
 
   if (can('FINANCE_EDIT') && !isVoid) {
     $('#rc-void').addEventListener('click', () => {
