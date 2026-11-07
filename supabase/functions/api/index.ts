@@ -2053,6 +2053,15 @@ Deno.serve(async (request) => {
         admin.from('students').select('*').eq('id', receipt.student_id).maybeSingle(),
         admin.from('settings').select('setting_key,value').in('setting_key', ['CENTRE_NAME','TAGLINE','ADDRESS','MOBILE','EMAIL','WEBSITE','ACADEMIC_YEAR']),
       ])
+      const creatorId = receipt.created_by || payment?.received_by || null
+      const { data: creator } = creatorId
+        ? await admin.from('app_users').select('username,user_type,linked_id').eq('id', creatorId).maybeSingle()
+        : { data: null }
+      let creatorName = creator?.username || ''
+      if (creator?.user_type === 'TEACHER' && creator.linked_id) {
+        const { data: teacher } = await admin.from('teachers').select('name').eq('id', creator.linked_id).maybeSingle()
+        creatorName = teacher?.name || creatorName
+      }
       const { data: currentBatch } = student?.current_batch_id
         ? await admin.from('batches').select('name').eq('id', student.current_batch_id).maybeSingle() : { data: null }
       const settingMap = Object.fromEntries((settings || []).map((r) => [r.setting_key, r.value]))
@@ -2063,7 +2072,7 @@ Deno.serve(async (request) => {
           LineItems: normalizedInvoiceLines(inv), TotalAmount: Number(inv.total_amount), PaidAmount: Number(inv.paid_amount), BalanceAmount: Number(inv.balance_amount) }
       }
       return response({ ok: true, data: { receipt: { ReceiptID: receipt.id, ReceiptDate: receipt.receipt_date,
-        Amount: Number(receipt.amount), Status: receipt.status, Format: receipt.format, CreatedBy: receipt.created_by,
+        Amount: Number(receipt.amount), Status: receipt.status, Format: receipt.format, CreatedBy: creatorName,
         CreatedAt: receipt.created_at, VoidedBy: receipt.voided_by, VoidDate: receipt.void_date, VoidReason: receipt.void_reason },
         payment: payment ? { PaymentID: payment.id, Mode: payment.payment_mode, Reference: payment.transaction_reference,
           Notes: payment.notes, PaymentDate: payment.payment_date, Allocations: allocationsFromPayment(payment.allocations) } : null,

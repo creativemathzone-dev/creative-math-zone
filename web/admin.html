@@ -1777,7 +1777,8 @@ VIEWS.receipt = async (main, receiptId) => {
         '<div><div class="muted" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem">Payment details</div>' +
           (pay ? '<div>Mode: <b>' + esc(pay.Mode) + '</b></div>' +
                  (pay.Reference ? '<div class="muted" style="font-size:.85rem">Ref: ' + esc(pay.Reference) + '</div>' : '') +
-                 '<div class="muted" style="font-size:.82rem">Received by ' + esc(r.CreatedBy) + '</div>'
+                 (pay.Notes ? '<div class="muted" style="font-size:.85rem;white-space:pre-wrap">Notes: ' + esc(pay.Notes) + '</div>' : '') +
+                 (r.CreatedBy ? '<div class="muted" style="font-size:.82rem">Received by ' + esc(r.CreatedBy) + '</div>' : '')
                : '') +
         '</div>' +
       '</div>' +
