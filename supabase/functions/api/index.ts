@@ -1316,7 +1316,7 @@ Deno.serve(async (request) => {
       const { data: created, error: authCreateError } = await admin.auth.admin.createUser({ email: authEmailForUsername(username), password: tempPassword, email_confirm: true })
       if (authCreateError || !created.user) throw new ApiFault('ACCOUNT_CREATE_FAILED', 'Could not create the teacher login account.')
       const now = new Date().toISOString()
-      const teacherRow = { id, username, status: 'Active', photo_url: '', mobile: '', email: '', address: '', qualification: '',
+      const teacherRow: Record<string, unknown> = { id, username, status: 'Active', photo_url: '', mobile: '', email: '', address: '', qualification: '',
         joining_date: now.slice(0, 10), income_method: 'PER_STUDENT_MONTH', default_rate_per_student: 0,
         income_visible_to_teacher: false, ...row, created_at: now, updated_at: now }
       const { error: teacherError } = await admin.from('teachers').insert(teacherRow)
@@ -1417,8 +1417,8 @@ Deno.serve(async (request) => {
     if (action === 'users.setPermissions') {
       const id = requireText(payload.userId, 'User ID', 60, true)
       if (!Array.isArray(payload.extraPermissions)) throw new ApiFault('BAD_REQUEST', 'extraPermissions must be a list.')
-      const allowedPermissions = new Set(Object.keys(PERMISSION_LABELS))
-      const extra = [...new Set(payload.extraPermissions.map((x: unknown) => String(x)))]
+      const allowedPermissions = new Set<string>(Object.keys(PERMISSION_LABELS))
+      const extra: string[] = [...new Set((payload.extraPermissions as unknown[]).map((x: unknown) => String(x)))]
       const invalid = extra.find((x) => !allowedPermissions.has(x))
       if (invalid) throw new ApiFault('BAD_REQUEST', `Unknown permission: ${invalid}`)
       const { data: target, error: lookupError } = await admin.from('app_users').select('id,username,role').eq('id', id).maybeSingle()
@@ -1591,7 +1591,7 @@ Deno.serve(async (request) => {
       const batchId = requireText(payload.batchId, 'Batch', 40, true)
       const startDate = requireText(payload.startDate || todayDate(), 'Start date', 10, true)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new ApiFault('BAD_REQUEST', 'Start date must use yyyy-mm-dd.')
-      const picks = Array.isArray(payload.subjects) ? payload.subjects : []
+      const picks: Array<Record<string, unknown>> = Array.isArray(payload.subjects) ? payload.subjects as Array<Record<string, unknown>> : []
       if (picks.length > 6) throw new ApiFault('BAD_REQUEST', 'Choose no more than 6 subjects.')
       const seen = new Set<string>()
       for (const pick of picks) {
@@ -2039,8 +2039,8 @@ Deno.serve(async (request) => {
         const subjectNames = new Map((subjects || []).map((s) => [s.id, s.name]))
         const result = await Promise.all((rows || []).map(async (r) => {
           const signed = r.qr_path ? await admin.storage.from('teacher-payment-qr').createSignedUrl(r.qr_path, 3600) : { data: null }
-          const methodSubjectIds = Array.isArray(r.subject_ids) && r.subject_ids.length ? r.subject_ids : [r.subject_id]
-          const methodSubjectNames = methodSubjectIds.map((id) => subjectNames.get(id) || id)
+          const methodSubjectIds: string[] = Array.isArray(r.subject_ids) && r.subject_ids.length ? r.subject_ids as string[] : [r.subject_id]
+          const methodSubjectNames = methodSubjectIds.map((id: string) => subjectNames.get(id) || id)
           return { MethodID: r.id, SubjectID: r.subject_id, SubjectName: methodSubjectNames[0] || r.subject_id,
             SubjectIDs: methodSubjectIds, SubjectNames: methodSubjectNames,
             UpiID: r.upi_id, PaymentLink: r.payment_link, QRPath: r.qr_path, QRUrl: signed.data?.signedUrl || '',
@@ -2048,8 +2048,8 @@ Deno.serve(async (request) => {
         }))
         return response({ ok: true, data: { subjects: (subjects || []).map((s) => ({ SubjectID: s.id, SubjectName: s.name })), methods: result } })
       }
-      const rawSubjectIds = Array.isArray(payload.subjectIds) ? payload.subjectIds : [payload.subjectId]
-      const subjectIds = [...new Set(rawSubjectIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      const rawSubjectIds: unknown[] = Array.isArray(payload.subjectIds) ? payload.subjectIds : [payload.subjectId]
+      const subjectIds: string[] = [...new Set(rawSubjectIds.map((id: unknown) => String(id || '').trim()).filter(Boolean))]
       if (!subjectIds.length || subjectIds.length > 50 || subjectIds.some((id) => id.length > 40)) throw new ApiFault('BAD_REQUEST', 'Select one or more subjects.')
       const { data: assignments, error: assignmentError } = await admin.from('student_subjects').select('subject_id').eq('teacher_id', user.linked_id).in('subject_id', subjectIds).ilike('status', 'active')
       if (assignmentError) throw assignmentError
@@ -2091,8 +2091,8 @@ Deno.serve(async (request) => {
       const tm = new Map((teachers || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name]))
       const result = await Promise.all((rows || []).map(async (r) => {
         const signed = r.qr_path ? await admin.storage.from('teacher-payment-qr').createSignedUrl(r.qr_path, 3600) : { data: null }
-        const methodSubjectIds = Array.isArray(r.subject_ids) && r.subject_ids.length ? r.subject_ids : [r.subject_id]
-        const methodSubjectNames = methodSubjectIds.map((id) => sm.get(id) || id)
+        const methodSubjectIds: string[] = Array.isArray(r.subject_ids) && r.subject_ids.length ? r.subject_ids as string[] : [r.subject_id]
+        const methodSubjectNames = methodSubjectIds.map((id: string) => sm.get(id) || id)
         return { MethodID: r.id, TeacherID: r.teacher_id, TeacherName: tm.get(r.teacher_id) || r.teacher_id,
           SubjectID: r.subject_id, SubjectName: methodSubjectNames[0] || r.subject_id, SubjectIDs: methodSubjectIds, SubjectNames: methodSubjectNames, UpiID: r.upi_id,
           PaymentLink: r.payment_link, QRUrl: signed.data?.signedUrl || '', Status: r.status,
@@ -2134,7 +2134,7 @@ Deno.serve(async (request) => {
       if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only available in the student portal.')
       const invoiceId = requireText(payload.invoiceId, 'Invoice', 60, true), methodId = requireText(payload.methodId, 'Payment option', 60, true)
       const reference = requireText(payload.reference, 'Transaction reference', 100, true)
-      const submitted = Array.isArray(payload.allocations) && payload.allocations.length
+      const submitted: Array<{ subjectId: string; amount: number }> = Array.isArray(payload.allocations) && payload.allocations.length
         ? payload.allocations.map((value: unknown) => {
           const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
           return {
@@ -2462,7 +2462,7 @@ Deno.serve(async (request) => {
       const { data: created, error: authCreateError } = await admin.auth.admin.createUser({ email, password: tempPassword, email_confirm: true })
       if (authCreateError || !created.user) throw new ApiFault('ACCOUNT_CREATE_FAILED', 'Could not create the student login account.')
       const now = new Date().toISOString()
-      const studentRow = { ...row, id, registration_year: String(year), registration_date: now.slice(0, 10),
+      const studentRow: Record<string, unknown> = { ...row, id, registration_year: String(year), registration_date: now.slice(0, 10),
         roll_no: row.roll_no || id.slice(prefix.length), status: 'ACTIVE', academic_year: studentSettingMap.ACADEMIC_YEAR || `${year}-${String(year + 1).slice(-2)}`,
         created_at: now, updated_at: now }
       const { error: studentError } = await admin.from('students').insert(studentRow)
