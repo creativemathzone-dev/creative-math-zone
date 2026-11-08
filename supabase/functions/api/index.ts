@@ -2045,7 +2045,7 @@ Deno.serve(async (request) => {
             SubjectIDs: methodSubjectIds, SubjectNames: methodSubjectNames,
             UpiID: r.upi_id, PaymentLink: r.payment_link, QRPath: r.qr_path, QRUrl: signed.data?.signedUrl || '',
             Status: r.status, ReviewNote: r.review_note, CreatedAt: r.created_at }
-        }))
+        })
         return response({ ok: true, data: { subjects: (subjects || []).map((s) => ({ SubjectID: s.id, SubjectName: s.name })), methods: result } })
       }
       const rawSubjectIds = Array.isArray(payload.subjectIds) ? payload.subjectIds : [payload.subjectId]
@@ -2133,9 +2133,19 @@ Deno.serve(async (request) => {
     if (action === 'student.paymentSubmit') {
       if (user.user_type !== 'STUDENT' || !user.linked_id) throw new ApiFault('FORBIDDEN', 'This action is only available in the student portal.')
       const invoiceId = requireText(payload.invoiceId, 'Invoice', 60, true), methodId = requireText(payload.methodId, 'Payment option', 60, true)
-      const subjectId = requireText(payload.subjectId, 'Subject', 40, true), reference = requireText(payload.reference, 'Transaction reference', 100, true)
-      const amount = Math.round(Number(payload.amount) * 100) / 100
-      if (!Number.isFinite(amount) || amount < 1) throw new ApiFault('BAD_REQUEST', 'Enter a valid amount.')
+      const reference = requireText(payload.reference, 'Transaction reference', 100, true)
+      const submitted = Array.isArray(payload.allocations) && payload.allocations.length
+        ? payload.allocations.map((value: unknown) => {
+          const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+          return {
+            subjectId: requireText(item.subjectId, 'Subject', 40, true),
+            amount: Math.round(Number(item.amount) * 100) / 100,
+          }
+        })
+        : [{ subjectId: requireText(payload.subjectId, 'Subject', 40, true), amount: Math.round(Number(payload.amount) * 100) / 100 }]
+      if (submitted.length > 20 || submitted.some((item) => !Number.isFinite(item.amount) || item.amount < 1) ||
+          new Set(submitted.map((item) => item.subjectId)).size !== submitted.length)
+        throw new ApiFault('BAD_REQUEST', 'Select unique subjects and enter a valid amount for each.')
       const [{ data: invoice }, { data: method }, { data: pending }] = await Promise.all([
         admin.from('invoices').select('*').eq('id', invoiceId).eq('student_id', user.linked_id).maybeSingle(),
         admin.from('teacher_payment_methods').select('id,teacher_id,subject_id,subject_ids,status').eq('id', methodId).maybeSingle(),
@@ -2143,14 +2153,25 @@ Deno.serve(async (request) => {
       ])
       if (!invoice || String(invoice.status).toUpperCase() === 'CANCELLED') throw new ApiFault('NOT_FOUND', 'Invoice not found.')
       const methodSubjectIds = method && Array.isArray(method.subject_ids) && method.subject_ids.length ? method.subject_ids : (method ? [method.subject_id] : [])
-      if (!method || method.status !== 'APPROVED' || !methodSubjectIds.includes(subjectId)) throw new ApiFault('BAD_REQUEST', 'This payment option is no longer available. Refresh the invoice.')
-      const { data: assignment } = await admin.from('student_subjects').select('id').eq('student_id', user.linked_id).eq('subject_id', subjectId).eq('teacher_id', method.teacher_id).ilike('status', 'active').limit(1).maybeSingle()
-      if (!assignment) throw new ApiFault('BAD_REQUEST', 'That subject is not currently assigned to this teacher for you.')
-      if ((pending || []).some((claim) => allocationsFromPayment(claim.allocations).some((allocation) => String(allocation.subjectId) === subjectId)))
-        throw new ApiFault('CONFLICT', 'A payment for this subject is already awaiting review.')
-      const line = normalizedInvoiceLines(invoice).find((x) => String(x.subjectId) === subjectId)
-      if (!line || amount > Number(line.balanceAmount) + 0.005) throw new ApiFault('BAD_REQUEST', 'Amount exceeds the selected subject balance.')
-      const allocations = [{ subjectId, subjectName: String(line.subjectName || subjectId), amount }]
+      const subjectIds = submitted.map((item) => item.subjectId)
+      if (!method || method.status !== 'APPROVED' || subjectIds.some((subjectId) => !methodSubjectIds.includes(subjectId)))
+        throw new ApiFault('BAD_REQUEST', 'This payment option is no longer available for one or more selected subjects. Refresh the invoice.')
+      const { data: assignments, error: assignmentError } = await admin.from('student_subjects').select('subject_id')
+        .eq('student_id', user.linked_id).eq('teacher_id', method.teacher_id).in('subject_id', subjectIds).ilike('status', 'active')
+      if (assignmentError) throw assignmentError
+      const assignedSubjects = new Set((assignments || []).map((row) => String(row.subject_id)))
+      if (subjectIds.some((subjectId) => !assignedSubjects.has(subjectId)))
+        throw new ApiFault('BAD_REQUEST', 'One or more subjects are not currently assigned to this teacher for you.')
+      if ((pending || []).some((claim) => allocationsFromPayment(claim.allocations).some((allocation) => subjectIds.includes(String(allocation.subjectId)))))
+        throw new ApiFault('CONFLICT', 'A payment for one or more selected subjects is already awaiting review.')
+      const invoiceLines = normalizedInvoiceLines(invoice)
+      const allocations = submitted.map((item) => {
+        const line = invoiceLines.find((row) => String(row.subjectId) === item.subjectId)
+        if (!line || item.amount > Number(line.balanceAmount) + 0.005)
+          throw new ApiFault('BAD_REQUEST', 'An amount exceeds its subject balance. Refresh the invoice and try again.')
+        return { subjectId: item.subjectId, subjectName: String(line.subjectName || item.subjectId), amount: item.amount }
+      })
+      const amount = Math.round(allocations.reduce((sum, allocation) => sum + allocation.amount, 0) * 100) / 100
       const { data, error } = await admin.from('payment_submissions').insert({ invoice_id: invoiceId, student_id: user.linked_id,
         amount, payment_mode: String(payload.mode || 'UPI').toUpperCase() === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : 'UPI',
         transaction_reference: reference, allocations, status: 'PENDING' }).select('id').single()

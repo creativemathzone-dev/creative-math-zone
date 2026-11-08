@@ -143,6 +143,12 @@ th{font-size:.85rem;color:var(--ink-2);font-weight:600;background:#f1f5fa}
 #doc-paper .r{text-align:right}
 #doc-paper .pay-option{border:1px solid var(--line);border-radius:10px;padding:.75rem;margin:.65rem 0}
 #doc-paper .pay-option img{width:150px;height:150px;object-fit:contain}
+#doc-paper .pay-allocation{display:grid;grid-template-columns:minmax(0,1fr) minmax(110px,160px);align-items:center;gap:.65rem;padding:.55rem 0;border-top:1px solid var(--line)}
+#doc-paper .pay-allocation-subject{display:flex;align-items:center;gap:.6rem;min-width:0;cursor:pointer}
+#doc-paper .pay-allocation input[type=checkbox]{width:1.1rem;height:1.1rem;margin:0;accent-color:var(--navy)}
+#doc-paper .pay-allocation input[type=number]{width:100%;min-height:40px;padding:.4rem .55rem;border:1px solid #c5d1e0;border-radius:7px;background:#fff}
+#doc-paper .pay-total{font-weight:700;margin:.55rem 0}
+@media(max-width:560px){#doc-paper .pay-allocation{grid-template-columns:1fr}#doc-paper .pay-allocation input[type=number]{grid-column:1}}
 @media print{
   html,body{background:#fff!important;overflow:visible!important}
   body>*:not(#doc-overlay){display:none!important}
@@ -983,17 +989,18 @@ function showInvoiceDoc(d, subjectId) {
   }).filter(Boolean);
   const only = subjectId ? lines[0].subjectName : '';
   const options=(d.paymentOptions||[]).filter(o=>(o.SubjectIDs||[o.SubjectID]).some(id=>lines.some(l=>String(l.subjectId)===String(id)&&Number(l.balanceAmount)>0)));
-  const optionRows=options.length?'<section class="payment-instructions" style="margin-top:1rem"><h2 style="font-size:1.05rem">Payment options</h2><p class="muted" style="font-size:.82rem">Use the approved details for the matching subject. A staff member must verify payment before it appears as paid.</p>'+options.map(o=>{
+  const optionRows=options.length?'<section class="payment-instructions no-print" style="margin-top:1rem"><h2 style="font-size:1.05rem">Payment options</h2><p class="muted" style="font-size:.82rem">Select the subjects you are paying with the same account. The UPI app will open with the total filled in. Staff verify every payment before it is marked paid.</p>'+options.map(o=>{
     const coveredIds=o.SubjectIDs||[o.SubjectID];
     const coveredLines=lines.filter(l=>coveredIds.some(id=>String(id)===String(l.subjectId))&&Number(l.balanceAmount)>0);
     if(!coveredLines.length)return '';
     return '<div class="pay-option"><b>'+esc(coveredLines.map(l=>l.subjectName).join(', '))+'</b><div class="muted">One approved payment option for these subjects · '+esc(o.TeacherName||'your teacher')+'</div>'+
       (o.QRUrl?'<img src="'+esc(o.QRUrl)+'" alt="Approved payment QR">':'')+(o.UpiID?'<div>UPI ID: <b>'+esc(o.UpiID)+'</b></div>':'')+
       (o.PaymentLink?'<div>Payment link: <a href="'+esc(o.PaymentLink)+'" target="_blank" rel="noopener">'+esc(o.PaymentLink)+'</a></div>':'')+
-      coveredLines.map(line=>{
+      '<form class="no-print" data-student-payment data-invoice="'+esc(inv.InvoiceID)+'" data-method="'+esc(o.MethodID)+'" data-upi="'+esc(o.UpiID||'')+'" data-payee="'+esc(o.TeacherName||'Creative Math Zone')+'" data-note="'+esc('CMZ '+inv.InvoiceID+' '+(st?.StudentID||''))+'" style="margin-top:.65rem">'+coveredLines.map(line=>{
         const pending=(d.pendingSubmissions||[]).find(p=>(p.Allocations||[]).some(a=>String(a.subjectId)===String(line.subjectId)));
-        return '<div style="border-top:1px solid var(--line);padding-top:.6rem;margin-top:.6rem"><b>'+esc(line.subjectName)+'</b> · Balance '+money(line.balanceAmount)+(pending?'<div class="pill warn">Payment submitted · awaiting staff verification</div><div class="muted no-print">₹'+Number(pending.Amount).toLocaleString('en-IN')+' · Ref: '+esc(pending.Reference)+'</div>':'<form class="no-print" data-student-payment data-invoice="'+esc(inv.InvoiceID)+'" data-method="'+esc(o.MethodID)+'" data-subject="'+esc(line.subjectId)+'" data-balance="'+esc(line.balanceAmount)+'" style="margin-top:.5rem"><div class="grid2"><label class="f"><span>Amount paid</span><input name="amount" type="number" min="1" step=".01" max="'+esc(line.balanceAmount)+'" value="'+esc(line.balanceAmount)+'" required></label><label class="f"><span>Payment mode</span><select name="mode"><option value="UPI">UPI</option><option value="BANK_TRANSFER">Bank transfer</option></select></label><label class="f full"><span>Transaction reference / UTR</span><input name="reference" maxlength="100" required></label></div><button class="btn primary">Submit for verification</button></form>')+'</div>';
-      }).join('')+'</div>';
+        const pendingLine=pending&&(pending.Allocations||[]).find(a=>String(a.subjectId)===String(line.subjectId));
+        return '<div class="pay-allocation">'+(pending?'<span><b>'+esc(line.subjectName)+'</b> · Balance '+money(line.balanceAmount)+'<div class="pill warn">Payment submitted · awaiting staff verification</div><div class="muted">'+money(pendingLine?.amount||0)+' · Ref: '+esc(pending.Reference)+'</div></span>':'<label class="pay-allocation-subject"><input type="checkbox" name="subjectId" value="'+esc(line.subjectId)+'" checked><span><b>'+esc(line.subjectName)+'</b><br><span class="muted">Balance '+money(line.balanceAmount)+'</span></span></label><input name="amount" type="number" min="1" step=".01" max="'+esc(line.balanceAmount)+'" value="'+esc(line.balanceAmount)+'" required aria-label="Amount for '+esc(line.subjectName)+'">')+'</div>';
+      }).join('')+'<div class="pay-total">Selected total: <span data-pay-total>₹'+coveredLines.filter(line=>!(d.pendingSubmissions||[]).some(p=>(p.Allocations||[]).some(a=>String(a.subjectId)===String(line.subjectId)))).reduce((sum,line)=>sum+Number(line.balanceAmount||0),0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span></div>'+(o.UpiID?'<button type="button" class="btn primary" data-upi-launch>Pay with UPI</button><p class="muted" style="font-size:.8rem">Review the payee and amount in your UPI app before confirming. If it does not open, use the QR or payment link above and enter the amount shown.</p>':'<p class="muted" style="font-size:.8rem">Use the QR or payment link above; enter the selected total if the payment app asks for an amount.</p>')+'<div class="grid2" style="margin-top:.65rem"><label class="f full"><span>Transaction reference / UTR after payment</span><input name="reference" maxlength="100" required placeholder="Enter after completing payment"></label></div><button type="submit" class="btn primary">Submit payment for verification</button></form></div>';
   }).join('')+'</section>':'<p class="muted no-print" style="margin-top:1rem">No approved online payment option is available for these subjects yet. Contact the centre to pay.</p>';
   docShell(docHead(c) +
     (bal <= 0 ? '<div style="position:absolute;top:40%;left:50%;transform:translate(-50%,-50%) rotate(-20deg);font:900 5rem/1 var(--display);color:rgba(31,122,85,.15);border:6px solid rgba(31,122,85,.15);padding:.1em .3em;border-radius:12px;pointer-events:none;user-select:none">PAID</div>' : '') +
@@ -1019,10 +1026,25 @@ document.addEventListener('click', ev => {
   if (rc) { busy(rc, async () => showReceiptDoc(await api('student.receipt', { receiptId: rc.dataset.rcptDoc }))); return; }
   const iv = ev.target.closest('[data-inv-doc]');
   if (iv) { busy(iv, async () => showInvoiceDoc(await api('student.invoiceDoc', { invoiceId: iv.dataset.invDoc }), iv.dataset.sub || '')); return; }
+  const upi = ev.target.closest('[data-upi-launch]');
+  if (upi) {
+    const form = upi.closest('[data-student-payment]');
+    const allocations = [...form.querySelectorAll('input[name="subjectId"]:checked')].map(check => {
+      const input = check.closest('.pay-allocation').querySelector('input[name="amount"]');
+      return { subjectId: check.value, amount: Number(input.value), maximum: Number(input.max) };
+    });
+    const total = allocations.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
+    if (!allocations.length || allocations.some(item => !(item.amount >= 1) || item.amount > item.maximum)) { toast('Select subjects and keep each amount within its outstanding balance.', true); return; }
+    const params = new URLSearchParams({ pa: form.dataset.upi, pn: form.dataset.payee, am: total.toFixed(2), cu: 'INR', tn: form.dataset.note });
+    window.location.href = 'upi://pay?' + params.toString();
+    return;
+  }
   if (ev.target.closest('[data-doc-close]')) closeDoc();
   if (ev.target.closest('[data-doc-print]')) window.print();
 });
-document.addEventListener('submit',ev=>{const f=ev.target.closest('[data-student-payment]');if(!f)return;ev.preventDefault();busy(f.querySelector('button'),async()=>{const amount=Number(f.elements.amount.value);if(!(amount>0)||amount>Number(f.dataset.balance)+.005)throw {error:'Amount exceeds the subject balance.'};await api('student.paymentSubmit',{invoiceId:f.dataset.invoice,methodId:f.dataset.method,subjectId:f.dataset.subject,amount,mode:f.elements.mode.value,reference:f.elements.reference.value.trim()});const ref=f.elements.reference.value.trim();f.innerHTML='<div class="pill warn">Submitted · Awaiting staff verification</div><div class="muted" style="margin-top:.35rem">Reference: '+esc(ref)+'</div>';toast('Payment reference submitted. It will show as paid after staff verification.');});});
+document.addEventListener('change',ev=>{if(!ev.target.matches('[data-student-payment] input[name="subjectId"]'))return;const f=ev.target.closest('[data-student-payment]'),row=ev.target.closest('.pay-allocation'),amount=row.querySelector('input[name="amount"]');amount.disabled=!ev.target.checked;const total=[...f.querySelectorAll('input[name="subjectId"]:checked')].reduce((sum,check)=>sum+Number(check.closest('.pay-allocation').querySelector('input[name="amount"]').value||0),0);const out=f.querySelector('[data-pay-total]');if(out)out.textContent='₹'+total.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});});
+document.addEventListener('input',ev=>{if(!ev.target.matches('[data-student-payment] input[name="amount"]'))return;const f=ev.target.closest('[data-student-payment]'),total=[...f.querySelectorAll('input[name="subjectId"]:checked')].reduce((sum,check)=>sum+Number(check.closest('.pay-allocation').querySelector('input[name="amount"]').value||0),0),out=f.querySelector('[data-pay-total]');if(out)out.textContent='₹'+total.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});});
+document.addEventListener('submit',ev=>{const f=ev.target.closest('[data-student-payment]');if(!f)return;ev.preventDefault();busy(f.querySelector('button[type="submit"]'),async()=>{const allocations=[...f.querySelectorAll('input[name="subjectId"]:checked')].map(check=>{const input=check.closest('.pay-allocation').querySelector('input[name="amount"]');return {subjectId:check.value,amount:Number(input.value),maximum:Number(input.max)}});if(!allocations.length||allocations.some(a=>!(a.amount>=1)||a.amount>a.maximum))throw {error:'Select subjects and keep each amount within its outstanding balance.'};const reference=f.elements.reference.value.trim();await api('student.paymentSubmit',{invoiceId:f.dataset.invoice,methodId:f.dataset.method,allocations,mode:'UPI',reference});f.innerHTML='<div class="pill warn">Submitted · Awaiting staff verification</div><div class="muted" style="margin-top:.35rem">Reference: '+esc(reference)+'</div>';toast('Payment reference submitted. It will show as paid after staff verification.');});});
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeDoc(); });
 
 /* ---- online registration (public, no login) ---- */
