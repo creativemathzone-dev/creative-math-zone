@@ -2045,7 +2045,7 @@ Deno.serve(async (request) => {
             SubjectIDs: methodSubjectIds, SubjectNames: methodSubjectNames,
             UpiID: r.upi_id, PaymentLink: r.payment_link, QRPath: r.qr_path, QRUrl: signed.data?.signedUrl || '',
             Status: r.status, ReviewNote: r.review_note, CreatedAt: r.created_at }
-        })
+        }))
         return response({ ok: true, data: { subjects: (subjects || []).map((s) => ({ SubjectID: s.id, SubjectName: s.name })), methods: result } })
       }
       const rawSubjectIds = Array.isArray(payload.subjectIds) ? payload.subjectIds : [payload.subjectId]
