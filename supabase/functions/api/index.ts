@@ -1547,9 +1547,19 @@ Deno.serve(async (request) => {
 
     if (action === 'students.list') {
       const limit = Math.min(Math.max(Number.parseInt(payload.limit, 10) || 200, 1), 1000)
+      let subjectStudentIds: string[] | null = null
+      if (payload.subjectId) {
+        const subjectId = requireText(payload.subjectId, 'Subject', 40, true)
+        const { data: assignments, error: assignmentError } = await admin.from('student_subjects')
+          .select('student_id').eq('subject_id', subjectId).ilike('status', 'ACTIVE')
+        if (assignmentError) throw assignmentError
+        subjectStudentIds = [...new Set((assignments || []).map((row) => String(row.student_id)).filter(Boolean))]
+        if (!subjectStudentIds.length) return response({ ok: true, data: { total: 0, students: [] } })
+      }
       let query = admin.from('students').select('*', { count: 'exact' }).order('name').limit(limit)
       if (payload.status) query = query.ilike('status', String(payload.status))
       if (payload.batchId) query = query.eq('current_batch_id', String(payload.batchId))
+      if (subjectStudentIds) query = query.in('id', subjectStudentIds)
       if (payload.search) {
         const search = String(payload.search).replace(/[^a-zA-Z0-9 -]/g, '').trim()
         if (search) query = query.or(`name.ilike.%${search}%,id.eq.${search}`)

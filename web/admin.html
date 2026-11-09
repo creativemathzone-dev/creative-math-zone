@@ -927,23 +927,26 @@ async function studentDialog() {
 }
 VIEWS.students = async main => {
   await loadLookups();
-  const st = VIEWS.students.state = VIEWS.students.state || { q: '', status: 'ACTIVE', batch: '' };
+  const st = VIEWS.students.state = VIEWS.students.state || { q: '', status: 'ACTIVE', batch: '', subject: '' };
+  if (!('subject' in st)) st.subject = '';
   main.innerHTML = '<div class="head"><div><h1>Students</h1><p id="s-count"></p></div>' + (can('STUDENT_EDIT') ? '<button class="btn primary" data-act="add-student">Add student</button>' : '') + '</div>' +
     '<div class="toolbar"><input id="s-q" type="search" placeholder="Search by name or student ID" value="' + esc(st.q) + '">' +
     '<select id="s-status"><option value="">All statuses</option>' + ['ACTIVE', 'INACTIVE', 'COMPLETED', 'LEFT', 'SUSPENDED'].map(x => '<option value="' + x + '"' + (st.status === x ? ' selected' : '') + '>' + x.charAt(0) + x.slice(1).toLowerCase() + '</option>').join('') + '</select>' +
-    '<select id="s-batch"><option value="">All batches</option>' + L('batches').map(b => '<option value="' + esc(b.BatchID) + '"' + (st.batch === b.BatchID ? ' selected' : '') + '>' + esc(b.BatchName) + '</option>').join('') + '</select></div>' +
+    '<select id="s-batch"><option value="">All batches</option>' + L('batches').map(b => '<option value="' + esc(b.BatchID) + '"' + (st.batch === b.BatchID ? ' selected' : '') + '>' + esc(b.BatchName) + '</option>').join('') + '</select>' +
+    '<select id="s-subject" aria-label="Filter students by subject"><option value="">All subjects</option>' + activeOnly('subjects').map(s => '<option value="' + esc(s.SubjectID) + '"' + (st.subject === s.SubjectID ? ' selected' : '') + '>' + esc(s.SubjectName) + '</option>').join('') + '</select></div>' +
     '<div id="s-list"></div>';
   const load = async () => {
-    const r = await api('students.list', { search: st.q, status: st.status, batchId: st.batch, limit: 500 });
+    const r = await api('students.list', { search: st.q, status: st.status, batchId: st.batch, subjectId: st.subject, limit: 500 });
     $('#s-count').textContent = r.total + (r.total === 1 ? ' student' : ' students') + (r.total > r.students.length ? ' (showing ' + r.students.length + ')' : '');
     $('#s-list').innerHTML = r.students.length ?
       '<div class="tablewrap"><table class="stack"><thead><tr><th>Student ID</th><th>Name</th><th>Class</th><th>Batch</th><th>Mobile</th><th>Status</th></tr></thead><tbody>' +
       r.students.map(s => '<tr class="click" data-id="' + esc(s.StudentID) + '"><td data-l="ID"><b>' + studentProfileLink(s.StudentID,s.StudentID) + '</b></td><td data-l="Name">' + studentProfileLink(s.StudentID,s.Name) + '</td><td data-l="Class">' + esc(s.CurrentClass) + '</td><td data-l="Batch">' + esc(nameOf('batches', 'BatchID', 'BatchName', s.CurrentBatch) || '—') + '</td><td data-l="Mobile">' + esc(s.Mobile || s.ParentMobile || '—') + '</td><td>' + pill(s.Status) + '</td></tr>').join('') + '</tbody></table></div>' :
-      '<div class="card empty"><b>No students found</b>' + (st.q || st.batch ? 'Try a different search or filter.' : (can('STUDENT_EDIT') ? 'Use “Add student” to register the first one.' : 'None have been added yet.')) + '</div>';
+      '<div class="card empty"><b>No students found</b>' + (st.q || st.batch || st.subject ? 'Try a different search or filter.' : (can('STUDENT_EDIT') ? 'Use “Add student” to register the first one.' : 'None have been added yet.')) + '</div>';
   };
   let t; $('#s-q').addEventListener('input', e => { st.q = e.target.value; clearTimeout(t); t = setTimeout(() => load().catch(fail), 300); });
   $('#s-status').addEventListener('change', e => { st.status = e.target.value; load().catch(fail); });
   $('#s-batch').addEventListener('change', e => { st.batch = e.target.value; load().catch(fail); });
+  $('#s-subject').addEventListener('change', e => { st.subject = e.target.value; load().catch(fail); });
   $('#s-list').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) go('student', tr.dataset.id); });
   await load();
 };
