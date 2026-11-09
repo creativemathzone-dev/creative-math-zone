@@ -138,6 +138,12 @@ tbody tr.click:hover{background:#f6faff}
 .link[data-batch]{padding:0;text-align:left}
 .perm{display:flex;gap:.6rem;align-items:flex-start;padding:.45rem 0;border-bottom:1px solid var(--line)}
 .perm input{margin-top:.3rem;width:18px;height:18px}
+.promo-fee-row{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.45rem 0;border-bottom:1px solid var(--line)}
+.promo-fee-row:last-child{border-bottom:0}
+.promo-fee-row small{display:block;color:var(--ink-3);font-size:.82rem}
+.mt-2{margin-top:1rem}
+.promo-fee-input{display:flex;align-items:center;gap:.35rem;white-space:nowrap}
+.promo-fee-input input,.promo-rate{width:160px;min-height:40px;padding:.4rem .55rem;border:1px solid #c5d1e0;border-radius:8px;background:#fff}
 
 main.quiet>*{animation:none!important}
 .live{display:flex;align-items:center;gap:.5rem;padding:.45rem .75rem;font-size:.8rem;color:#9fb2d0;flex-shrink:0}
@@ -659,6 +665,7 @@ $('#pw-out').addEventListener('click', doLogout);
 const NAV = [
   ['dashboard', 'Dashboard', null],
   ['students', 'Students', 'STUDENT_VIEW'],
+  ['promotions', 'Promotions', 'STUDENT_EDIT'],
   ['registrations', 'Registrations', 'STUDENT_VIEW'],
   ['teachers', 'Teachers', 'TEACHER_VIEW'],
   ['academic', 'Subjects, batches, rooms', 'MASTER_VIEW'],
@@ -677,7 +684,7 @@ const NAV = [
   ['logs', 'Activity log', 'LOG_VIEW']
 ];
 function buildNav() {
-  $('#nav-items').innerHTML = NAV.filter(n => !n[2] || can(n[2])).map(n => '<button class="item" data-go="' + n[0] + '">' + esc(n[1]) + '</button>').join('');
+  $('#nav-items').innerHTML = NAV.filter(n => (!n[2] || can(n[2])) && (n[0] !== 'promotions' || can('MASTER_VIEW'))).map(n => '<button class="item" data-go="' + n[0] + '">' + esc(n[1]) + '</button>').join('');
 }
 function go(view, arg){ S.view=view; S.arg=arg; SYNC.stale=false; liveState('Live'); $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
@@ -771,14 +778,17 @@ document.addEventListener('click', ev => {
 /* ---------- students ---------- */
 const classOpts = () => Array.from(new Set(activeOnly('batches').map(b => b.Class))).map(c => [c, 'Class ' + c]);
 const batchOpts = cls => activeOnly('batches').filter(b => !cls || b.Class === cls).map(b => [b.BatchID, b.BatchName]);
-function studentFields(isEdit) {
+function studentFields(isEdit, existingBoard) {
+  const boardOptions = [['WBBSE','WBBSE'],['WBCHSE','WBCHSE'],['CBSE','CBSE'],['ICSE','ICSE'],['ISC','ISC'],['Other','Other']];
+  const boardValue = String(existingBoard || '').trim();
+  if (boardValue && !boardOptions.some(o => o[0] === boardValue)) boardOptions.push([boardValue, boardValue + ' (existing)']);
   const f = [
     { n: 'Name', l: 'Full name', req: 1, full: 1, max: 100 },
     { n: 'CurrentClass', l: 'Class', type: 'select', req: 1, options: classOpts() },
     { n: 'CurrentBatch', l: 'Batch', type: 'select', options: batchOpts(), blank: 'No batch yet' },
     { n: 'DOB', l: 'Date of birth', type: 'date' }, { n: 'Gender', l: 'Gender', type: 'select', options: [['MALE', 'Male'], ['FEMALE', 'Female'], ['OTHER', 'Other']] },
     { n: 'Mobile', l: 'Student mobile', type: 'tel', hint: '10 digits' }, { n: 'Email', l: 'Student email', type: 'email' },
-    { n: 'School', l: 'School' }, { n: 'Board', l: 'Board', hint: 'CBSE, ICSE, WBBSE…' },
+    { n: 'School', l: 'School' }, { n: 'Board', l: 'Board', type: 'select', options: boardOptions, hint: 'Choose the student’s board for grouped promotions.' },
     { n: 'PreviousPercentage', l: 'Previous exam %', type: 'number', step: 'any' }, { n: 'Address', l: 'Address', full: 1 },
     { n: 'ParentName', l: 'Parent or guardian' }, { n: 'Relationship', l: 'Relationship' },
     { n: 'ParentMobile', l: 'Parent mobile', type: 'tel' }, { n: 'ParentWhatsApp', l: 'Parent WhatsApp', type: 'tel' }, { n: 'ParentEmail', l: 'Parent email', type: 'email', full: 1 }
@@ -793,6 +803,88 @@ function wireClassBatch(root, current) {
   cls.addEventListener('change', () => fill(''));
   fill(current);
 }
+VIEWS.promotions = async main => {
+  if (!can('MASTER_VIEW')) {
+    main.innerHTML = '<div class="card"><h1>Student promotions</h1><p>This page also needs master-data view access to load subjects and target batches. Ask the super admin to add that permission.</p></div>';
+    return;
+  }
+  await loadLookups();
+  const studentResult = await api('students.list', { status: 'ACTIVE', limit: 1000 });
+  const students = studentResult.students || [];
+  const normalizeBoard = value => {
+    const raw=String(value||'').trim(), key=raw.toUpperCase().replace(/[^A-Z0-9]/g,'');
+    const canonical=['WBBSE','WBCHSE','CBSE','ICSE','ISC'].find(x=>x===key);
+    return canonical||raw;
+  };
+  const boards = [...new Set(students.map(s => normalizeBoard(s.Board)).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  const classesForBoard = board => [...new Set(students.filter(s => normalizeBoard(s.Board).toUpperCase() === board.toUpperCase()).map(s => String(s.CurrentClass || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  const batchClasses = [...new Set(activeOnly('batches').map(b => String(b.Class || '').trim()).filter(Boolean))];
+  const currentYear = S.cfg.academicYear || (new Date().getFullYear() + '-' + String(new Date().getFullYear()+1).slice(-2));
+  const now=new Date(), today=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  main.innerHTML = '<div class="head"><div><h1>Student promotions</h1><p>Promote a board and class group together. Set target fees once, review each student, and keep old records intact.</p></div></div>' +
+    '<div class="card"><h2 style="font-size:1.1rem">Promotion group</h2><div class="grid2">' +
+      '<label class="f"><span>Board</span><select id="promo-board"><option value="">Choose board…</option>'+boards.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join('')+'</select></label>'+
+      '<label class="f"><span>Current class</span><select id="promo-source"><option value="">Choose current class…</option></select></label>'+
+      '<label class="f"><span>Promote to class</span><select id="promo-target"><option value="">Choose target class…</option>'+batchClasses.map(x=>'<option value="'+esc(x)+'">Class '+esc(x)+'</option>').join('')+'</select></label>'+
+      '<label class="f"><span>Target batch</span><select id="promo-batch"><option value="">Choose target class first…</option></select><small>Target batch and promotion academic year must match.</small></label>'+
+      '<label class="f"><span>New academic year</span><input id="promo-year" maxlength="10" value="'+esc(currentYear)+'" placeholder="e.g. 2027-28"></label>'+
+      '<label class="f"><span>Effective from</span><input id="promo-date" type="date" value="'+esc(today)+'"></label></div>'+
+      '<div class="row mt-2"><button class="btn primary" id="promo-preview">Load promotion preview</button><span class="muted">No student or fee changes happen until you apply the reviewed promotion.</span></div></div>'+
+    '<div id="promo-workspace"></div>';
+  const boardEl=$('#promo-board',main), sourceEl=$('#promo-source',main), targetEl=$('#promo-target',main), batchEl=$('#promo-batch',main), workspace=$('#promo-workspace',main);
+  const fillSource=()=>{const values=classesForBoard(boardEl.value);sourceEl.innerHTML='<option value="">Choose current class…</option>'+values.map(x=>'<option value="'+esc(x)+'">Class '+esc(x)+'</option>').join('');};
+  const fillBatches=()=>{const options=activeOnly('batches').filter(b=>String(b.Class).trim().toUpperCase()===targetEl.value.trim().toUpperCase());batchEl.innerHTML='<option value="">Choose target batch…</option>'+options.map(b=>'<option value="'+esc(b.BatchID)+'" data-academic-year="'+esc(b.AcademicYear||'')+'">'+esc(b.BatchName)+' · '+esc(b.Class)+' · '+esc(b.AcademicYear||'')+'</option>').join('');};
+  boardEl.addEventListener('change',fillSource); targetEl.addEventListener('change',fillBatches);
+  batchEl.addEventListener('change',()=>{const year=batchEl.selectedOptions[0]?.dataset.academicYear;if(year)$('#promo-year',main).value=year;});
+  const rateHtml = (subjectList, saved) => '<div class="card mt-2"><h2 style="font-size:1.1rem">Suggested monthly fees</h2><p class="muted">Set a new base fee per subject for this board, target class, and academic year. Leave blank to keep each student’s current base fee. ₹0 is allowed when it is not below an existing student discount. Existing student discounts carry forward.</p>'+
+    '<div class="tablewrap"><table class="stack"><thead><tr><th>Subject</th><th>Suggested fee (₹)</th></tr></thead><tbody>'+subjectList.map(s=>{const rate=saved.find(r=>r.SubjectID===s.SubjectID);return '<tr><td data-l="Subject">'+esc(s.SubjectName)+'</td><td data-l="Suggested fee"><input class="promo-rate" data-rate-subject="'+esc(s.SubjectID)+'" type="number" min="0" max="100000" step="0.01" value="'+(rate?esc(rate.Amount):'')+'" placeholder="Keep each current fee" style="max-width:220px"></td></tr>';}).join('')+'</tbody></table></div><button class="btn mt-2" id="promo-save-rates">Save suggested fees</button></div>';
+  let previewData=null;
+  const renderPreview = () => {
+    if (!previewData) return;
+    const rows=previewData.students||[];
+    const nonEmpty=rows.filter(s=>s.Subjects.length);
+    workspace.innerHTML=rateHtml(previewData.subjects||[],previewData.feeRates||[]) +
+      '<div class="head mt-2"><div><h2>Review students and fees</h2><p>'+nonEmpty.length+' student(s) with active subject assignments · subjects and teachers carry forward unless you change them later.</p></div><div class="row"><button class="btn small" id="promo-select-all">Select all</button><button class="btn small" id="promo-select-none">Select none</button></div></div>'+
+      (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Promote</th><th>Student</th><th>Subjects · new base fee</th></tr></thead><tbody>'+rows.map(s=>'<tr><td data-l="Promote"><input type="checkbox" data-promo-student="'+esc(s.StudentID)+'" '+(s.Subjects.length?'checked':'disabled')+' aria-label="Promote '+esc(s.Name)+'"></td><td data-l="Student"><b>'+esc(s.Name)+'</b><div class="muted">'+esc(s.StudentID)+' · '+esc(s.CurrentBatch||'No current batch')+'</div></td><td data-l="Subjects">'+(s.Subjects.length?s.Subjects.map(sub=>'<label class="promo-fee-row"><span>'+esc(sub.SubjectName)+'<small>Current base ₹'+Number(sub.CurrentFee||0).toLocaleString('en-IN')+' · discount ₹'+Number(sub.CurrentDiscount||0).toLocaleString('en-IN')+' · payable ₹'+Math.max(0,Number(sub.CurrentFee||0)-Number(sub.CurrentDiscount||0)).toLocaleString('en-IN')+(sub.SuggestedFee===null?' · no class suggestion':' · suggested base ₹'+Number(sub.SuggestedFee).toLocaleString('en-IN'))+'</small></span><span class="promo-fee-input"><span>₹</span><input type="number" min="0" max="100000" step="0.01" data-promo-fee="'+esc(sub.StudentSubjectID)+'" value="'+esc(sub.SuggestedFee===null?sub.CurrentFee:sub.SuggestedFee)+'" aria-label="New base fee for '+esc(sub.SubjectName)+' for '+esc(s.Name)+'"></span></label>').join(''):'<span class="muted">No active subjects. Assign subjects before promoting.</span>')+'</td></tr>').join('')+'</tbody></table></div>' : '<div class="card empty">No active students match this board and current class.</div>')+
+      '<div class="card mt-2"><div class="row" style="justify-content:space-between"><div><b>Apply promotion</b><div class="muted">This updates class and batch, closes old subject assignments, creates new assignments, and writes history. Existing invoices remain unchanged.</div></div><button class="btn primary" id="promo-apply" '+(!nonEmpty.length?'disabled':'')+'>Promote selected students</button></div></div>';
+    $('#promo-select-all',workspace)?.addEventListener('click',()=>$$('[data-promo-student]:not(:disabled)',workspace).forEach(x=>x.checked=true));
+    $('#promo-select-none',workspace)?.addEventListener('click',()=>$$('[data-promo-student]',workspace).forEach(x=>x.checked=false));
+    $('#promo-save-rates',workspace)?.addEventListener('click',ev=>busy(ev.target,async()=>{
+      const board=boardEl.value,targetClass=targetEl.value,academicYear=$('#promo-year',main).value.trim();
+      if(!board||!targetClass||!academicYear){toast('Choose board, target class, and academic year first.',true);return;}
+      const inputs=$$('[data-rate-subject]',workspace);
+      for(const input of inputs) {
+        if(input.value.trim()==='') await api('promotions.fees.delete',{board,targetClass,academicYear,subjectId:input.dataset.rateSubject});
+        else await api('promotions.fees.save',{board,targetClass,academicYear,subjectId:input.dataset.rateSubject,amount:input.value});
+      }
+      toast('Suggested fees saved.');
+      const data=await api('promotions.preview',{board,sourceClass:sourceEl.value,targetClass,academicYear});previewData=data;renderPreview();
+    }));
+    $('#promo-apply',workspace)?.addEventListener('click',ev=>busy(ev.target,async()=>{
+      const selected=$$('[data-promo-student]:checked',workspace).map(el=>el.dataset.promoStudent);
+      if(!selected.length){toast('Select at least one student.',true);return;}
+      const board=boardEl.value,sourceClass=sourceEl.value,targetClass=targetEl.value,batchId=batchEl.value,academicYear=$('#promo-year',main).value.trim(),startDate=$('#promo-date',main).value;
+      if(!board||!sourceClass||!targetClass||!batchId||!academicYear||!startDate){toast('Complete the promotion group, target batch, academic year, and effective date.',true);return;}
+      const payloadRows=previewData.students.filter(s=>selected.includes(s.StudentID)).map(s=>({studentId:s.StudentID,fees:s.Subjects.map(sub=>({studentSubjectId:sub.StudentSubjectID,amount:$('[data-promo-fee="'+CSS.escape(sub.StudentSubjectID)+'"]',workspace)?.value}))}));
+      const feeBelowDiscount=previewData.students.filter(s=>selected.includes(s.StudentID)).some(s=>s.Subjects.some(sub=>{
+        const input=$('[data-promo-fee="'+CSS.escape(sub.StudentSubjectID)+'"]',workspace), amount=Number(input?.value);
+        return Number.isFinite(amount)&&amount<Number(sub.CurrentDiscount||0);
+      }));
+      if(feeBelowDiscount){toast('A new base fee cannot be lower than that student’s active discount. Update the discount first, or set a higher fee.',true);return;}
+      if(payloadRows.some(s=>s.fees.some(f=>String(f.amount??'').trim()===''||!Number.isFinite(Number(f.amount))||Number(f.amount)<0||Number(f.amount)>100000))){toast('Enter a valid new base fee from ₹0 to ₹100000 for every subject. Use 0 when it is free and no active discount exceeds it.',true);return;}
+      const count=selected.length;
+      if(!confirm('Promote '+count+' student(s) from Class '+sourceClass+' to Class '+targetClass+' in '+academicYear+'? Their old invoices and class history will remain unchanged.'))return;
+      const result=await api('promotions.apply',{board,sourceClass,targetClass,targetBatchId:batchId,academicYear,startDate,promotions:payloadRows});
+      toast(result.promoted+' student(s) promoted.'); workspace.innerHTML=''; previewData=null;
+    }));
+  };
+  $('#promo-preview',main).addEventListener('click',ev=>busy(ev.target,async()=>{
+    const board=boardEl.value,sourceClass=sourceEl.value,targetClass=targetEl.value,academicYear=$('#promo-year',main).value.trim();
+    if(!board||!sourceClass||!targetClass||!academicYear){toast('Choose board, current class, target class, and academic year.',true);return;}
+    const data=await api('promotions.preview',{board,sourceClass,targetClass,academicYear});
+    previewData=data;renderPreview();
+  }));
+};
 async function studentDialog() {
   await loadLookups();
   if (!L('batches').length) { toast('Add a batch first under “Subjects, batches, rooms”.', true); return; }
@@ -845,7 +937,7 @@ VIEWS.student = async (main, id) => {
     api('changes.list', { studentId: id }),
     canFinance ? api('finance.studentFee.list', { studentId: id }).catch(() => null) : Promise.resolve(null)
   ]);
-  const s = d.student, fields = studentFields(true), editable = can('STUDENT_EDIT');
+  const s = d.student, fields = studentFields(true, d.student.Board), editable = can('STUDENT_EDIT');
   const subjRows = d.subjects.slice().reverse();
 
   const activeSubjects = d.subjects.filter(x => String(x.Status).toUpperCase() === 'ACTIVE').length;

@@ -678,6 +678,8 @@ Deno.serve(async (request) => {
       'rooms.add': 'MASTER_EDIT', 'rooms.update': 'MASTER_EDIT',
       'students.list': 'STUDENT_VIEW', 'students.get': 'STUDENT_VIEW',
       'students.add': 'STUDENT_EDIT', 'students.update': 'STUDENT_EDIT',
+      'promotions.preview': 'STUDENT_EDIT', 'promotions.fees.list': 'STUDENT_EDIT',
+      'promotions.fees.save': 'STUDENT_EDIT', 'promotions.fees.delete': 'STUDENT_EDIT', 'promotions.apply': 'STUDENT_EDIT',
       'students.resetPassword': 'STUDENT_EDIT',
       'studentSubjects.assign': 'STUDENT_EDIT', 'studentSubjects.end': 'STUDENT_EDIT', 'studentSubjects.updateFee': 'STUDENT_EDIT',
       'changes.list': 'STUDENT_VIEW',
@@ -2419,6 +2421,135 @@ Deno.serve(async (request) => {
         student: student ? { StudentID: student.id, Name: student.name, CurrentClass: student.current_class, ParentName: student.parent_name } : null,
         centre: { name: values.CENTRE_NAME || 'Creative Math Zone', tagline: values.TAGLINE || '', address: values.ADDRESS || '',
           mobile: values.MOBILE || '', email: values.EMAIL || '', website: values.WEBSITE || '', academicYear: values.ACADEMIC_YEAR || '2026-27' } } })
+    }
+
+    if (action === 'promotions.fees.list') {
+      const board = requireText(payload.board, 'Board', 30, true)
+      const targetClass = requireText(payload.targetClass, 'Target class', 10, true)
+      const academicYear = requireText(payload.academicYear, 'Academic year', 10, true)
+      const { data, error } = await admin.from('promotion_fee_rates').select('id,board,target_class,subject_id,academic_year,amount')
+        .ilike('board', board).ilike('target_class', targetClass).eq('academic_year', academicYear)
+      if (error) throw error
+      return response({ ok: true, data: (data || []).map(r => ({ RateID: r.id, Board: r.board, TargetClass: r.target_class,
+        SubjectID: r.subject_id, AcademicYear: r.academic_year, Amount: Number(r.amount) })) })
+    }
+
+    if (action === 'promotions.fees.save') {
+      const board = requireText(payload.board, 'Board', 30, true).toUpperCase()
+      const targetClass = requireText(payload.targetClass, 'Target class', 10, true).toUpperCase()
+      const academicYear = requireText(payload.academicYear, 'Academic year', 10, true)
+      const subjectId = requireText(payload.subjectId, 'Subject', 40, true)
+      const amount = Number(payload.amount)
+      if (!Number.isFinite(amount) || amount < 0 || amount > 100000) throw new ApiFault('BAD_REQUEST', 'Suggested fee must be from 0 to 100000.')
+      const { data: subject, error: subjectError } = await admin.from('subjects').select('id').eq('id', subjectId).maybeSingle()
+      if (subjectError) throw subjectError
+      if (!subject) throw new ApiFault('NOT_FOUND', 'Subject not found.')
+      const { error } = await admin.from('promotion_fee_rates').upsert({ id: `PFR-${crypto.randomUUID()}`,
+        board, target_class: targetClass, subject_id: subjectId, academic_year: academicYear, amount, updated_at: new Date().toISOString() },
+        { onConflict: 'board,target_class,subject_id,academic_year' })
+      if (error) throw error
+      await logAction(admin, user, 'SET_PROMOTION_FEE', 'PROMOTION_FEE', `${board}:${targetClass}:${subjectId}:${academicYear}`, { amount })
+      return response({ ok: true, data: { saved: true } })
+    }
+
+    if (action === 'promotions.fees.delete') {
+      const board = requireText(payload.board, 'Board', 30, true).toUpperCase()
+      const targetClass = requireText(payload.targetClass, 'Target class', 10, true).toUpperCase()
+      const academicYear = requireText(payload.academicYear, 'Academic year', 10, true)
+      const subjectId = requireText(payload.subjectId, 'Subject', 40, true)
+      const { error } = await admin.from('promotion_fee_rates').delete().ilike('board', board)
+        .ilike('target_class', targetClass).eq('academic_year', academicYear).eq('subject_id', subjectId)
+      if (error) throw error
+      await logAction(admin, user, 'CLEAR_PROMOTION_FEE', 'PROMOTION_FEE', `${board}:${targetClass}:${subjectId}:${academicYear}`, {})
+      return response({ ok: true, data: { deleted: true } })
+    }
+
+    if (action === 'promotions.preview') {
+      const board = requireText(payload.board, 'Board', 30, true)
+      const sourceClass = requireText(payload.sourceClass, 'Current class', 10, true)
+      const targetClass = requireText(payload.targetClass, 'Target class', 10, true)
+      const academicYear = requireText(payload.academicYear, 'Academic year', 10, true)
+      const [{ data: students, error, count: studentCount }, { data: subjects, error: subjectError },
+        { data: rates, error: rateError }, { data: feeRows, error: feeError }, { data: currentYear }] = await Promise.all([
+        admin.from('students').select('id,name,board,current_class,current_batch_id,academic_year,status', { count: 'exact' }).ilike('board', board)
+          .ilike('current_class', sourceClass).ilike('status', 'ACTIVE').order('name').limit(500),
+        admin.from('subjects').select('id,name,status'),
+        admin.from('promotion_fee_rates').select('subject_id,amount').ilike('board', board).ilike('target_class', targetClass).eq('academic_year', academicYear),
+        admin.from('fee_structure').select('subject_id,amount,academic_year').eq('item_type', 'SUBJECT').eq('status', 'Active'),
+        admin.from('settings').select('value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle(),
+      ])
+      if (error || subjectError || rateError || feeError) throw error || subjectError || rateError || feeError
+      if ((studentCount || 0) > 500) throw new ApiFault('PROMOTION_LIMIT', `This group has ${studentCount} active students, above the 500-student limit. Narrow the promotion group or contact support before applying it.`)
+      const studentIds = (students || []).map(s => s.id)
+      let assignments: any[] = []
+      let discounts: any[] = []
+      if (studentIds.length) {
+        const [{ data, error: assignmentError }, { data: discountRows, error: discountError }] = await Promise.all([
+          admin.from('student_subjects').select('id,student_id,subject_id,teacher_id,batch_id,fee_override,teacher_rate_override,academic_year')
+            .in('student_id', studentIds).ilike('status', 'ACTIVE').limit(30000),
+          admin.from('student_fees').select('student_id,subject_id,discount_amount').in('student_id', studentIds)
+            .eq('status', 'Active').is('effective_to', null),
+        ])
+        if (assignmentError || discountError) throw assignmentError || discountError
+        assignments = data || []
+        discounts = discountRows || []
+      }
+      const subjectNames = new Map((subjects || []).map(s => [s.id, s.name]))
+      const suggestions = new Map((rates || []).map(r => [r.subject_id, Number(r.amount)]))
+      const standardFees = new Map((feeRows || []).filter(r => r.academic_year === (currentYear?.value || '2026-27')).map(r => [r.subject_id, Number(r.amount)]))
+      const discountByKey = new Map(discounts.map(r => [`${r.student_id}:${r.subject_id}`, Number(r.discount_amount) || 0]))
+      const rows = (students || []).map(student => ({ StudentID: student.id, Name: student.name, Board: student.board,
+        CurrentClass: student.current_class, CurrentBatch: student.current_batch_id || '', AcademicYear: student.academic_year || '',
+        Subjects: (assignments || []).filter(a => a.student_id === student.id).map(a => ({ StudentSubjectID: a.id,
+          SubjectID: a.subject_id, SubjectName: subjectNames.get(a.subject_id) || a.subject_id, TeacherID: a.teacher_id || '',
+          BatchID: a.batch_id || '', CurrentFee: a.fee_override === null ? (standardFees.get(a.subject_id) || 0) : Number(a.fee_override),
+          CurrentDiscount: discountByKey.get(`${student.id}:${a.subject_id}`) || 0,
+          SuggestedFee: suggestions.has(a.subject_id) ? suggestions.get(a.subject_id) : null }))
+      }))
+      return response({ ok: true, data: { students: rows, subjects: (subjects || []).filter(s => s.status === 'Active')
+        .map(s => ({ SubjectID: s.id, SubjectName: s.name })), feeRates: [...suggestions.entries()].map(([SubjectID, Amount]) => ({ SubjectID, Amount })) } })
+    }
+
+    if (action === 'promotions.apply') {
+      const board = requireText(payload.board, 'Board', 30, true).toUpperCase()
+      const sourceClass = requireText(payload.sourceClass, 'Current class', 10, true).toUpperCase()
+      const targetClass = requireText(payload.targetClass, 'Target class', 10, true).toUpperCase()
+      const batchId = requireText(payload.targetBatchId, 'Target batch', 40, true)
+      const academicYear = requireText(payload.academicYear, 'Academic year', 10, true)
+      const startDate = requireText(payload.startDate, 'Effective date', 10, true)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new ApiFault('BAD_REQUEST', 'Effective date must use yyyy-mm-dd.')
+      if (!Array.isArray(payload.promotions) || !payload.promotions.length || payload.promotions.length > 500) throw new ApiFault('BAD_REQUEST', 'Select between 1 and 500 students.')
+      const seen = new Set<string>()
+      const promotions = payload.promotions.map((item: any) => {
+        const studentId = requireText(item?.studentId, 'Student ID', 40, true)
+        if (seen.has(studentId)) throw new ApiFault('BAD_REQUEST', 'A student was selected more than once.')
+        seen.add(studentId)
+        if (!Array.isArray(item.fees) || item.fees.length > 30) throw new ApiFault('BAD_REQUEST', 'Promotion fee details are invalid.')
+        const feeIds = new Set<string>()
+        const fees = item.fees.map((fee: any) => {
+          const studentSubjectId = requireText(fee?.studentSubjectId, 'Subject assignment', 60, true)
+          if (feeIds.has(studentSubjectId)) throw new ApiFault('BAD_REQUEST', 'A subject fee was repeated.')
+          feeIds.add(studentSubjectId)
+          const rawAmount = String(fee?.amount ?? '').trim()
+          if (!rawAmount) throw new ApiFault('BAD_REQUEST', 'Enter a fee for every active subject. Use 0 when that subject is free.')
+          const amount = Number(rawAmount)
+          if (!Number.isFinite(amount) || amount < 0 || amount > 100000) throw new ApiFault('BAD_REQUEST', 'Each suggested fee must be from 0 to 100000.')
+          return { studentSubjectId, amount }
+        })
+        return { studentId, fees }
+      })
+      if (sourceClass === targetClass) throw new ApiFault('BAD_REQUEST', 'Choose a different target class from the current class.')
+      const { data: batch, error: batchError } = await admin.from('batches').select('id,class,status,academic_year').eq('id', batchId).maybeSingle()
+      if (batchError) throw batchError
+      if (!batch || batch.status !== 'Active' || String(batch.class).trim().toUpperCase() !== targetClass) throw new ApiFault('BAD_REQUEST', 'Choose an active batch for the target class.')
+      if (String(batch.academic_year || '') !== academicYear) throw new ApiFault('BAD_REQUEST', 'The target batch academic year must match the promotion academic year.')
+      const { data, error } = await admin.rpc('apply_student_promotions', { p_board: board, p_source_class: sourceClass,
+        p_target_class: targetClass, p_target_batch_id: batchId, p_academic_year: academicYear, p_start_date: startDate,
+        p_promotions: promotions, p_changed_by: user.id })
+      if (error) throw new ApiFault('PROMOTION_FAILED', error.message || 'The promotion could not be applied. No changes were saved.')
+      await logAction(admin, user, 'PROMOTE_STUDENTS', 'STUDENT', `${board}:${sourceClass}->${targetClass}`,
+        { count: Number(data) || promotions.length, batchId, academicYear, startDate })
+      return response({ ok: true, data: { promoted: Number(data) || promotions.length } })
     }
 
     if (action === 'students.get') {
