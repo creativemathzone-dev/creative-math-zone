@@ -126,9 +126,10 @@ tbody tr.click:hover{background:#f6faff}
 .kv dt{color:var(--ink-3);font-size:.9rem}.kv dd{margin:0}
 .section{margin-top:1.75rem}
 .section>h2{font-size:1.2rem;margin-bottom:.75rem}
-.dash-search-results{position:absolute;z-index:20;top:100%;left:0;right:0;max-height:320px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:0 0 12px 12px;box-shadow:var(--shadow)}
+.dash-search-results{position:relative;z-index:1;width:100%;max-height:320px;overflow:auto;margin-top:.45rem;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .toolbar:has(#dash-search){position:relative;display:block;margin-bottom:1rem}
 .toolbar:has(#dash-search) #dash-search{width:100%;max-width:none}
+.dash-search-message{padding:.75rem .9rem;color:var(--ink-2)}
 .dash-result{display:flex;width:100%;flex-direction:column;align-items:flex-start;gap:.1rem;padding:.65rem .85rem;border:0;border-bottom:1px solid var(--line);background:#fff;color:var(--ink);text-align:left;cursor:pointer}
 .dash-result:hover{background:var(--paper)}
 .dash-result span{font-size:.85rem;color:var(--ink-3)}
@@ -724,7 +725,31 @@ VIEWS.dashboard = async main => {
     (perBatch.length ? '<div class="section" style="margin-top:0"><h2>Active students by batch</h2><div class="tablewrap"><table><tbody>' +
       perBatch.map(batchRow).join('') + '</tbody></table></div></div>' : ''));
   const search = $('#dash-search'), results = $('#dash-search-results');
-  if (search && results) { let timer; search.addEventListener('input',()=>{clearTimeout(timer);const q=search.value.trim();if(q.length<2){results.hidden=true;return;}timer=setTimeout(async()=>{try{const r=await api('students.list',{search:q,limit:8});results.innerHTML=r.students.length?r.students.map(s=>'<button class="dash-result" data-student="'+esc(s.StudentID)+'"><b>'+esc(s.Name)+'</b><span>'+esc(s.StudentID)+' · Class '+esc(s.CurrentClass)+' · '+esc(nameOf('batches','BatchID','BatchName',s.CurrentBatch)||'No batch')+'</span></button>').join(''):'<div class="muted" style="padding:.75rem">No matching students.</div>';results.hidden=false;}catch(e){fail(e)}},250);});results.addEventListener('click',e=>{const b=e.target.closest('[data-student]');if(b)go('student',b.dataset.student);}); }
+  if (search && results) {
+    let timer, requestId = 0;
+    const hideResults = () => { results.hidden = true; results.innerHTML = ''; };
+    search.addEventListener('input', () => {
+      clearTimeout(timer);
+      const q = search.value.trim(), currentRequest = ++requestId;
+      if (q.length < 2) { hideResults(); return; }
+      results.innerHTML = '<div class="dash-search-message" role="status">Searching students…</div>';
+      results.hidden = false;
+      timer = setTimeout(async () => {
+        try {
+          const r = await api('students.list', { search: q, limit: 8 });
+          if (currentRequest !== requestId || search.value.trim() !== q) return;
+          const matches = Array.isArray(r.students) ? r.students : [];
+          results.innerHTML = matches.length ? matches.map(s => '<button class="dash-result" data-student="'+esc(s.StudentID)+'"><b>'+esc(s.Name)+'</b><span>'+esc(s.StudentID)+' · Class '+esc(s.CurrentClass)+' · '+esc(nameOf('batches','BatchID','BatchName',s.CurrentBatch)||'No batch')+'</span></button>').join('') : '<div class="dash-search-message" role="status">No students found for “'+esc(q)+'”. Check the spelling or try the student ID.</div>';
+        } catch (e) {
+          if (currentRequest !== requestId) return;
+          results.innerHTML = '<div class="dash-search-message" role="alert">Could not search right now. Please try again.</div>';
+          fail(e);
+        }
+      }, 250);
+    });
+    search.addEventListener('keydown', e => { if (e.key === 'Escape') hideResults(); });
+    results.addEventListener('click', e => { const b = e.target.closest('[data-student]'); if (b) go('student', b.dataset.student); });
+  }
   $$('[data-batch]',main).forEach(b=>b.addEventListener('click',()=>{VIEWS.students.state={...(VIEWS.students.state||{}),q:'',status:'ACTIVE',batch:b.dataset.batch};go('students');}));
   $$('[data-goto]',main).forEach(b=>b.addEventListener('click',()=>go(b.dataset.goto)));
 };
