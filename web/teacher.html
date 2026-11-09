@@ -530,15 +530,37 @@ function buildNav(){
   const list = NAV.filter(n => n[0] !== 'income' || can('TEACHER_INCOME_VIEW'));
   $('#nav-items').innerHTML = list.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join('');
 }
-function go(view, arg){ S.view=view; $('#side').classList.remove('open');
+function go(view, arg){ if (view === 'studentProfile' && S.view !== 'studentProfile') { S.studentReturnView=S.view; S.studentReturnArg=S.arg; } if (S.liveCleanup && view !== 'live') { S.liveCleanup(); S.liveCleanup = null; } S.view=view; S.arg=arg; $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
   const main=$('#main'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
   Promise.resolve().then(() => (VIEWS[view] || VIEWS.dashboard)(main, arg)).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(e => viewFail(main, view, arg, e)); window.scrollTo(0,0);
 }
+function teacherStudentLink(id, name){ return '<button type="button" class="link student-profile-link" data-profile-student="'+esc(id)+'">'+esc(name)+'</button>'; }
+document.addEventListener('click', ev => {
+  const link = ev.target.closest('[data-profile-student]');
+  if (!link) return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  go('studentProfile', link.dataset.profileStudent);
+}, true);
 $('#nav-items').addEventListener('click', ev => { const b=ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
 $('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open'));
 
 const VIEWS = {};
+
+VIEWS.studentProfile = async (main, id) => {
+  if (!id) throw { code:'VALIDATION', error:'Student ID is missing.' };
+  const result = await api('teacher.studentProfile', { studentId:id });
+  const s = result.student;
+  const backView = S.studentReturnView || 'students';
+  const backLabel = ({ dashboard:'Dashboard', timetable:'Timetable', students:'My students', sessions:'Past classes', homework:'Homework' })[backView] || 'My students';
+  main.innerHTML = '<p><button type="button" class="link" id="student-profile-back">← '+esc(backLabel)+'</button></p>' +
+    '<div class="head"><div><h1>'+esc(s.Name)+'</h1><p>'+esc(s.StudentID)+' · Class '+esc(s.CurrentClass||'—')+(s.CurrentBatchName?' · '+esc(s.CurrentBatchName):'')+' · '+pill(s.Status)+'</p></div></div>' +
+    '<section class="card"><h2 style="font-size:1.15rem">Subjects and batches assigned to you</h2>' +
+      (result.assignments.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Subject</th><th>Batch</th><th>Academic year</th><th>Assigned</th><th>Ended</th><th>Status</th></tr></thead><tbody>' +
+        result.assignments.map(a=>'<tr><td data-l="Subject">'+esc(a.SubjectName)+'</td><td data-l="Batch">'+esc(a.BatchName)+'</td><td data-l="Academic year">'+esc(a.AcademicYear||'—')+'</td><td data-l="Assigned">'+esc(a.StartDate?fmtDate(a.StartDate):'—')+'</td><td data-l="Ended">'+esc(a.EndDate?fmtDate(a.EndDate):'—')+'</td><td>'+pill(a.Status)+'</td></tr>').join('')+
+        '</tbody></table></div>' : '<p class="muted">No class assignments found.</p>')+'</section>';
+  $('#student-profile-back',main).addEventListener('click',()=>go(backView,S.studentReturnArg));
+};
 
 /* ---- dashboard ---- */
 VIEWS.dashboard = async main => {
@@ -606,7 +628,8 @@ async function startClass(timetableId) {
 VIEWS.live = async (main, sessionId) => {
   if (!sessionId) { main.innerHTML = '<div class="card empty"><b>No class selected</b>Open a class from the Dashboard.</div>'; return; }
   let poll = null, stopped = false, lastTotal = 0;
-  const cleanup = () => { stopped = true; if (poll) { clearInterval(poll); poll = null; } };
+  const cleanup = () => { stopped = true; if (poll) { clearInterval(poll); poll = null; } if (S.liveCleanup === cleanup) S.liveCleanup = null; };
+  S.liveCleanup = cleanup;
   main.innerHTML = '<div id="live-body"><p class="muted">Loading…</p></div>';
 
   const render = st => {
@@ -641,7 +664,7 @@ VIEWS.live = async (main, sessionId) => {
             const method = x.Method ? '<span class="method">'+esc(x.Method.replace('_',' ').toLowerCase())+'</span>' : '';
             return '<div class="att-item" data-sid="'+esc(x.StudentID)+'">' +
               '<span class="sid">'+esc(x.RollNo || x.StudentID)+'</span>' +
-              '<span class="name">'+esc(x.Name)+'</span>' + method + ' ' + p +
+              '<span class="name">'+teacherStudentLink(x.StudentID,x.Name)+'</span>' + method + ' ' + p +
               '<span class="acts">' +
                 '<button class="btn small" data-mark="PRESENT">P</button>' +
                 '<button class="btn small" data-mark="LATE">L</button>' +
@@ -717,7 +740,7 @@ VIEWS.students = async main => {
         '<p class="muted" style="font-size:.85rem;margin:0 0 .5rem">'+g.students.length+' student'+(g.students.length===1?'':'s')+'</p>' +
         (g.students.length
           ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Roll</th><th>Student ID</th><th>Name</th></tr></thead><tbody>' +
-            g.students.map(s => '<tr><td data-l="Roll">'+esc(s.RollNo||'—')+'</td><td data-l="Student ID">'+esc(s.StudentID)+'</td><td data-l="Name">'+esc(s.Name)+'</td></tr>').join('') +
+          g.students.map(s => '<tr><td data-l="Roll">'+esc(s.RollNo||'—')+'</td><td data-l="Student ID">'+teacherStudentLink(s.StudentID,s.StudentID)+'</td><td data-l="Name">'+teacherStudentLink(s.StudentID,s.Name)+'</td></tr>').join('') +
             '</tbody></table></div>'
           : '<div class="muted">No active students yet.</div>') +
       '</div>'
@@ -788,7 +811,7 @@ VIEWS.homework = async main => {
         (h.Materials.length?'<p>'+h.Materials.map(u=>'<a href="'+esc(u)+'" target="_blank" rel="noopener">Open material</a>').join(' · ')+'</p>':'')+
         (h.Files.length?'<p><b>Attached files:</b> '+h.Files.map(f=>'<span><button class="link" data-hw-file="'+esc(f.FileID)+'">'+esc(f.FileName)+(f.Archived?' · Drive archive':f.ArchiveError?' · Archive failed; copy retained':' · Pending archive')+'</button> <button class="btn small danger" data-hw-delete="'+esc(f.FileID)+'">Delete</button></span>').join(' · ')+'</p>':'')+
         (!expired?'<div class="row"><input type="file" multiple data-hw-extra="'+esc(h.HomeworkID)+'" accept=".pdf,.jpg,.jpeg,.png,.docx,application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document"><button type="button" class="btn small" data-hw-extra-add="'+esc(h.HomeworkID)+'">Add files</button></div>':'')+
-        (h.Submissions.length?'<div class="tablewrap"><table class="stack"><thead><tr><th>Student</th><th>Submitted</th><th>Answer</th><th>Link / files</th><th>Status / feedback</th></tr></thead><tbody>'+h.Submissions.map(s=>'<tr><td>'+esc(s.StudentName)+'</td><td>'+esc(new Date(s.SubmittedAt).toLocaleString())+'</td><td style="white-space:pre-wrap">'+esc(s.Answer)+'</td><td>'+(s.AttachmentURL?'<a href="'+esc(s.AttachmentURL)+'" target="_blank" rel="noopener">Open link</a>':'')+(s.Files||[]).map(f=>'<div><button class="link" data-hw-file="'+esc(f.FileID)+'">'+esc(f.FileName)+(f.Archived?' · Drive archive':f.ArchiveError?' · Archive failed; copy retained':' · Pending archive')+'</button> <button class="btn small danger" data-hw-delete="'+esc(f.FileID)+'">Delete</button></div>').join('')+'</td><td>'+esc(s.Status)+(s.Feedback?'<br>'+esc(s.Feedback):'')+(s.Status!=='REVIEWED'?'<br><button class="btn small" data-hw-review="'+esc(h.HomeworkID)+'" data-hw-sub="'+esc(s.SubmissionID)+'">Review</button>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted">No submissions yet.</p>')+'</details>';
+        (h.Submissions.length?'<div class="tablewrap"><table class="stack"><thead><tr><th>Student</th><th>Submitted</th><th>Answer</th><th>Link / files</th><th>Status / feedback</th></tr></thead><tbody>'+h.Submissions.map(s=>'<tr><td>'+teacherStudentLink(s.StudentID,s.StudentName)+'</td><td>'+esc(new Date(s.SubmittedAt).toLocaleString())+'</td><td style="white-space:pre-wrap">'+esc(s.Answer)+'</td><td>'+(s.AttachmentURL?'<a href="'+esc(s.AttachmentURL)+'" target="_blank" rel="noopener">Open link</a>':'')+(s.Files||[]).map(f=>'<div><button class="link" data-hw-file="'+esc(f.FileID)+'">'+esc(f.FileName)+(f.Archived?' · Drive archive':f.ArchiveError?' · Archive failed; copy retained':' · Pending archive')+'</button> <button class="btn small danger" data-hw-delete="'+esc(f.FileID)+'">Delete</button></div>').join('')+'</td><td>'+esc(s.Status)+(s.Feedback?'<br>'+esc(s.Feedback):'')+(s.Status!=='REVIEWED'?'<br><button class="btn small" data-hw-review="'+esc(h.HomeworkID)+'" data-hw-sub="'+esc(s.SubmissionID)+'">Review</button>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted">No submissions yet.</p>')+'</details>';
     }).join('') + '<div id="hw-no-matches" class="card empty" hidden><b>No matching homework</b>Try another search.</div>' : '<div class="card empty"><b>No homework assigned yet</b></div>');
   const filterHomework=()=>{const q=st.search.trim().toLowerCase();let count=0;$$('[data-hw-search]',main).forEach(card=>{card.hidden=!!q&&!card.dataset.hwSearch.toLowerCase().includes(q);if(!card.hidden)count++;});$('#hw-no-matches',main)?.toggleAttribute('hidden',count>0);};
   $('#hw-search',main).addEventListener('input',e=>{st.search=e.target.value;filterHomework();});filterHomework();

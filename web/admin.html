@@ -684,6 +684,15 @@ function go(view, arg){ S.view=view; S.arg=arg; SYNC.stale=false; liveState('Liv
   const main=$('#main'); main.classList.remove('quiet'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
   Promise.resolve().then(() => (VIEWS[view] || VIEWS.dashboard)(main, arg)).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(e => viewFail(main, view, arg, e)); window.scrollTo(0,0);
 }
+// Student names link to the canonical admin profile, even inside clickable rows.
+document.addEventListener('click', ev => {
+  const link = ev.target.closest('[data-profile-student]');
+  if (!link) return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  if (link.closest('dialog[open]')) closeDlg();
+  go('student', link.dataset.profileStudent);
+}, true);
+const studentProfileLink = (id, name) => can('STUDENT_VIEW') && id ? '<button type="button" class="link" data-profile-student="' + esc(id) + '">' + esc(name) + '</button>' : esc(name);
 $('#nav-items').addEventListener('click', ev => { const b = ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
 $('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open'));
 
@@ -818,7 +827,7 @@ VIEWS.students = async main => {
     $('#s-count').textContent = r.total + (r.total === 1 ? ' student' : ' students') + (r.total > r.students.length ? ' (showing ' + r.students.length + ')' : '');
     $('#s-list').innerHTML = r.students.length ?
       '<div class="tablewrap"><table class="stack"><thead><tr><th>Student ID</th><th>Name</th><th>Class</th><th>Batch</th><th>Mobile</th><th>Status</th></tr></thead><tbody>' +
-      r.students.map(s => '<tr class="click" data-id="' + esc(s.StudentID) + '"><td data-l="ID"><b>' + esc(s.StudentID) + '</b></td><td data-l="Name">' + esc(s.Name) + '</td><td data-l="Class">' + esc(s.CurrentClass) + '</td><td data-l="Batch">' + esc(nameOf('batches', 'BatchID', 'BatchName', s.CurrentBatch) || '—') + '</td><td data-l="Mobile">' + esc(s.Mobile || s.ParentMobile || '—') + '</td><td>' + pill(s.Status) + '</td></tr>').join('') + '</tbody></table></div>' :
+      r.students.map(s => '<tr class="click" data-id="' + esc(s.StudentID) + '"><td data-l="ID"><b>' + studentProfileLink(s.StudentID,s.StudentID) + '</b></td><td data-l="Name">' + studentProfileLink(s.StudentID,s.Name) + '</td><td data-l="Class">' + esc(s.CurrentClass) + '</td><td data-l="Batch">' + esc(nameOf('batches', 'BatchID', 'BatchName', s.CurrentBatch) || '—') + '</td><td data-l="Mobile">' + esc(s.Mobile || s.ParentMobile || '—') + '</td><td>' + pill(s.Status) + '</td></tr>').join('') + '</tbody></table></div>' :
       '<div class="card empty"><b>No students found</b>' + (st.q || st.batch ? 'Try a different search or filter.' : (can('STUDENT_EDIT') ? 'Use “Add student” to register the first one.' : 'None have been added yet.')) + '</div>';
   };
   let t; $('#s-q').addEventListener('input', e => { st.q = e.target.value; clearTimeout(t); t = setTimeout(() => load().catch(fail), 300); });
@@ -1056,7 +1065,7 @@ VIEWS.registrations = async main => {
         rows.map(r => '<tr class="click" data-r="' + esc(r.RegistrationID) + '" data-search="' + esc([r.RegistrationID, r.Name, r.ParentName, r.ParentMobile, r.ParentWhatsApp, r.Mobile, r.Email, r.CurrentClass, r.SubjectNames].join(' ')) + '">' +
           '<td data-l="Request"><b>' + esc(r.RegistrationID) + '</b></td>' +
           '<td data-l="Sent">' + esc(fmtTime(r.SubmittedAt)) + '</td>' +
-          '<td data-l="Student"><b>' + esc(r.Name) + '</b><div class="muted" style="font-size:.82rem">Class ' + esc(r.CurrentClass) + '</div></td>' +
+          '<td data-l="Student"><b>' + (r.Status === 'APPROVED' && r.StudentID ? studentProfileLink(r.StudentID, r.Name) : esc(r.Name)) + '</b><div class="muted" style="font-size:.82rem">Class ' + esc(r.CurrentClass) + '</div></td>' +
           '<td data-l="Parent">' + esc(r.ParentName) + '<div class="muted" style="font-size:.82rem">' + esc(r.ParentMobile) + '</div></td>' +
           '<td data-l="Subjects">' + esc(r.SubjectNames || '—') + '</td>' +
           '<td>' + regPill(r.Status) + '</td></tr>').join('') + '</tbody></table></div><div id="reg-search-empty" class="card empty" hidden><b>No matching registrations</b>Try a different name, phone number, subject, or request ID.</div>'
@@ -1481,7 +1490,7 @@ function paymentDialog(invoice, lines, onDone, reissueReceiptId) {
     '</div>').join('');
 
   openDlg('Record payment',
-    '<p class="muted" style="margin:0 0 .75rem">' + esc(invoice.MonthLabel) + ' · ' + esc(invoice.StudentName) +
+    '<p class="muted" style="margin:0 0 .75rem">' + esc(invoice.MonthLabel) + ' · ' + studentProfileLink(invoice.StudentID, invoice.StudentName) +
       ' · Balance <b>' + fmt(invoice.BalanceAmount) + '</b></p>' +
     '<form>' +
       (lump
@@ -1604,7 +1613,7 @@ VIEWS.invoices = async main => {
         r.rows.map(inv =>
           '<tr class="click" data-inv="' + esc(inv.InvoiceID) + '">' +
           '<td data-l="Invoice"><b>' + esc(inv.InvoiceID) + '</b></td>' +
-          '<td data-l="Student">' + esc(inv.StudentName) +
+          '<td data-l="Student">' + studentProfileLink(inv.StudentID, inv.StudentName) +
             (inv.CurrentBatchName ? '<div class="muted" style="font-size:.82rem">Batch: ' + esc(inv.CurrentBatchName) + '</div>' : '') +
             '<div class="muted" style="font-size:.82rem">' + esc(inv.StudentID) + '</div></td>' +
           '<td data-l="Class / subjects">' + esc(inv.Classes || 'No subject details') + '</td>' +
@@ -1670,7 +1679,7 @@ VIEWS.paymentmethods = async main => {
 VIEWS.paymentreview = async main => {
   const rows = await api('paymentSubmissions.adminList',{status:'PENDING'});
   main.innerHTML = '<div class="head"><div><h1>Student payment review</h1><p>References remain pending until staff confirms them. Approval records the payment and creates a receipt.</p></div></div>' +
-    (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Student / batch</th><th>Invoice</th><th>Subject allocation</th><th>Amount</th><th>Mode / reference</th><th>Submitted</th><th>Review</th></tr></thead><tbody>'+rows.map(r=>'<tr><td data-l="Student"><b>'+esc(r.StudentName)+'</b><div class="muted">'+esc(r.StudentID)+' · Class '+esc(r.Class)+' · '+esc(r.BatchName||'—')+'</div></td><td data-l="Invoice">'+esc(r.InvoiceID)+'<div class="muted">'+esc(r.Month)+'</div></td><td data-l="Subject">'+esc((r.Allocations||[]).map(a=>a.subjectName).join(', '))+'</td><td data-l="Amount"><b>₹'+Number(r.Amount).toLocaleString('en-IN')+'</b></td><td data-l="Mode">'+esc(r.Mode)+'<div><b>'+esc(r.Reference)+'</b></div></td><td data-l="Submitted">'+esc(fmtTime(r.CreatedAt))+'</td><td><button class="btn small primary" data-submission-review="APPROVED" data-id="'+esc(r.SubmissionID)+'">Verify & record</button> <button class="btn small danger" data-submission-review="REJECTED" data-id="'+esc(r.SubmissionID)+'">Reject</button></td></tr>').join('')+'</tbody></table></div>' : '<div class="card empty"><b>No payment references awaiting review</b>Student submissions will appear here.</div>');
+    (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Student / batch</th><th>Invoice</th><th>Subject allocation</th><th>Amount</th><th>Mode / reference</th><th>Submitted</th><th>Review</th></tr></thead><tbody>'+rows.map(r=>'<tr><td data-l="Student"><b>'+studentProfileLink(r.StudentID,r.StudentName)+'</b><div class="muted">'+esc(r.StudentID)+' · Class '+esc(r.Class)+' · '+esc(r.BatchName||'—')+'</div></td><td data-l="Invoice">'+esc(r.InvoiceID)+'<div class="muted">'+esc(r.Month)+'</div></td><td data-l="Subject">'+esc((r.Allocations||[]).map(a=>a.subjectName).join(', '))+'</td><td data-l="Amount"><b>₹'+Number(r.Amount).toLocaleString('en-IN')+'</b></td><td data-l="Mode">'+esc(r.Mode)+'<div><b>'+esc(r.Reference)+'</b></div></td><td data-l="Submitted">'+esc(fmtTime(r.CreatedAt))+'</td><td><button class="btn small primary" data-submission-review="APPROVED" data-id="'+esc(r.SubmissionID)+'">Verify & record</button> <button class="btn small danger" data-submission-review="REJECTED" data-id="'+esc(r.SubmissionID)+'">Reject</button></td></tr>').join('')+'</tbody></table></div>' : '<div class="card empty"><b>No payment references awaiting review</b>Student submissions will appear here.</div>');
   $$('[data-submission-review]',main).forEach(b=>b.addEventListener('click',()=>busy(b,async()=>{const decision=b.dataset.submissionReview;const note=decision==='REJECTED'?prompt('Reason for rejection?')||'':'Verified against the transaction';if(decision==='REJECTED'&&!note)return;if(decision==='APPROVED'&&!confirm('Confirm this transaction and record it as a payment?'))return;const res=await api('paymentSubmissions.review',{submissionId:b.dataset.id,decision,note});toast(decision==='APPROVED'?'Payment verified · Receipt '+res.ReceiptID:'Payment reference rejected.');go('paymentreview');})));
 };
 
@@ -1684,7 +1693,7 @@ VIEWS.invoice = async (main, invoiceId) => {
 
   main.innerHTML =
     '<p><button class="link" data-back>← All invoices</button></p>' +
-    '<div class="head"><div><h1>' + esc(inv.MonthLabel) + ' · ' + esc(inv.StudentName) + '</h1>' +
+    '<div class="head"><div><h1>' + esc(inv.MonthLabel) + ' · ' + studentProfileLink(inv.StudentID, inv.StudentName) + '</h1>' +
       '<p>' + esc(inv.InvoiceID) + ' · ' + esc(inv.StudentID) +
         (inv.CurrentClass ? ' · Class ' + esc(inv.CurrentClass) : '') +
         (inv.CurrentBatchName ? ' · Batch ' + esc(inv.CurrentBatchName) : '') +
@@ -1785,7 +1794,7 @@ VIEWS.receipts = async main => {
           '<tr class="click" data-rc="' + esc(r.ReceiptID) + '">' +
           '<td data-l="Receipt"><b>' + esc(r.ReceiptID) + '</b></td>' +
           '<td data-l="Date">' + esc(fmtDate(r.ReceiptDate)) + '</td>' +
-          '<td data-l="Student">' + esc(r.StudentName) +
+          '<td data-l="Student">' + studentProfileLink(r.StudentID, r.StudentName) +
             (r.CurrentBatchName ? '<div class="muted" style="font-size:.82rem">Batch: ' + esc(r.CurrentBatchName) + '</div>' : '') +
             '<div class="muted" style="font-size:.82rem">' + esc(r.StudentID) + '</div></td>' +
           '<td data-l="Class / subjects">' + esc(r.Classes || 'Unallocated / advance') + '</td>' +
@@ -1841,7 +1850,7 @@ VIEWS.receipt = async (main, receiptId) => {
   main.innerHTML =
     '<p class="no-print"><button class="link" data-back>← All receipts</button></p>' +
     '<div class="head no-print"><div><h1>Receipt ' + esc(r.ReceiptID) + '</h1>' +
-      '<p>' + esc(fmtDate(r.ReceiptDate)) + ' · ' + esc(st ? st.Name : '') + ' · ' + pill(r.Status) + '</p></div>' +
+      '<p>' + esc(fmtDate(r.ReceiptDate)) + ' · ' + (st ? studentProfileLink(st.StudentID, st.Name) : '') + ' · ' + pill(r.Status) + '</p></div>' +
       '<div>' +
         '<label class="f no-print" style="display:inline-flex;align-items:center;gap:.4rem;margin:0 .5rem 0 0"><span>Paper</span><select id="rc-paper"><option value="A5">A5</option><option value="A4">A4</option></select></label><button class="btn" id="rc-print">Print / Save PDF</button>' +
         (can('FINANCE_EDIT') && !isVoid ? ' <button class="btn danger" id="rc-void">Void receipt</button>' : '') +
@@ -2001,7 +2010,7 @@ VIEWS.teacherincome = async main => {
         '<dt>Still to pay teacher</dt><dd><b>' + fmt(i.BalanceAmount) + '</b> ' + tiPill(i.Status) + '</dd></dl>' +
         '<div class="section"><h2>Student fee breakdown</h2>' + (d.students.length
           ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Student</th><th>Batch</th><th>Subject</th><th>Expected</th><th>Collected</th><th>Due</th></tr></thead><tbody>' +
-            d.students.map(s => '<tr><td data-l="Student">' + esc(s.studentName) + '</td><td data-l="Batch">' + esc(s.batchName || '—') + '</td><td data-l="Subject">' + esc(s.subjectName) + '</td><td data-l="Expected">' + fmt(s.expectedAmount) + '</td><td data-l="Collected">' + fmt(s.collectedAmount) + '</td><td data-l="Due">' + fmt(s.outstandingAmount) + '</td></tr>').join('') +
+            d.students.map(s => '<tr><td data-l="Student">' + studentProfileLink(s.studentId,s.studentName) + '</td><td data-l="Batch">' + esc(s.batchName || '—') + '</td><td data-l="Subject">' + esc(s.subjectName) + '</td><td data-l="Expected">' + fmt(s.expectedAmount) + '</td><td data-l="Collected">' + fmt(s.collectedAmount) + '</td><td data-l="Due">' + fmt(s.outstandingAmount) + '</td></tr>').join('') +
             '</tbody></table></div>' : '<p class="muted">No assigned student fees were found for this month.</p>') + '</div>'
       : '<dl class="kv"><dt>Earlier subject-level record</dt><dd>' + esc(i.SubjectName) + '</dd>' +
         '<dt>Students × recorded rate</dt><dd>' + i.StudentCount + ' × ' + fmt(i.RatePerStudent) + ' = ' + fmt(i.GrossIncome) + '</dd>' +
@@ -2154,7 +2163,7 @@ VIEWS.attendance = async main => {
       (d.students.length
         ? '<div class="tablewrap"><table><thead><tr><th>Student</th><th>Status</th>' + (canFix ? '<th>Correct</th>' : '') + '</tr></thead><tbody>' +
           d.students.map(x =>
-            '<tr data-sid="' + esc(x.StudentID) + '"><td><b>' + esc(x.Name) + '</b><div class="muted" style="font-size:.82rem">' + esc(x.RollNo || x.StudentID) + '</div></td>' +
+            '<tr data-sid="' + esc(x.StudentID) + '"><td><b>' + studentProfileLink(x.StudentID, x.Name) + '</b><div class="muted" style="font-size:.82rem">' + esc(x.RollNo || x.StudentID) + '</div></td>' +
             '<td>' + (x.Status ? pill(x.Status) : '<span class="pill">Not marked</span>') +
               (x.Method ? '<div class="muted" style="font-size:.78rem">' + esc(String(x.Method).replace(/_/g, ' ').toLowerCase()) + '</div>' : '') + '</td>' +
             (canFix ? '<td><button class="btn small" data-m="PRESENT">P</button> <button class="btn small" data-m="LATE">L</button> <button class="btn small" data-m="ABSENT">A</button></td>' : '') +
@@ -2218,7 +2227,7 @@ VIEWS.reports = async (main, tab) => {
       const r = await api('reports.dues', { month: st.month });
       out.innerHTML = '<div class="stats">' + stat(r.totals.students, 'Students with dues') + stat(fmt(r.totals.balance), 'Outstanding') + stat(fmt(r.totals.overdue), 'Overdue') + '</div>' +
         (r.rows.length ? table(['Student', 'Class', 'Phone', 'Invoices', 'Unpaid for', 'Oldest due', 'Overdue', 'Balance'],
-          r.rows.map(x => '<tr class="click" data-st="' + esc(x.StudentID) + '"><td data-l="Student"><b>' + esc(x.StudentName) + '</b><div class="muted" style="font-size:.82rem">' + esc(x.StudentID) + '</div></td><td data-l="Class">' + esc(x.CurrentClass) + '</td><td data-l="Phone">' + esc(x.Phone || '—') + '</td><td data-l="Invoices">' + x.Invoices + '</td><td data-l="Unpaid for">' + esc(x.Subjects || '—') + '</td><td data-l="Oldest due">' + esc(fmtDate(x.OldestDue) || '—') + '</td><td data-l="Overdue">' + (x.Overdue ? '<span class="pill bad">' + fmt(x.Overdue) + '</span>' : '—') + '</td><td data-l="Balance"><b>' + fmt(x.Balance) + '</b></td></tr>').join(''))
+          r.rows.map(x => '<tr class="click" data-st="' + esc(x.StudentID) + '"><td data-l="Student"><b>' + studentProfileLink(x.StudentID,x.StudentName) + '</b><div class="muted" style="font-size:.82rem">' + esc(x.StudentID) + '</div></td><td data-l="Class">' + esc(x.CurrentClass) + '</td><td data-l="Phone">' + esc(x.Phone || '—') + '</td><td data-l="Invoices">' + x.Invoices + '</td><td data-l="Unpaid for">' + esc(x.Subjects || '—') + '</td><td data-l="Oldest due">' + esc(fmtDate(x.OldestDue) || '—') + '</td><td data-l="Overdue">' + (x.Overdue ? '<span class="pill bad">' + fmt(x.Overdue) + '</span>' : '—') + '</td><td data-l="Balance"><b>' + fmt(x.Balance) + '</b></td></tr>').join(''))
           : '<div class="card empty"><b>No dues</b>Everyone is paid up for this selection.</div>');
       $$('[data-st]', out).forEach(tr => tr.addEventListener('click', () => go('student', tr.dataset.st)));
     },
@@ -2230,7 +2239,7 @@ VIEWS.reports = async (main, tab) => {
           : '<div class="card empty"><b>No attendance in this range</b></div>') + '</div>' +
         '<div class="section"><h2>Active students below ' + r.threshold + '%</h2>' +
         (r.lowStudents.length ? table(['Student', 'Class', 'Records', 'Absent', 'Attendance'],
-          r.lowStudents.map(x => '<tr class="click" data-st="' + esc(x.StudentID) + '"><td data-l="Student"><b>' + esc(x.StudentName) + '</b><div class="muted" style="font-size:.82rem">' + esc(x.StudentID) + '</div></td><td data-l="Class">' + esc(x.CurrentClass) + '</td><td data-l="Records">' + x.Sessions + '</td><td data-l="Absent">' + x.Absent + '</td><td data-l="Attendance"><span class="pill bad">' + x.Pct + '%</span></td></tr>').join(''))
+          r.lowStudents.map(x => '<tr class="click" data-st="' + esc(x.StudentID) + '"><td data-l="Student"><b>' + studentProfileLink(x.StudentID,x.StudentName) + '</b><div class="muted" style="font-size:.82rem">' + esc(x.StudentID) + '</div></td><td data-l="Class">' + esc(x.CurrentClass) + '</td><td data-l="Records">' + x.Sessions + '</td><td data-l="Absent">' + x.Absent + '</td><td data-l="Attendance"><span class="pill bad">' + x.Pct + '%</span></td></tr>').join(''))
           : '<p class="muted">Nobody is below the line.</p>') + '</div>';
       $$('[data-st]', out).forEach(tr => tr.addEventListener('click', () => go('student', tr.dataset.st)));
     },

@@ -707,7 +707,7 @@ Deno.serve(async (request) => {
       'drive.connections.list': 'SETTINGS_VIEW', 'drive.oauthStart': 'SETTINGS_EDIT',
       'teacher.classMaterials.upload': 'CLASS_RUN', 'teacher.classMaterials.register': 'CLASS_RUN', 'teacher.classMaterials.list': 'SELF_VIEW',
       'student.classMaterials.list': 'SELF_VIEW',
-      'teacher.dashboard': 'SELF_VIEW', 'teacher.timetable': 'SELF_VIEW', 'teacher.students': 'SELF_VIEW',
+      'teacher.dashboard': 'SELF_VIEW', 'teacher.timetable': 'SELF_VIEW', 'teacher.students': 'SELF_VIEW', 'teacher.studentProfile': 'SELF_VIEW',
       'teacher.startClass': 'CLASS_RUN', 'teacher.regenerateCode': 'CLASS_RUN', 'teacher.classStatus': 'CLASS_RUN',
       'teacher.rescheduleClass': 'CLASS_RUN',
       'teacher.manualAttendance': 'ATTENDANCE_MARK', 'teacher.markAll': 'ATTENDANCE_MARK',
@@ -2826,7 +2826,8 @@ Deno.serve(async (request) => {
         present, late, absent, totalSessions: rows.length }, todayClasses, recentNotices } })
     }
 
-    if (action === 'teacher.dashboard' || action === 'teacher.timetable' || action === 'teacher.students' || action === 'teacher.sessions') {
+    if (action === 'teacher.dashboard' || action === 'teacher.timetable' || action === 'teacher.students' || action === 'teacher.studentProfile' || action === 'teacher.sessions') {
+      if (action === 'teacher.studentProfile' && user.user_type !== 'TEACHER') throw new ApiFault('FORBIDDEN', 'Teacher access is required.')
       if (!user.linked_id) throw new ApiFault('NOT_FOUND', 'Teacher account is not linked to a teacher record.')
       const { data: teacher, error: tError } = await admin.from('teachers').select('*').eq('id', user.linked_id).maybeSingle()
       if (tError) throw tError
@@ -2858,6 +2859,33 @@ Deno.serve(async (request) => {
           if (s && s.status.toUpperCase() === 'ACTIVE') (groups.get(key)!.students as unknown[]).push({ StudentID: s.id, Name: s.name, RollNo: s.roll_no || '' })
         }
         return response({ ok: true, data: [...groups.values()] })
+      }
+      if (action === 'teacher.studentProfile') {
+        const studentId = requireText(payload.studentId, 'Student ID', 60, true)
+        const { data: assignedRows, error: assignedError } = await admin.from('student_subjects')
+          .select('subject_id,batch_id,status,start_date,end_date,academic_year')
+          .eq('teacher_id', teacher.id).eq('student_id', studentId).order('start_date', { ascending: false })
+        if (assignedError) throw assignedError
+        if (!assignedRows?.length) throw new ApiFault('FORBIDDEN', 'This student is not assigned to your classes.')
+        const { data: student, error: studentError } = await admin.from('students')
+          .select('id,name,roll_no,status,current_class,current_batch_id').eq('id', studentId).maybeSingle()
+        if (studentError) throw studentError
+        if (!student) throw new ApiFault('NOT_FOUND', 'Student not found.')
+        const subjectIds = [...new Set(assignedRows.map((r) => r.subject_id))]
+        const batchIds = [...new Set(assignedRows.map((r) => r.batch_id))]
+        const [{ data: subjects, error: subjectsError }, { data: batches, error: batchesError }] = await Promise.all([
+          admin.from('subjects').select('id,name').in('id', subjectIds),
+          admin.from('batches').select('id,name').in('id', batchIds),
+        ])
+        if (subjectsError) throw subjectsError
+        if (batchesError) throw batchesError
+        const subjectNames = new Map((subjects || []).map((r) => [r.id, r.name]))
+        const batchNames = new Map((batches || []).map((r) => [r.id, r.name]))
+        return response({ ok: true, data: { student: { StudentID: student.id, Name: student.name, RollNo: student.roll_no || '',
+          Status: student.status, CurrentClass: student.current_class || '', CurrentBatchName: batchNames.get(student.current_batch_id) || '' },
+          assignments: assignedRows.map((r) => ({ SubjectName: subjectNames.get(r.subject_id) || r.subject_id,
+            BatchName: batchNames.get(r.batch_id) || r.batch_id, Status: r.status, StartDate: r.start_date || '',
+            EndDate: r.end_date || '', AcademicYear: r.academic_year || '' })) } })
       }
       if (action === 'teacher.sessions') {
         const limit = Math.min(Math.max(Number(payload.limit) || 30, 1), 200)
