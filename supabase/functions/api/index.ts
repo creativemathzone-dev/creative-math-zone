@@ -161,13 +161,45 @@ function legacyStudent(row: Record<string, unknown>) {
   }
 }
 
+function studentClassLevel(value: unknown): number {
+  const key = String(value || '').trim().toUpperCase().replace(/^CLASS\s*/, '').replace(/[^IVX0-9]/g, '')
+  const roman: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10, XI: 11, XII: 12 }
+  return /^\d{1,2}$/.test(key) ? Number(key) : (roman[key] || 0)
+}
+
+function canonicalStudentBoard(value: unknown, currentClass: unknown): string {
+  const level = studentClassLevel(currentClass)
+  if (!level) throw new ApiFault('BAD_REQUEST', 'Choose a supported class from I to XII before selecting a board.')
+  const key = String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const higher = level >= 11
+  if (key === 'CBSE') return higher ? 'CBSE (Higher)' : 'CBSE (Lower)'
+  if (key === 'CBSEHIGHER' || key === 'CBSESR' || key === 'CBSECLASS11') {
+    if (!higher) throw new ApiFault('BAD_REQUEST', 'CBSE (Higher) is available only for Classes XI and XII.')
+    return 'CBSE (Higher)'
+  }
+  if (key === 'CBSELOWER' || key === 'CBSEJR' || key === 'CBSECLASS10') {
+    if (higher) throw new ApiFault('BAD_REQUEST', 'CBSE (Lower) is available only for Classes I to X.')
+    return 'CBSE (Lower)'
+  }
+  const allowed = higher ? { WBCHSE: 'WBCHSE', ISC: 'ISC' } : { WBBSE: 'WBBSE', ICSE: 'ICSE' }
+  const board = allowed[key]
+  if (board) return board
+  throw new ApiFault('BAD_REQUEST', higher
+    ? 'For Classes XI and XII, choose WBCHSE, ISC, or CBSE (Higher).'
+    : 'For Classes I to X, choose WBBSE, ICSE, or CBSE (Lower).')
+}
+
+function normalizeStudentBoardRow(row: Record<string, unknown>) {
+  if (row.current_class && row.board) row.board = canonicalStudentBoard(row.board, row.current_class)
+}
+
 function validateStudentInput(input: Record<string, unknown>, partial: boolean) {
   const fields: Record<string, { column: string; max?: number; required?: boolean; kind?: 'date' | 'number' | 'mobile' | 'email' | 'status' | 'gender' }> = {
     RollNo: { column: 'roll_no', max: 20 }, Name: { column: 'name', max: 100, required: !partial },
     PhotoURL: { column: 'photo_url', max: 500 }, DOB: { column: 'dob', kind: 'date' },
     Gender: { column: 'gender', kind: 'gender' }, Mobile: { column: 'mobile', kind: 'mobile' },
     Email: { column: 'email', kind: 'email' }, Address: { column: 'address', max: 300 },
-    School: { column: 'school', max: 100 }, Board: { column: 'board', max: 30 },
+    School: { column: 'school', max: 100 }, Board: { column: 'board', max: 30, required: !partial },
     CurrentClass: { column: 'current_class', max: 10, required: !partial },
     CurrentBatch: { column: 'current_batch_id', max: 40 }, ParentName: { column: 'parent_name', max: 100 },
     Relationship: { column: 'relationship', max: 30 }, ParentMobile: { column: 'parent_mobile', kind: 'mobile' },
@@ -214,6 +246,7 @@ function validateStudentInput(input: Record<string, unknown>, partial: boolean) 
   if (!partial) {
     for (const [key, spec] of Object.entries(fields)) if (spec.required && !(spec.column in row)) throw new ApiFault('BAD_REQUEST', `${key} is required.`)
   }
+  normalizeStudentBoardRow(row)
   return row
 }
 
@@ -288,7 +321,7 @@ function validateRegistrationInput(input: Record<string, unknown>, partial = fal
     Name: { column: 'name', max: 100, required: !partial }, CurrentClass: { column: 'current_class', max: 10, required: !partial },
     DOB: { column: 'dob', kind: 'date' }, Gender: { column: 'gender', kind: 'gender' }, Mobile: { column: 'mobile', kind: 'mobile' },
     Email: { column: 'email', kind: 'email' }, Address: { column: 'address', max: 300 }, School: { column: 'school', max: 100 },
-    Board: { column: 'board', max: 30 }, PreviousPercentage: { column: 'previous_percentage', kind: 'number' },
+    Board: { column: 'board', max: 30, required: !partial }, PreviousPercentage: { column: 'previous_percentage', kind: 'number' },
     ParentName: { column: 'parent_name', max: 100, required: !partial }, Relationship: { column: 'relationship', max: 30 },
     ParentMobile: { column: 'parent_mobile', kind: 'mobile', required: !partial },
     ParentWhatsApp: { column: 'parent_whatsapp', kind: 'mobile' }, ParentEmail: { column: 'parent_email', kind: 'email' },
@@ -324,6 +357,7 @@ function validateRegistrationInput(input: Record<string, unknown>, partial = fal
     row[spec.column] = value.replace(/^[=+\-@]+/, '')
   }
   for (const [key, spec] of Object.entries(allowed)) if (!partial && spec.required && !(spec.column in row)) throw new ApiFault('BAD_REQUEST', `${key} is required.`)
+  normalizeStudentBoardRow(row)
   return row
 }
 
@@ -1567,6 +1601,10 @@ Deno.serve(async (request) => {
       if (readError) throw readError
       if (!old) throw new ApiFault('NOT_FOUND', 'Request not found.')
       if (old.status !== 'PENDING') throw new ApiFault('BAD_REQUEST', 'Only pending requests can be edited.')
+      const merged = { ...old, ...changes }
+      if ('current_class' in changes || 'board' in changes) {
+        changes.board = canonicalStudentBoard(merged.board, merged.current_class)
+      }
       const { error } = await admin.from('registrations').update(changes).eq('id', id)
       if (error) throw error
       await logAction(admin, user, 'EDIT_REGISTRATION', 'REGISTRATION', id, changes)
@@ -2469,16 +2507,20 @@ Deno.serve(async (request) => {
       const sourceClass = requireText(payload.sourceClass, 'Current class', 10, true)
       const targetClass = requireText(payload.targetClass, 'Target class', 10, true)
       const academicYear = requireText(payload.academicYear, 'Academic year', 10, true)
-      const [{ data: students, error, count: studentCount }, { data: subjects, error: subjectError },
+      const [{ data: candidateStudents, error }, { data: subjects, error: subjectError },
         { data: rates, error: rateError }, { data: feeRows, error: feeError }, { data: currentYear }] = await Promise.all([
-        admin.from('students').select('id,name,board,current_class,current_batch_id,academic_year,status', { count: 'exact' }).ilike('board', board)
-          .ilike('current_class', sourceClass).ilike('status', 'ACTIVE').order('name').limit(500),
+        admin.from('students').select('id,name,board,current_class,current_batch_id,academic_year,status')
+          .ilike('current_class', sourceClass).ilike('status', 'ACTIVE').order('name').limit(5000),
         admin.from('subjects').select('id,name,status'),
-        admin.from('promotion_fee_rates').select('subject_id,amount').ilike('board', board).ilike('target_class', targetClass).eq('academic_year', academicYear),
+        admin.from('promotion_fee_rates').select('subject_id,amount').in('board', [board, 'CBSE']).ilike('target_class', targetClass).eq('academic_year', academicYear),
         admin.from('fee_structure').select('subject_id,amount,academic_year').eq('item_type', 'SUBJECT').eq('status', 'Active'),
         admin.from('settings').select('value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle(),
       ])
       if (error || subjectError || rateError || feeError) throw error || subjectError || rateError || feeError
+      const students = (candidateStudents || []).filter(s => {
+        try { return canonicalStudentBoard(s.board, s.current_class).toUpperCase() === board.toUpperCase() } catch { return false }
+      })
+      const studentCount = students.length
       if ((studentCount || 0) > 500) throw new ApiFault('PROMOTION_LIMIT', `This group has ${studentCount} active students, above the 500-student limit. Narrow the promotion group or contact support before applying it.`)
       const studentIds = (students || []).map(s => s.id)
       let assignments: any[] = []
@@ -2619,6 +2661,10 @@ Deno.serve(async (request) => {
       if (readError) throw readError
       if (!existing) throw new ApiFault('NOT_FOUND', 'Student not found.')
       const merged = { ...existing, ...changes }
+      if ('current_class' in changes || 'board' in changes) {
+        changes.board = canonicalStudentBoard(merged.board, merged.current_class)
+        merged.board = changes.board
+      }
       if (('current_class' in changes || 'current_batch_id' in changes) && merged.current_batch_id) {
         const { data: batch } = await admin.from('batches').select('id,class,status').eq('id', merged.current_batch_id).maybeSingle()
         if (!batch || batch.status !== 'Active') throw new ApiFault('BAD_REQUEST', 'Choose an active batch.')

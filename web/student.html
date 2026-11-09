@@ -1062,8 +1062,20 @@ function rf(n, l, o) {
 function rs(n, l, opts, o) {
   o = o || {};
   return '<label class="f' + (o.full ? ' full' : '') + '"><span>' + esc(l) + (o.req ? ' <em style="color:var(--bad);font-style:normal">*</em>' : '') + '</span>' +
-    '<select name="' + n + '"' + (o.req ? ' required' : '') + '><option value="">' + esc(o.blank || 'Select…') + '</option>' +
+    '<select name="' + n + '"' + (o.req ? ' required' : '') + (o.disabled ? ' disabled' : '') + '><option value="">' + esc(o.blank || 'Select…') + '</option>' +
     opts.map(x => '<option value="' + esc(x[0]) + '">' + esc(x[1]) + '</option>').join('') + '</select></label>';
+}
+
+function registrationClassLevel(value) {
+  const key = String(value || '').trim().toUpperCase().replace(/^CLASS\s*/, '').replace(/[^IVX0-9]/g, '');
+  const roman = { I:1, II:2, III:3, IV:4, V:5, VI:6, VII:7, VIII:8, IX:9, X:10, XI:11, XII:12 };
+  return /^\d{1,2}$/.test(key) ? Number(key) : (roman[key] || 0);
+}
+function registrationBoardsForClass(value) {
+  const level = registrationClassLevel(value);
+  if (level >= 11 && level <= 12) return [['WBCHSE','WBCHSE'],['ISC','ISC'],['CBSE (Higher)','CBSE (Higher)']];
+  if (level >= 1 && level <= 10) return [['WBBSE','WBBSE'],['ICSE','ICSE'],['CBSE (Lower)','CBSE (Lower)']];
+  return [];
 }
 
 async function openRegister() {
@@ -1099,7 +1111,7 @@ function renderRegForm() {
       rf('Mobile', 'Student mobile', { type: 'tel', hint: '10 digits, optional' }) +
       rf('Email', 'Student email', { type: 'email' }) +
       rf('School', 'School') +
-      rf('Board', 'Board', { hint: 'CBSE, ICSE, WBBSE…' }) +
+      rs('Board', 'Board', [], { req: 1, disabled: 1, blank: 'Choose class first' }) +
       rf('PreviousPercentage', 'Previous exam %', { attrs: 'inputmode="decimal"', hint: 'For example 82.5' }) +
       rf('Address', 'Address', { full: 1 }) +
     '</div></div>' +
@@ -1123,6 +1135,15 @@ function renderRegForm() {
     '</form>');
 
   const form = $('#reg-f');
+  const classSelect = form.elements.CurrentClass, boardSelect = form.elements.Board;
+  const fillBoards = () => {
+    const options = registrationBoardsForClass(classSelect.value);
+    boardSelect.innerHTML = '<option value="">' + (options.length ? 'Select board…' : 'Choose class first') + '</option>' +
+      options.map(x => '<option value="' + esc(x[0]) + '">' + esc(x[1]) + '</option>').join('');
+    boardSelect.disabled = !options.length;
+  };
+  classSelect.addEventListener('change', fillBoards);
+  fillBoards();
   form.addEventListener('change', ev => {
     if (ev.target.name !== 'subj') return;
     const sel = $$('input[name=subj]:checked', form).map(i => i.value);

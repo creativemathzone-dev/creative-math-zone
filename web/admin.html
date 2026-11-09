@@ -561,7 +561,7 @@ function fieldHtml(f, val) {
   }
   return '<label class="f ' + (f.full ? 'full' : '') + '"><span>' + esc(f.l) + req + '</span>' + inner + (f.hint ? '<small>' + esc(f.hint) + '</small>' : '') + '</label>';
 }
-function formHtml(fields, vals) { vals = vals || {}; return '<div class="grid2">' + fields.map(f => fieldHtml(f, vals[f.n])).join('') + '</div>'; }
+function formHtml(fields, vals) { vals = vals || {}; return '<div class="grid2">' + fields.map(f => fieldHtml(f, f.n === 'Board' ? normalizeStudentBoard(vals.Board, vals.CurrentClass) : vals[f.n])).join('') + '</div>'; }
 function collect(root, fields) {
   const o = {};
   fields.forEach(f => {
@@ -778,17 +778,34 @@ document.addEventListener('click', ev => {
 /* ---------- students ---------- */
 const classOpts = () => Array.from(new Set(activeOnly('batches').map(b => b.Class))).map(c => [c, 'Class ' + c]);
 const batchOpts = cls => activeOnly('batches').filter(b => !cls || b.Class === cls).map(b => [b.BatchID, b.BatchName]);
-function studentFields(isEdit, existingBoard) {
-  const boardOptions = [['WBBSE','WBBSE'],['WBCHSE','WBCHSE'],['CBSE','CBSE'],['ICSE','ICSE'],['ISC','ISC'],['Other','Other']];
-  const boardValue = String(existingBoard || '').trim();
-  if (boardValue && !boardOptions.some(o => o[0] === boardValue)) boardOptions.push([boardValue, boardValue + ' (existing)']);
+function classLevel(value) {
+  const key = String(value || '').trim().toUpperCase().replace(/^CLASS\s*/, '').replace(/[^IVX0-9]/g, '');
+  const roman = { I:1, II:2, III:3, IV:4, V:5, VI:6, VII:7, VIII:8, IX:9, X:10, XI:11, XII:12 };
+  return /^\d{1,2}$/.test(key) ? Number(key) : (roman[key] || 0);
+}
+function boardsForClass(cls) {
+  const level = classLevel(cls);
+  if (level >= 11 && level <= 12) return [['WBCHSE','WBCHSE'],['ISC','ISC'],['CBSE (Higher)','CBSE (Higher)']];
+  if (level >= 1 && level <= 10) return [['WBBSE','WBBSE'],['ICSE','ICSE'],['CBSE (Lower)','CBSE (Lower)']];
+  return [];
+}
+function normalizeStudentBoard(value, cls) {
+  const key = String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const high = classLevel(cls) >= 11;
+  if (key === 'CBSE') return high ? 'CBSE (Higher)' : 'CBSE (Lower)';
+  if (key === 'CBSEHIGHER' || key === 'CBSESR' || key === 'CBSECLASS11') return 'CBSE (Higher)';
+  if (key === 'CBSELOWER' || key === 'CBSEJR' || key === 'CBSECLASS10') return 'CBSE (Lower)';
+  return (boardsForClass(cls).find(o => o[0].toUpperCase().replace(/[^A-Z0-9]/g, '') === key) || [])[0] || '';
+}
+function studentFields(isEdit, existingBoard, existingClass) {
+  const boardOptions = boardsForClass(existingClass);
   const f = [
     { n: 'Name', l: 'Full name', req: 1, full: 1, max: 100 },
     { n: 'CurrentClass', l: 'Class', type: 'select', req: 1, options: classOpts() },
     { n: 'CurrentBatch', l: 'Batch', type: 'select', options: batchOpts(), blank: 'No batch yet' },
     { n: 'DOB', l: 'Date of birth', type: 'date' }, { n: 'Gender', l: 'Gender', type: 'select', options: [['MALE', 'Male'], ['FEMALE', 'Female'], ['OTHER', 'Other']] },
     { n: 'Mobile', l: 'Student mobile', type: 'tel', hint: '10 digits' }, { n: 'Email', l: 'Student email', type: 'email' },
-    { n: 'School', l: 'School' }, { n: 'Board', l: 'Board', type: 'select', options: boardOptions, hint: 'Choose the student’s board for grouped promotions.' },
+    { n: 'School', l: 'School' }, { n: 'Board', l: 'Board', type: 'select', req: 1, options: boardOptions, hint: 'Board choices depend on class. Select the correct board for grouped promotions.' },
     { n: 'PreviousPercentage', l: 'Previous exam %', type: 'number', step: 'any' }, { n: 'Address', l: 'Address', full: 1 },
     { n: 'ParentName', l: 'Parent or guardian' }, { n: 'Relationship', l: 'Relationship' },
     { n: 'ParentMobile', l: 'Parent mobile', type: 'tel' }, { n: 'ParentWhatsApp', l: 'Parent WhatsApp', type: 'tel' }, { n: 'ParentEmail', l: 'Parent email', type: 'email', full: 1 }
@@ -796,12 +813,18 @@ function studentFields(isEdit, existingBoard) {
   if (isEdit) f.splice(3, 0, { n: 'Status', l: 'Status', type: 'select', req: 1, options: ['ACTIVE', 'INACTIVE', 'COMPLETED', 'LEFT', 'SUSPENDED'].map(x => [x, x.charAt(0) + x.slice(1).toLowerCase()]) });
   return f;
 }
-function wireClassBatch(root, current) {
+function wireClassBatch(root, current, existingBoard) {
   const cls = root.querySelector('[name=CurrentClass]'), bat = root.querySelector('[name=CurrentBatch]');
-  if (!cls || !bat) return;
-  const fill = keep => { bat.innerHTML = '<option value="">No batch yet</option>' + batchOpts(cls.value).map(o => '<option value="' + esc(o[0]) + '"' + (o[0] === keep ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join(''); };
-  cls.addEventListener('change', () => fill(''));
-  fill(current);
+  const board = root.querySelector('[name=Board]');
+  const fill = (keepBatch, keepBoard) => {
+    if (bat) bat.innerHTML = '<option value="">No batch yet</option>' + batchOpts(cls?.value).map(o => '<option value="' + esc(o[0]) + '"' + (o[0] === keepBatch ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
+    if (board) {
+      const opts = boardsForClass(cls?.value), normalized = normalizeStudentBoard(keepBoard, cls?.value);
+      board.innerHTML = '<option value="">Select board…</option>' + opts.map(o => '<option value="' + esc(o[0]) + '"' + (o[0] === normalized ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
+    }
+  };
+  if (cls) cls.addEventListener('change', () => fill('', ''));
+  fill(current || '', existingBoard || board?.value || '');
 }
 VIEWS.promotions = async main => {
   if (!can('MASTER_VIEW')) {
@@ -811,13 +834,9 @@ VIEWS.promotions = async main => {
   await loadLookups();
   const studentResult = await api('students.list', { status: 'ACTIVE', limit: 1000 });
   const students = studentResult.students || [];
-  const normalizeBoard = value => {
-    const raw=String(value||'').trim(), key=raw.toUpperCase().replace(/[^A-Z0-9]/g,'');
-    const canonical=['WBBSE','WBCHSE','CBSE','ICSE','ISC'].find(x=>x===key);
-    return canonical||raw;
-  };
-  const boards = [...new Set(students.map(s => normalizeBoard(s.Board)).filter(Boolean))].sort((a,b) => a.localeCompare(b));
-  const classesForBoard = board => [...new Set(students.filter(s => normalizeBoard(s.Board).toUpperCase() === board.toUpperCase()).map(s => String(s.CurrentClass || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  const normalizeBoard = (value, cls) => normalizeStudentBoard(value, cls);
+  const boards = [...new Set(students.map(s => normalizeBoard(s.Board, s.CurrentClass)).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  const classesForBoard = board => [...new Set(students.filter(s => normalizeBoard(s.Board, s.CurrentClass).toUpperCase() === board.toUpperCase()).map(s => String(s.CurrentClass || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b));
   const batchClasses = [...new Set(activeOnly('batches').map(b => String(b.Class || '').trim()).filter(Boolean))];
   const currentYear = S.cfg.academicYear || (new Date().getFullYear() + '-' + String(new Date().getFullYear()+1).slice(-2));
   const now=new Date(), today=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
@@ -893,7 +912,7 @@ async function studentDialog() {
     '<form id="sf">' + formHtml(fields) + '<label class="f"><span>Password (optional)</span><input name="password" autocomplete="off"><small>Leave empty and the system makes a temporary one for you.</small></label></form>',
     '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="sf-save">Add student</button>',
     d => {
-      wireClassBatch(d, '');
+      wireClassBatch(d, '', '');
       $('#sf-save', d).addEventListener('click', ev => busy(ev.target, async () => {
         if (!validForm(d)) return;
         const data = collect(d, fields), student = {};
@@ -937,7 +956,7 @@ VIEWS.student = async (main, id) => {
     api('changes.list', { studentId: id }),
     canFinance ? api('finance.studentFee.list', { studentId: id }).catch(() => null) : Promise.resolve(null)
   ]);
-  const s = d.student, fields = studentFields(true, d.student.Board), editable = can('STUDENT_EDIT');
+  const s = d.student, fields = studentFields(true, d.student.Board, d.student.CurrentClass), editable = can('STUDENT_EDIT');
   const subjRows = d.subjects.slice().reverse();
 
   const activeSubjects = d.subjects.filter(x => String(x.Status).toUpperCase() === 'ACTIVE').length;
@@ -961,7 +980,7 @@ VIEWS.student = async (main, id) => {
         hist.map(h => '<tr><td data-l="When">' + esc(fmtTime(h.ChangedAt)) + '</td><td data-l="What">' + esc(h.Field) + '</td><td data-l="From">' + esc(h.OldValue || '—') + '</td><td data-l="To">' + esc(h.NewValue) + '</td><td data-l="By">' + esc(h.ChangedBy) + '</td><td data-l="Reason">' + esc(h.Reason) + '</td></tr>').join('') + '</tbody></table></div>'
       : '<div class="card empty"><b>No changes yet</b>Class, batch, status and subject changes will be listed here.</div>') + '</div>';
 
-  wireClassBatch($('#ef'), s.CurrentBatch);
+  wireClassBatch($('#ef'), s.CurrentBatch, s.Board);
   $('[data-go-back]', main).addEventListener('click', () => go('students'));
   $('#student-id-print').addEventListener('click', () => printStudentDocument(s, 'id'));
   $('#student-cert-print').addEventListener('click', () => printStudentDocument(s, 'certificate'));
@@ -1196,6 +1215,7 @@ VIEWS.registrations = async main => {
       (canAct ? '<button class="btn danger" id="rg-rej">Reject</button><button class="btn" id="rg-save">Save changes</button><button class="btn primary" id="rg-ok">Approve…</button>' : '') +
       (row.Status === 'APPROVED' && row.StudentID ? '<button class="btn primary" id="rg-open">Open student</button>' : '');
     openDlg('Registration ' + row.RegistrationID, body, footer, d => {
+      if (canAct) wireClassBatch(d, '', row.Board);
       if (row.Status === 'APPROVED' && row.StudentID) $('#rg-open', d).addEventListener('click', () => { closeDlg(); go('student', row.StudentID); });
       if (!canAct) return;
       const saveEdits = async () => {
