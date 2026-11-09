@@ -1042,7 +1042,7 @@ async function refreshRegBadge() {
 
 VIEWS.registrations = async main => {
   await loadLookups();
-  const st = VIEWS.registrations.state = VIEWS.registrations.state || { status: 'PENDING' };
+  const st = VIEWS.registrations.state = VIEWS.registrations.state || { status: 'PENDING', q: '' };
   const edit = can('STUDENT_EDIT');
   const data = await api('registrations.list', { status: st.status });
   const c = data.counts, rows = data.rows;
@@ -1050,19 +1050,29 @@ VIEWS.registrations = async main => {
 
   main.innerHTML = '<div class="head"><div><h1>Registrations</h1><p>Students who registered online. Approving a request creates their student account.</p></div></div>' +
     '<div class="tabs" role="tablist">' + tabs.map(t => '<button role="tab" aria-selected="' + (t[0] === st.status) + '" data-rs="' + t[0] + '">' + esc(t[1]) + '</button>').join('') + '</div>' +
+    '<div class="toolbar"><input id="reg-search" type="search" placeholder="Search student, parent, phone, subject, or request ID" aria-label="Search registrations" value="' + esc(st.q || '') + '"></div>' +
     (rows.length
       ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Request</th><th>Sent</th><th>Student</th><th>Parent</th><th>Subjects wanted</th><th>Status</th></tr></thead><tbody>' +
-        rows.map(r => '<tr class="click" data-r="' + esc(r.RegistrationID) + '">' +
+        rows.map(r => '<tr class="click" data-r="' + esc(r.RegistrationID) + '" data-search="' + esc([r.RegistrationID, r.Name, r.ParentName, r.ParentMobile, r.ParentWhatsApp, r.Mobile, r.Email, r.CurrentClass, r.SubjectNames].join(' ')) + '">' +
           '<td data-l="Request"><b>' + esc(r.RegistrationID) + '</b></td>' +
           '<td data-l="Sent">' + esc(fmtTime(r.SubmittedAt)) + '</td>' +
           '<td data-l="Student"><b>' + esc(r.Name) + '</b><div class="muted" style="font-size:.82rem">Class ' + esc(r.CurrentClass) + '</div></td>' +
           '<td data-l="Parent">' + esc(r.ParentName) + '<div class="muted" style="font-size:.82rem">' + esc(r.ParentMobile) + '</div></td>' +
           '<td data-l="Subjects">' + esc(r.SubjectNames || '—') + '</td>' +
-          '<td>' + regPill(r.Status) + '</td></tr>').join('') + '</tbody></table></div>'
+          '<td>' + regPill(r.Status) + '</td></tr>').join('') + '</tbody></table></div><div id="reg-search-empty" class="card empty" hidden><b>No matching registrations</b>Try a different name, phone number, subject, or request ID.</div>'
       : '<div class="card empty"><b>' + (st.status === 'PENDING' ? 'Nothing waiting' : 'No requests here') + '</b>' +
         (st.status === 'PENDING' ? 'New online registrations will show up here. You can switch registration on or off with REGISTRATION_ENABLED in Settings.' : 'Try another tab.') + '</div>');
 
   $$('[data-rs]', main).forEach(b => b.addEventListener('click', () => { st.status = b.dataset.rs; go('registrations'); }));
+  const filterRegistrations = () => {
+    st.q = $('#reg-search').value;
+    const query = st.q.trim().toLowerCase();
+    let shown = 0;
+    $$('[data-r][data-search]', main).forEach(tr => { const match = !query || tr.dataset.search.toLowerCase().includes(query); tr.hidden = !match; if (match) shown++; });
+    const noMatches = $('#reg-search-empty'); if (noMatches) noMatches.hidden = !query || shown > 0;
+  };
+  $('#reg-search').addEventListener('input', filterRegistrations);
+  filterRegistrations();
   $$('[data-r]', main).forEach(tr => tr.addEventListener('click', () => reviewDlg(rows.find(x => x.RegistrationID === tr.dataset.r))));
 
   const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
