@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#16243b">
 <link rel="manifest" href="./manifest.webmanifest">
-<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="./icons/icon-192.png?v=2" type="image/png">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <script src="./pwa.js" defer></script>
 <script src="config.js"></script>
@@ -1968,6 +1968,7 @@ VIEWS.receipt = async (main, receiptId) => {
       '<p>' + esc(fmtDate(r.ReceiptDate)) + ' · ' + (st ? studentProfileLink(st.StudentID, st.Name) : '') + ' · ' + pill(r.Status) + '</p></div>' +
       '<div>' +
         '<label class="f no-print" style="display:inline-flex;align-items:center;gap:.4rem;margin:0 .5rem 0 0"><span>Paper</span><select id="rc-paper"><option value="A5">A5</option><option value="A4">A4</option></select></label><button class="btn" id="rc-print">Print / Save PDF</button>' +
+        (!isVoid && can('FINANCE_VIEW') ? ' <button class="btn" id="rc-whatsapp">Send PDF on WhatsApp</button>' : '') +
         (can('FINANCE_EDIT') && !isVoid ? ' <button class="btn danger" id="rc-void">Void receipt</button>' : '') +
       '</div></div>' +
 
@@ -2039,6 +2040,37 @@ VIEWS.receipt = async (main, receiptId) => {
     style.textContent = '@media print{@page{size:' + e.target.value + ' portrait;margin:6mm}}';
   });
   $('#rc-print').addEventListener('click', () => window.print());
+  const waButton = $('#rc-whatsapp');
+  if (waButton) waButton.addEventListener('click', async () => {
+    const phone = String((st && (st.ParentWhatsApp || st.ParentMobile || st.Mobile)) || '').replace(/\D/g, '').slice(-10);
+    if (phone.length !== 10) { toast('No valid guardian WhatsApp number is saved for this student.', true); return; }
+    const chat = window.open('about:blank', '_blank');
+    if (!chat) { toast('Allow pop-ups for this site, then try again.', true); return; }
+    const message = 'Hello, please find the fee receipt ' + r.ReceiptID + ' for ' + (st ? st.Name : 'the student') + '. The PDF has been downloaded; please attach it in this chat.';
+    chat.location.href = 'https://wa.me/91' + phone + '?text=' + encodeURIComponent(message);
+    waButton.disabled = true;
+    try {
+      if (!window.html2pdf) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js';
+          script.onload = resolve; script.onerror = reject; document.head.appendChild(script);
+        });
+      }
+      const paper = $('#receipt-paper');
+      await window.html2pdf().set({
+        margin: 6,
+        filename: 'Receipt-' + String(r.ReceiptID).replace(/[^a-z0-9_-]/gi, '-') + '.pdf',
+        image: { type: 'jpeg', quality: .98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'mm', format: $('#rc-paper').value, orientation: 'portrait' }
+      }).from(paper).save();
+      toast('Receipt PDF downloaded. Attach it to the WhatsApp chat that opened.');
+    } catch (err) {
+      console.error('Receipt PDF export failed:', err);
+      toast('PDF download could not start. Use Print / Save PDF, then attach it in WhatsApp.', true);
+    } finally { waButton.disabled = false; }
+  });
   $$('[data-related-receipt]', main).forEach(b => b.addEventListener('click', () => go('receipt', b.dataset.relatedReceipt)));
 
   if (can('FINANCE_EDIT') && !isVoid) {

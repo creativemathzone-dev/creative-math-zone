@@ -2348,7 +2348,8 @@ Deno.serve(async (request) => {
         payment: payment ? { PaymentID: payment.id, Mode: payment.payment_mode, Reference: payment.transaction_reference,
           Notes: payment.notes, PaymentDate: payment.payment_date, Allocations: allocationsFromPayment(payment.allocations) } : null,
         invoice: invoiceData, student: student ? { StudentID: student.id, Name: student.name, CurrentClass: student.current_class,
-          CurrentBatch: student.current_batch_id, CurrentBatchName: currentBatch?.name || '', ParentName: student.parent_name, Mobile: student.mobile || student.parent_mobile } : null,
+          CurrentBatch: student.current_batch_id, CurrentBatchName: currentBatch?.name || '', ParentName: student.parent_name,
+          ParentMobile: student.parent_mobile || '', ParentWhatsApp: student.parent_whatsapp || '', Mobile: student.mobile || student.parent_mobile } : null,
         centre: { name: settingMap.CENTRE_NAME || 'Creative Math Zone', tagline: settingMap.TAGLINE || '', address: settingMap.ADDRESS || '',
           mobile: settingMap.MOBILE || '', email: settingMap.EMAIL || '', website: settingMap.WEBSITE || '',
           academicYear: settingMap.ACADEMIC_YEAR || '2026-27' } } })
