@@ -1864,11 +1864,13 @@ Deno.serve(async (request) => {
       const month = requireText(payload.month, 'Month', 7, true)
       const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month)
       if (!match) throw new ApiFault('BAD_REQUEST', 'Pick a valid month (YYYY-MM).')
+      const monthStart = `${month}-01`
+      const monthEnd = new Date(Date.UTC(Number(match[1]), Number(match[2]), 0)).toISOString().slice(0, 10)
       const studentFilter = requireText(payload.studentId, 'Student ID', 40)
       const [{ data: students, error: studentError }, { data: assignments, error: assignmentError },
         { data: feeRows, error: feeError }, { data: studentFeeRows, error: studentFeeError }, { data: settingRows }] = await Promise.all([
         admin.from('students').select('id,name,status').order('id').limit(2000),
-        admin.from('student_subjects').select('*').eq('status', 'ACTIVE'),
+        admin.from('student_subjects').select('*').in('status', ['ACTIVE', 'ENDED']),
         admin.from('fee_structure').select('*').eq('item_type', 'SUBJECT').eq('status', 'Active'),
         admin.from('student_fees').select('*').eq('status', 'Active').is('effective_to', null),
         admin.from('settings').select('setting_key,value').in('setting_key', ['ACADEMIC_YEAR','INVOICE_DUE_DAY']),
@@ -1891,7 +1893,14 @@ Deno.serve(async (request) => {
       const overrideByKey = new Map((studentFeeRows || []).filter((r) => r.effective_from <= todayDate())
         .map((r) => [`${r.student_id}|${r.subject_id}`, r]))
       const assignmentByStudent = new Map<string, any[]>()
-      for (const a of assignments || []) assignmentByStudent.set(a.student_id, [...(assignmentByStudent.get(a.student_id) || []), a])
+      for (const a of assignments || []) {
+        // Bill only for months when this student was actually assigned the
+        // subject. This also allows a past month to be generated after a
+        // subject has ended, while excluding future starts from earlier bills.
+        if ((a.start_date && String(a.start_date).slice(0, 10) > monthEnd) ||
+            (a.end_date && String(a.end_date).slice(0, 10) < monthStart)) continue
+        assignmentByStudent.set(a.student_id, [...(assignmentByStudent.get(a.student_id) || []), a])
+      }
       const result = { generated: 0, skippedExisting: 0, skippedEmpty: 0, total: 0, details: [] as Array<Record<string, unknown>> }
       for (const student of eligible) {
         if (already.has(student.id)) { result.skippedExisting++; continue }
