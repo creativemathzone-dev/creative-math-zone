@@ -1897,7 +1897,19 @@ Deno.serve(async (request) => {
         // Bill only for months when this student was actually assigned the
         // subject. This also allows a past month to be generated after a
         // subject has ended, while excluding future starts from earlier bills.
-        if ((a.start_date && String(a.start_date).slice(0, 10) > monthEnd) ||
+        // Older rows may have no start_date; created_at is the safest available
+        // fallback so a newly-created assignment cannot be billed retroactively.
+        const assignmentStart = a.start_date
+          ? String(a.start_date).slice(0, 10)
+          : a.created_at
+            ? (() => {
+              const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' })
+                .formatToParts(new Date(a.created_at))
+              const part = (type: string) => parts.find((item) => item.type === type)?.value || ''
+              return `${part('year')}-${part('month')}-${part('day')}`
+            })()
+            : ''
+        if ((assignmentStart && assignmentStart > monthEnd) ||
             (a.end_date && String(a.end_date).slice(0, 10) < monthStart)) continue
         assignmentByStudent.set(a.student_id, [...(assignmentByStudent.get(a.student_id) || []), a])
       }
@@ -1933,6 +1945,8 @@ Deno.serve(async (request) => {
       const month = requireText(payload.month, 'Month', 7)
       const statusFilter = String(payload.status || '').toUpperCase()
       const search = String(payload.search || '').trim().toLowerCase().slice(0, 100)
+      const batchFilter = String(payload.batchId || '').trim()
+      const subjectFilter = String(payload.subjectId || '').trim()
       const limit = Math.min(Math.max(Number.parseInt(payload.limit, 10) || 500, 1), 2000)
       let query = admin.from('invoices').select('*').order('month', { ascending: false }).order('id', { ascending: false }).limit(5000)
       if (month) query = query.eq('month', month)
@@ -1942,29 +1956,58 @@ Deno.serve(async (request) => {
       const { data: students, error: studentsError } = await admin.from('students').select('id,name,current_class,current_batch_id').in('id', studentIds.length ? studentIds : ['__none__'])
       if (studentsError) throw studentsError
       const studentMap = new Map((students || []).map((s) => [s.id, s]))
-      const batchIds = [...new Set((students || []).map((s) => s.current_batch_id).filter(Boolean))]
-      const { data: batches, error: batchesError } = batchIds.length
-        ? await admin.from('batches').select('id,name').in('id', batchIds) : { data: [], error: null }
-      if (batchesError) throw batchesError
+      const linesByInvoice = new Map((data || []).map((r) => [r.id, normalizedInvoiceLines(r)]))
+      const invoiceBatchIds = (data || []).flatMap((r) => (linesByInvoice.get(r.id) || []).map((line) => String(line.batchId || '').trim()).filter(Boolean))
+      const batchIds = [...new Set([...(students || []).map((s) => String(s.current_batch_id || '').trim()), ...invoiceBatchIds].filter(Boolean))]
+      const subjectIds = [...new Set((data || []).flatMap((r) => (linesByInvoice.get(r.id) || [])
+        .map((line) => String(line.subjectId || '').trim()).filter(Boolean)))]
+      const [{ data: batches, error: batchesError }, { data: subjects, error: subjectsError }] = await Promise.all([
+        batchIds.length ? admin.from('batches').select('id,name').in('id', batchIds) : Promise.resolve({ data: [], error: null }),
+        subjectIds.length ? admin.from('subjects').select('id,name').in('id', subjectIds) : Promise.resolve({ data: [], error: null }),
+      ])
+      if (batchesError || subjectsError) throw batchesError || subjectsError
       const batchNames = new Map((batches || []).map((b) => [b.id, b.name]))
-      const invoiceLines = new Map((data || []).map((r) => [r.id, normalizedInvoiceLines(r).map((line) => String(line.subjectName || line.subjectId || 'Unspecified'))]))
+      const subjectNames = new Map((subjects || []).map((s) => [String(s.id), s.name]))
+      const batchOptions = new Map<string, string>()
+      const subjectOptions = new Map<string, string>()
       let rows = (data || []).map((r) => {
         const student = studentMap.get(r.student_id)
+        const currentBatchId = String(student?.current_batch_id || '').trim()
+        const lines = (linesByInvoice.get(r.id) || []).map((line) => {
+          const subjectName = String(line.subjectName || subjectNames.get(String(line.subjectId || '')) || line.subjectId || '').trim()
+          const subjectId = String(line.subjectId || '').trim() || (subjectName ? `legacy-subject:${subjectName.toLowerCase()}` : '')
+          const batchId = String(line.batchId || '').trim() || currentBatchId
+          const batchName = String(batchNames.get(batchId) || (batchId === currentBatchId ? batchNames.get(currentBatchId) : '') || batchId).trim()
+          if (subjectId && subjectName) subjectOptions.set(subjectId, subjectName)
+          if (batchId && batchName) batchOptions.set(batchId, batchName)
+          return { subjectId, subjectName: subjectName || 'Unspecified', batchId, batchName }
+        })
+        const rowBatchIds = [...new Set(lines.map((line) => line.batchId).filter(Boolean))]
+        if (!rowBatchIds.length && currentBatchId) {
+          rowBatchIds.push(currentBatchId)
+          batchOptions.set(currentBatchId, String(batchNames.get(currentBatchId) || currentBatchId))
+        }
+        const rowSubjectIds = [...new Set(lines.map((line) => line.subjectId).filter(Boolean))]
         return { InvoiceID: r.id, StudentID: r.student_id, StudentName: student?.name || r.student_id,
           CurrentClass: student?.current_class || '', CurrentBatchName: batchNames.get(student?.current_batch_id) || '', Month: r.month, MonthLabel: monthLabel(r.month),
-          Classes: (invoiceLines.get(r.id) || []).join(', '),
+          Classes: lines.map((line) => line.subjectName).join(', '), BatchIDs: rowBatchIds, SubjectIDs: rowSubjectIds,
           TotalAmount: Number(r.total_amount) || 0, PaidAmount: Number(r.paid_amount) || 0,
           BalanceAmount: Math.max(0, Number(r.total_amount) - Number(r.paid_amount)), DueDate: r.due_date,
           Status: invoiceStatus(r.total_amount, r.paid_amount, r.due_date, r.status), StoredStatus: r.status }
       })
+      const batchFilterOptions = [...batchOptions].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+      const subjectFilterOptions = [...subjectOptions].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
       if (statusFilter) rows = rows.filter((r) => r.Status === statusFilter)
       if (search) rows = rows.filter((r) => r.StudentName.toLowerCase().includes(search) || r.StudentID.toLowerCase().includes(search) || r.InvoiceID.toLowerCase().includes(search))
+      if (batchFilter) rows = rows.filter((r) => r.BatchIDs.includes(batchFilter))
+      if (subjectFilter) rows = rows.filter((r) => r.SubjectIDs.includes(subjectFilter))
       const totals = { count: 0, billed: 0, paid: 0, balance: 0, overdue: 0 }
       for (const row of rows) if (row.Status !== 'CANCELLED') {
         totals.count++; totals.billed += row.TotalAmount; totals.paid += row.PaidAmount; totals.balance += row.BalanceAmount
         if (row.Status === 'OVERDUE') totals.overdue += row.BalanceAmount
       }
-      return response({ ok: true, data: { rows: rows.slice(0, limit), totals } })
+      return response({ ok: true, data: { rows: rows.slice(0, limit), totals,
+        batchOptions: batchFilterOptions, subjectOptions: subjectFilterOptions } })
     }
 
     if (action === 'invoices.get') {

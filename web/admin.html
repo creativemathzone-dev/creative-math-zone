@@ -1691,7 +1691,7 @@ function invoiceStatusPill(s) {
 }
 
 VIEWS.invoices = async main => {
-  const st = VIEWS.invoices.state = VIEWS.invoices.state || { month: '', status: '', search: '' };
+  const st = VIEWS.invoices.state = VIEWS.invoices.state || { month: '', status: '', search: '', batchId: '', subjectId: '' };
   const currentMonth = new Date().toISOString().slice(0, 7);
   if (!st.month) st.month = currentMonth;
 
@@ -1705,6 +1705,8 @@ VIEWS.invoices = async main => {
         ['UNPAID','PARTIAL','PAID','OVERDUE','CANCELLED'].map(x =>
           '<option value="' + x + '"' + (st.status === x ? ' selected' : '') + '>' + x + '</option>').join('') +
       '</select>' +
+      '<select id="inv-batch"><option value="">All batches</option></select>' +
+      '<select id="inv-subject"><option value="">All subjects</option></select>' +
       '<input id="inv-search" placeholder="Search by student or invoice ID" value="' + esc(st.search) + '">' +
       '<button class="btn ghost" id="inv-clear">Clear filters</button>' +
     '</div>' +
@@ -1712,7 +1714,24 @@ VIEWS.invoices = async main => {
     '<div id="inv-list"></div>';
 
   const load = async () => {
-    const r = await api('invoices.list', { month: st.month, status: st.status, search: st.search });
+    const r = await api('invoices.list', { month: st.month, status: st.status, search: st.search,
+      batchId: st.batchId, subjectId: st.subjectId });
+    const setOptions = (selector, label, options, selected) => {
+      const select = $(selector);
+      const valid = !selected || options.some(option => String(option.id) === selected);
+      if (!valid) selected = '';
+      select.innerHTML = '<option value="">' + label + '</option>' + options.map(option =>
+        '<option value="' + esc(option.id) + '">' + esc(option.name) + '</option>').join('');
+      select.value = selected;
+      return valid;
+    };
+    const batchValid = setOptions('#inv-batch', 'All batches', r.batchOptions || [], st.batchId);
+    const subjectValid = setOptions('#inv-subject', 'All subjects', r.subjectOptions || [], st.subjectId);
+    if (!batchValid || !subjectValid) {
+      if (!batchValid) st.batchId = '';
+      if (!subjectValid) st.subjectId = '';
+      return load();
+    }
     const t = r.totals;
     $('#inv-summary').innerHTML =
       '<div class="card stat"><b>' + t.count + '</b><span>Invoices</span></div>' +
@@ -1747,19 +1766,21 @@ VIEWS.invoices = async main => {
 
   $('#inv-month').addEventListener('change', e => { st.month = e.target.value; load().catch(fail); });
   $('#inv-status').addEventListener('change', e => { st.status = e.target.value; load().catch(fail); });
+  $('#inv-batch').addEventListener('change', e => { st.batchId = e.target.value; load().catch(fail); });
+  $('#inv-subject').addEventListener('change', e => { st.subjectId = e.target.value; load().catch(fail); });
   let tmr; $('#inv-search').addEventListener('input', e => {
     st.search = e.target.value; clearTimeout(tmr); tmr = setTimeout(() => load().catch(fail), 300);
   });
   $('#inv-clear').addEventListener('click', () => {
-    st.month = currentMonth; st.status = ''; st.search = '';
-    $('#inv-month').value = currentMonth; $('#inv-status').value = ''; $('#inv-search').value = '';
+    st.month = currentMonth; st.status = ''; st.search = ''; st.batchId = ''; st.subjectId = '';
+    $('#inv-month').value = currentMonth; $('#inv-status').value = ''; $('#inv-batch').value = ''; $('#inv-subject').value = ''; $('#inv-search').value = '';
     load().catch(fail);
   });
 
   if (can('FINANCE_EDIT')) {
     $('#inv-gen').addEventListener('click', () => {
       openDlg('Generate invoices',
-        '<p>This creates one invoice per active student for the chosen month, based on their current subjects and fees.</p>' +
+        '<p>This creates one invoice per active student for the chosen month, using subjects assigned during that month and their applicable fees.</p>' +
         '<label class="f"><span>Month</span><input id="gen-month" type="month" value="' + esc(st.month) + '"></label>' +
         '<p class="muted" style="font-size:.85rem">Students who already have an invoice for that month are skipped. Students with no subjects are skipped.</p>',
         '<button class="btn" type="button" data-close>Cancel</button>' +
