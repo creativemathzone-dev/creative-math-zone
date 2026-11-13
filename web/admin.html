@@ -1988,6 +1988,7 @@ VIEWS.receipt = async (main, receiptId) => {
     '<div class="head no-print"><div><h1>Receipt ' + esc(r.ReceiptID) + '</h1>' +
       '<p>' + esc(fmtDate(r.ReceiptDate)) + ' · ' + (st ? studentProfileLink(st.StudentID, st.Name) : '') + ' · ' + pill(r.Status) + '</p></div>' +
       '<div>' +
+        (inv && inv.InvoiceID ? ' <button class="btn" id="rc-invoice">View invoice</button>' : '') +
         '<label class="f no-print" style="display:inline-flex;align-items:center;gap:.4rem;margin:0 .5rem 0 0"><span>Paper</span><select id="rc-paper"><option value="A5">A5</option><option value="A4">A4</option></select></label><button class="btn" id="rc-print">Print / Save PDF</button>' +
         (!isVoid && can('FINANCE_VIEW') ? ' <button class="btn" id="rc-whatsapp">Send PDF on WhatsApp</button>' : '') +
         (can('FINANCE_EDIT') && !isVoid ? ' <button class="btn danger" id="rc-void">Void receipt</button>' : '') +
@@ -2055,6 +2056,8 @@ VIEWS.receipt = async (main, receiptId) => {
     '</div>';
 
   $('[data-back]', main).addEventListener('click', () => go('receipts'));
+  const invoiceButton = $('#rc-invoice');
+  if (invoiceButton) invoiceButton.addEventListener('click', () => go('invoice', inv.InvoiceID));
   $('#rc-paper').addEventListener('change', e => {
     let style = $('#rc-page-size-style');
     if (!style) { style = document.createElement('style'); style.id = 'rc-page-size-style'; document.head.appendChild(style); }
