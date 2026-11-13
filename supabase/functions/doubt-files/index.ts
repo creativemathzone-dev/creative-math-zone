@@ -107,9 +107,19 @@ Deno.serve(async (req) => {
       let blob: Blob
       if (file.drive_file_id && file.drive_connection_id) {
         const { data: connection } = await admin.from('google_drive_connections').select('*').eq('id', file.drive_connection_id).maybeSingle()
-        if (!connection || !connection.refresh_token_ciphertext) return json({ error: 'The Google Drive account for this photo is no longer connected.' }, 410)
+        if (!connection) return json({ error: 'The Google Drive account for this photo is no longer connected.' }, 410)
+        let access = ''
+        try { if (connection.refresh_token_ciphertext && !connection.disconnected_at) access = await accessToken(connection) } catch { access = '' }
+        if (!access) {
+          // Old login expired: use the current login of the same Google account and re-point the photo.
+          const current = await primaryDrive(admin)
+          if (!current || String(current.account_email).toLowerCase() !== String(connection.account_email).toLowerCase())
+            return json({ error: 'The Google Drive login for this photo has expired. Reconnect Google Drive in Settings.' }, 410)
+          access = await accessToken(current)
+          await admin.from('doubt_files').update({ drive_connection_id: current.id }).eq('id', file.id)
+        }
         const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.drive_file_id)}?alt=media`,
-          { headers: { Authorization: `Bearer ${await accessToken(connection)}` } })
+          { headers: { Authorization: `Bearer ${access}` } })
         if (!res.ok) return json({ error: 'Could not load this photo from Google Drive.' }, 502)
         blob = await res.blob()
       } else {

@@ -27,13 +27,29 @@ async function accessToken(connection:any){
   if(!res.ok||!body.access_token)throw new Error(body.error_description||'Could not refresh the Google Drive connection.')
   return body.access_token as string
 }
+// Access for a file's Drive connection. If that connection's login has expired
+// or was replaced, use the current connection of the SAME Google account (the
+// app may open its own files with any of its logins) and re-point the file.
+async function accessFor(admin:any,connectionId:string,fileTable?:string,fileId?:string){
+  const {data:connection}=await admin.from('google_drive_connections').select('*').eq('id',connectionId).maybeSingle()
+  if(connection&&connection.refresh_token_ciphertext&&!connection.disconnected_at){
+    try{return {access:await accessToken(connection),connection}}catch{/* expired: try the same account's current login */}
+  }
+  if(!connection)throw new Error('The archive Drive account is unavailable.')
+  const {data:current}=await admin.from('google_drive_connections').select('*').eq('is_primary',true).is('disconnected_at',null).maybeSingle()
+  if(!current||current.id===connection.id||String(current.account_email).toLowerCase()!==String(connection.account_email).toLowerCase())
+    throw new Error('The Google Drive login for this file has expired. Reconnect '+connection.account_email+' in Settings.')
+  const access=await accessToken(current)
+  if(fileTable&&fileId)await admin.from(fileTable).update({drive_connection_id:current.id}).eq('id',fileId)
+  return {access,connection:current}
+}
 async function uploadDrive(access:string,fileName:string,mime:string,bytes:Uint8Array,folderId?:string|null){
   const metadata:any={name:fileName,mimeType:mime}
   if(folderId)metadata.parents=[folderId]
   const boundary=`cmz_${crypto.randomUUID().replaceAll('-','')}`
   const prefix=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`
   const suffix=`\r\n--${boundary}--`
-  const body=new Blob([enc.encode(prefix),bytes,enc.encode(suffix)])
+  const body=new Blob([enc.encode(prefix),bytes as Uint8Array<ArrayBuffer>,enc.encode(suffix)])
   const res=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,webViewLink',{method:'POST',headers:{Authorization:`Bearer ${access}`,'Content-Type':`multipart/related; boundary=${boundary}`},body})
   const result=await res.json()
   if(!res.ok||!result.id)throw new Error(result.error?.message||'Google Drive upload failed.')
@@ -76,9 +92,9 @@ Deno.serve(async req=>{
           (user.user_type==='STUDENT'&&file.uploaded_by_type==='STUDENT'&&file.uploaded_by_id===user.linked_id)
         if(!allowed)return json({error:'You cannot delete this homework file.'},403)
         if(file.drive_file_id&&file.drive_connection_id){
-          const {data:connection}=await admin.from('google_drive_connections').select('*').eq('id',file.drive_connection_id).maybeSingle()
-          if(!connection)return json({error:'The archive Drive account is unavailable; file record was kept.'},410)
-          const access=await accessToken(connection),removed=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.drive_file_id)}`,{method:'DELETE',headers:{Authorization:`Bearer ${access}`}})
+          let access:string
+          try{access=(await accessFor(admin,file.drive_connection_id)).access}catch(e){return json({error:(e instanceof Error?e.message:'The archive Drive account is unavailable')+' The file record was kept.'},410)}
+          const removed=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.drive_file_id)}`,{method:'DELETE',headers:{Authorization:`Bearer ${access}`}})
           if(!removed.ok&&removed.status!==404)throw new Error('Google Drive could not delete this archive; the app copy was retained.')
         }
         if(file.file_path){const {error}=await admin.storage.from('homework-files').remove([file.file_path]);if(error)throw error}
@@ -97,6 +113,18 @@ Deno.serve(async req=>{
         if(error)throw error
         const {data:source}=await admin.from('google_drive_connections').select('*').eq('id',sourceId).maybeSingle()
         if(!source)return json({error:'The old Drive connection was not found.'},404)
+        // Same Google account: the files are already in this Drive, so just point
+        // every record at the current login (no copying), then retire the old one.
+        if(String(source.account_email).toLowerCase()===String(target.account_email).toLowerCase()){
+          let moved=0
+          for(const table of ['homework_files','doubt_files','backup_runs']){
+            const {data:rows,error:moveError}=await admin.from(table).update({drive_connection_id:target.id}).eq('drive_connection_id',sourceId).select('id')
+            if(moveError&&!String(moveError.message||'').includes('does not exist'))throw moveError
+            moved+=(rows||[]).length
+          }
+          await admin.from('google_drive_connections').update({is_primary:false,disconnected_at:new Date().toISOString(),refresh_token_ciphertext:''}).eq('id',sourceId)
+          return json({transferred:moved,remaining:0,disconnected:true,sameAccount:true})
+        }
         const oldAccess=await accessToken(source),newAccess=await accessToken(target),folder=await ensureFolder(admin,target,newAccess)
         let moved=0
         for(const f of files||[]){
@@ -168,9 +196,8 @@ Deno.serve(async req=>{
       if(!allowed)return json({error:'You cannot access this homework file.'},403)
       let blob:Blob
       if(file.drive_file_id&&file.drive_connection_id){
-        const {data:connection}=await admin.from('google_drive_connections').select('*').eq('id',file.drive_connection_id).maybeSingle()
-        if(!connection)return json({error:'The archive Drive account is unavailable.'},410)
-        const access=await accessToken(connection)
+        let access:string
+        try{access=(await accessFor(admin,file.drive_connection_id,'homework_files',file.id)).access}catch(e){return json({error:e instanceof Error?e.message:'The archive Drive account is unavailable.'},410)}
         const result=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.drive_file_id)}?alt=media`,{headers:{Authorization:`Bearer ${access}`}})
         if(!result.ok)throw new Error('Could not retrieve the archived file from Google Drive.')
         blob=await result.blob()

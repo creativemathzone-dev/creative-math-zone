@@ -5,3 +5,5 @@ dist/
 !.env.example
 .vercel/
 .supabase/
+# Android APKs are stored in the "apps" GitHub Release, not in the code.
+downloads/*.apk

@@ -25,6 +25,17 @@ jobs:
       - name: Check critical application flows
         run: node --test tests/critical-flows.test.mjs
 
+      # The Android APKs live in the "apps" GitHub Release (not in the code) and
+      # are copied here so the download links stay at /downloads/<name>.apk.
+      # If this fails, publishing stops and the current site stays online.
+      - name: Get the Android apps from the "apps" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p downloads
+          gh release download apps --repo "$GITHUB_REPOSITORY" --pattern '*.apk' --dir downloads --clobber
+          ls -l downloads
+
       - name: Prepare the website files
         run: |
           mkdir -p _site/web _site/downloads _site/.well-known

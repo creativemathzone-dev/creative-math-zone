@@ -119,8 +119,18 @@ Deno.serve(async (req) => {
       const { data: run } = await admin.from('backup_runs').select('*').eq('id', id).maybeSingle()
       if (!run || !run.drive_file_id || !run.drive_connection_id) return json({ error: 'This backup is no longer in Google Drive.' }, 404)
       const { data: connection } = await admin.from('google_drive_connections').select('*').eq('id', run.drive_connection_id).maybeSingle()
-      if (!connection || !connection.refresh_token_ciphertext) return json({ error: 'That Google Drive account is no longer connected.' }, 410)
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(run.drive_file_id)}?alt=media`, { headers: { Authorization: `Bearer ${await accessToken(connection)}` } })
+      if (!connection) return json({ error: 'That Google Drive account is no longer connected.' }, 410)
+      let access = ''
+      try { if (connection.refresh_token_ciphertext && !connection.disconnected_at) access = await accessToken(connection) } catch { access = '' }
+      if (!access) {
+        // Old login expired: use the current login of the same Google account.
+        const { data: current } = await admin.from('google_drive_connections').select('*').eq('is_primary', true).is('disconnected_at', null).maybeSingle()
+        if (!current || String(current.account_email).toLowerCase() !== String(connection.account_email).toLowerCase())
+          return json({ error: 'The Google Drive login for this backup has expired. Reconnect Google Drive in Settings.' }, 410)
+        access = await accessToken(current)
+        await admin.from('backup_runs').update({ drive_connection_id: current.id }).eq('id', run.id)
+      }
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(run.drive_file_id)}?alt=media`, { headers: { Authorization: `Bearer ${access}` } })
       if (!res.ok) return json({ error: 'Could not download the backup from Google Drive.' }, 502)
       return new Response(await res.blob(), { headers: { ...cors, 'Content-Type': 'application/gzip', 'Cache-Control': 'no-store',
         'Content-Disposition': `attachment; filename="${String(run.file_name).replace(/["\r\n]/g, '_')}"` } })
