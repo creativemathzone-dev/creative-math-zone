@@ -1979,17 +1979,16 @@ Deno.serve(async (request) => {
           const batchId = String(line.batchId || '').trim() || currentBatchId
           const batchName = String(batchNames.get(batchId) || (batchId === currentBatchId ? batchNames.get(currentBatchId) : '') || batchId).trim()
           if (subjectId && subjectName) subjectOptions.set(subjectId, subjectName)
-          if (batchId && batchName) batchOptions.set(batchId, batchName)
           return { subjectId, subjectName: subjectName || 'Unspecified', batchId, batchName }
         })
         const rowBatchIds = [...new Set(lines.map((line) => line.batchId).filter(Boolean))]
-        if (!rowBatchIds.length && currentBatchId) {
-          rowBatchIds.push(currentBatchId)
+        if (currentBatchId) {
           batchOptions.set(currentBatchId, String(batchNames.get(currentBatchId) || currentBatchId))
         }
         const rowSubjectIds = [...new Set(lines.map((line) => line.subjectId).filter(Boolean))]
         return { InvoiceID: r.id, StudentID: r.student_id, StudentName: student?.name || r.student_id,
-          CurrentClass: student?.current_class || '', CurrentBatchName: batchNames.get(student?.current_batch_id) || '', Month: r.month, MonthLabel: monthLabel(r.month),
+          CurrentClass: student?.current_class || '', CurrentBatchID: currentBatchId,
+          CurrentBatchName: batchNames.get(currentBatchId) || '', Month: r.month, MonthLabel: monthLabel(r.month),
           Classes: lines.map((line) => line.subjectName).join(', '), BatchIDs: rowBatchIds, SubjectIDs: rowSubjectIds,
           TotalAmount: Number(r.total_amount) || 0, PaidAmount: Number(r.paid_amount) || 0,
           BalanceAmount: Math.max(0, Number(r.total_amount) - Number(r.paid_amount)), DueDate: r.due_date,
@@ -1999,7 +1998,7 @@ Deno.serve(async (request) => {
       const subjectFilterOptions = [...subjectOptions].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
       if (statusFilter) rows = rows.filter((r) => r.Status === statusFilter)
       if (search) rows = rows.filter((r) => r.StudentName.toLowerCase().includes(search) || r.StudentID.toLowerCase().includes(search) || r.InvoiceID.toLowerCase().includes(search))
-      if (batchFilter) rows = rows.filter((r) => r.BatchIDs.includes(batchFilter))
+      if (batchFilter) rows = rows.filter((r) => r.CurrentBatchID === batchFilter)
       if (subjectFilter) rows = rows.filter((r) => r.SubjectIDs.includes(subjectFilter))
       const totals = { count: 0, billed: 0, paid: 0, balance: 0, overdue: 0 }
       for (const row of rows) if (row.Status !== 'CANCELLED') {
