@@ -16,7 +16,7 @@ The supplied Apps Script has 24 logical data tables and a single action-based AP
 
 The initial schema is in [`supabase/migrations/20261013000000_initial_schema.sql`](supabase/migrations/20261013000000_initial_schema.sql). It defines the core relational model and enables row-level security on application data. The server-side action router in `supabase/functions/api/` covers configuration and authentication, student and teacher records, registrations, master data, timetable and notices, fee structures and discounts, invoices/payments/receipts, teacher income, reports, attendance, and the portal reads. The browser-ready copies are in [`web/`](web/) and call the Supabase Edge Function; the original files in `legacy-appscript/` remain the migration reference. The new pages are not deployed yet.
 
-The initial schema and seven database migrations have been applied to the user's Supabase project. A new migration, `20261013070000_login_rate_limits.sql`, adds login attempt throttling and must be applied before the API is deployed. Follow [`docs/bootstrap.md`](docs/bootstrap.md) for beginner-friendly setup steps.
+The initial schema and all eight database migrations, including login attempt throttling, have been applied to the user's Supabase project. The `api` Edge Function has also been deployed successfully through GitHub Actions. Follow [`docs/bootstrap.md`](docs/bootstrap.md) for the remaining setup steps.
 
 ## Legacy reference
 
@@ -24,11 +24,9 @@ The initial schema and seven database migrations have been applied to the user's
 
 ## Next implementation steps
 
-1. Apply `20261013070000_login_rate_limits.sql` in the Supabase SQL Editor.
-2. Create and link the first admin account.
-3. Run the manual `Deploy Supabase API` workflow; the scoped token is stored as a GitHub Actions secret.
-4. Enable GitHub Pages with the Actions source, then run the manual `Publish Creative Math Zone portal` workflow.
-5. Check every portal and permission against the empty project, then fix any issues before use.
-6. Prepare and verify a Google Sheets export/import before cutover. Keep the Apps Script site live until the new site and migrated data are ready.
+1. Create and link the first admin account.
+2. Enable GitHub Pages with the Actions source, then run the manual `Publish Creative Math Zone portal` workflow.
+3. Check every portal and permission against the empty project, then fix any issues before use.
+4. Prepare and verify a Google Sheets export/import before cutover. Keep the Apps Script site live until the new site and migrated data are ready.
 
 Never put a Supabase secret key in browser code or commit secrets to GitHub.
