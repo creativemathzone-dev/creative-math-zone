@@ -129,26 +129,48 @@ async function geminiKey(admin: any) {
   const { data } = await admin.from('app_secrets').select('value').eq('key', 'GEMINI_API_KEY').maybeSingle()
   return data?.value ? String(data.value) : ''
 }
+// Free Gemini models are sometimes overloaded (503) or rate limited per model (429).
+// Retry once after a short wait, then fall back to other free models, within a time budget.
+const MODEL_FALLBACKS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite']
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
 async function callGemini(key: string, model: string, system: string, text: string) {
-  let last = 'AI did not answer.'
-  for (const m of [...new Set([model, 'gemini-flash-latest', 'gemini-2.5-flash'])].filter(Boolean)) {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 16384 } }) })
-    const out = await res.json().catch(() => ({}))
-    if (res.ok) {
-      const t = (out.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('').trim()
-      if (t) return { text: t, model: m }
-      last = 'The AI returned an empty answer.'; continue
+  const started = Date.now(), budgetMs = 110000
+  let last = 'AI did not answer.', busy = false
+  for (const m of [...new Set([model, ...MODEL_FALLBACKS])].filter(Boolean)) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (Date.now() - started > budgetMs) break
+      let res: Response, out: any
+      try {
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text }] }],
+            generationConfig: { temperature: 0.5, maxOutputTokens: 16384 } }) })
+        out = await res.json().catch(() => ({}))
+      } catch { last = 'Could not reach Google AI.'; await pause(1500); continue }
+      if (res.ok) {
+        const t = (out.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('').trim()
+        if (t) return { text: t, model: m }
+        last = 'The AI returned an empty answer.'; break
+      }
+      const msg = String(out.error?.message || '')
+      if (res.status === 401 || res.status === 403 || /api key/i.test(msg)) throw new Error('The AI key was rejected. Check it in Admin → Settings → AI assistant.')
+      if (res.status === 404) { last = `Model ${m} is not available.`; break }
+      if (res.status === 503 || res.status === 500 || res.status === 504 || res.status === 429) {
+        busy = true; last = msg || `Google AI is busy (${res.status}).`
+        if (attempt === 0) { await pause(res.status === 429 ? 2000 : 3000); continue }
+        break // try the next (lighter) model
+      }
+      throw new Error('AI request failed' + (msg ? ': ' + msg.slice(0, 200) : ` (${res.status}).`))
     }
-    if (res.status === 404) { last = `Model ${m} is not available.`; continue }
-    if (res.status === 429) throw new Error('The free AI limit from Google is used up for now. Try again later or tomorrow.')
-    const msg = String(out.error?.message || '')
-    if (res.status === 401 || res.status === 403 || /api key/i.test(msg)) throw new Error('The AI key was rejected. Check it in Admin → Settings → AI assistant.')
-    throw new Error('AI request failed' + (msg ? ': ' + msg.slice(0, 200) : ` (${res.status}).`))
   }
+  if (busy) throw new Error('Google’s free AI is very busy right now. Please try again in a few minutes.')
   throw new Error(last)
+}
+// A failed AI call should not use up one of today's allowed drafts.
+async function refundAi(admin: any) {
+  const day = istToday()
+  const { data } = await admin.from('ai_usage').select('calls').eq('day', day).maybeSingle()
+  if (data && data.calls > 0) await admin.from('ai_usage').update({ calls: data.calls - 1 }).eq('day', day).eq('calls', data.calls)
 }
 const SYSTEM = [
   'You are an experienced Indian school teacher and paper setter. You write accurate, syllabus-appropriate question papers and answer keys.',
@@ -341,9 +363,10 @@ Deno.serve(async (req) => {
         prompt += `\n\nThis is SET B of the paper below. Keep exactly the same pattern, sections, marks and difficulty, but change every question (different numbers, values and situations) so students cannot copy answers between sets.\n--- SET A QUESTIONS ---\n${pc.questions.slice(0, 12000)}`
       }
       let out: { text: string, model: string }
-      try { out = await callGemini(key, await setting(admin, 'AI_MODEL', 'gemini-flash-latest'), SYSTEM, prompt) } catch (e) { return fail(e instanceof Error ? e.message : 'AI failed.', 502) }
+      try { out = await callGemini(key, await setting(admin, 'AI_MODEL', 'gemini-flash-latest'), SYSTEM, prompt) }
+      catch (e) { await refundAi(admin); return fail(e instanceof Error ? e.message : 'AI failed.', 502) }
       const p = parse(out.text)
-      if (!p.questions || !p.answerKey) return fail('The AI reply was incomplete. Please try again.', 502)
+      if (!p.questions || !p.answerKey) { await refundAi(admin); return fail('The AI reply was incomplete. Please try again.', 502) }
       const { data: idData, error: idError } = await admin.rpc('next_id', { p_counter_name: 'worksheets', p_prefix: 'WS-', p_width: 5 })
       if (idError) throw idError
       const title = (p.title || `${subject?.name || 'Worksheet'} — ${chapter}`).slice(0, 140) + (parent ? ' (Set B)' : '')

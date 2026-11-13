@@ -143,32 +143,47 @@ async function geminiKey(admin: any) {
 }
 const toB64 = (bytes: Uint8Array) => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s) }
 
+// Free Gemini models are sometimes overloaded (503) or rate limited per model (429).
+// Retry once after a short wait, then fall back to other free models, within a time budget.
+const MODEL_FALLBACKS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite']
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
 async function callGemini(key: string, model: string, text: string, images: Array<{ mime: string, data: string }>) {
-  const models = [...new Set([model, 'gemini-flash-latest', 'gemini-2.5-flash'])].filter(Boolean)
-  let lastError = 'AI did not answer.'
-  for (const m of models) {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: AI_SYSTEM }] },
-        contents: [{ role: 'user', parts: [{ text }, ...images.map((i) => ({ inline_data: { mime_type: i.mime, data: i.data } }))] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
-      }),
-    })
-    const out = await res.json().catch(() => ({}))
-    if (res.ok) {
-      const answer = (out.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('').trim()
-      if (answer) return { text: answer.slice(0, 6000), model: m }
-      lastError = out.candidates?.[0]?.finishReason === 'SAFETY' ? 'The AI declined this question.' : 'The AI returned an empty answer.'
-      continue
+  const started = Date.now(), budgetMs = 110000
+  let lastError = 'AI did not answer.', busy = false
+  for (const m of [...new Set([model, ...MODEL_FALLBACKS])].filter(Boolean)) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (Date.now() - started > budgetMs) break
+      let res: Response, out: any
+      try {
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: AI_SYSTEM }] },
+            contents: [{ role: 'user', parts: [{ text }, ...images.map((i) => ({ inline_data: { mime_type: i.mime, data: i.data } }))] }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+          }),
+        })
+        out = await res.json().catch(() => ({}))
+      } catch { lastError = 'Could not reach Google AI.'; await pause(1500); continue }
+      if (res.ok) {
+        const answer = (out.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('').trim()
+        if (answer) return { text: answer.slice(0, 6000), model: m }
+        lastError = out.candidates?.[0]?.finishReason === 'SAFETY' ? 'The AI declined this question.' : 'The AI returned an empty answer.'
+        break
+      }
+      const msg = String(out.error?.message || '')
+      if (res.status === 401 || res.status === 403 || /api key/i.test(msg)) throw new Error('The AI key was rejected. Check the key in Admin → Settings → AI assistant.')
+      if (res.status === 404) { lastError = `Model ${m} is not available.`; break }   // try the next model name
+      if (res.status === 503 || res.status === 500 || res.status === 504 || res.status === 429) {
+        busy = true; lastError = msg || `Google AI is busy (${res.status}).`
+        if (attempt === 0) { await pause(res.status === 429 ? 2000 : 3000); continue }
+        break // try the next (lighter) model
+      }
+      if (res.status === 400) throw new Error('The AI could not read this question' + (msg ? ': ' + msg.slice(0, 200) : '.'))
+      throw new Error(msg || `AI request failed (${res.status}).`)
     }
-    if (res.status === 404) { lastError = `Model ${m} is not available.`; continue }   // try the next model name
-    if (res.status === 429) throw new Error('The free AI limit from Google is used up for now. Try again later or tomorrow.')
-    const msg = String(out.error?.message || '')
-    if (res.status === 401 || res.status === 403 || /api key/i.test(msg)) throw new Error('The AI key was rejected. Check the key in Admin → Settings → AI assistant.')
-    if (res.status === 400) throw new Error('The AI could not read this question' + (msg ? ': ' + msg.slice(0, 200) : '.'))
-    lastError = out.error?.message || `AI request failed (${res.status}).`
   }
+  if (busy) throw new Error('Google’s free AI is very busy right now. Please try again in a few minutes.')
   throw new Error(lastError)
 }
 
@@ -207,6 +222,10 @@ async function aiDraft(admin: any, user: any, doubtId: string) {
     await admin.from('doubt_ai_drafts').upsert(row, { onConflict: 'doubt_id' })
     return json({ draft: { Body: out.text, Model: out.model, CreatedAt: row.created_at, Photos: images.length } })
   } catch (e) {
+    // A failed AI call should not use up one of today's allowed drafts.
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())
+    const { data: used } = await admin.from('ai_usage').select('calls').eq('day', day).maybeSingle()
+    if (used && used.calls > 0) await admin.from('ai_usage').update({ calls: used.calls - 1 }).eq('day', day).eq('calls', used.calls)
     const message = e instanceof Error ? e.message : 'AI draft failed.'
     return json({ error: message }, 502)
   }
