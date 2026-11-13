@@ -133,6 +133,20 @@ test('free reminders: correct fee schedule, cron secret, no duplicates, no paid 
   assert.match(sw, /addEventListener\('push'/);
 });
 
+test('large tables are read page by page (no silent 1,000-row cut-off) and invoices save in batches', () => {
+  assert.match(api, /async function fetchAll<T = any>\(build: \(\) => any, pageSize = 1000/);
+  const gen = actionBlock('async function generateInvoices(', 'Deno.serve(');
+  assert.match(gen, /fetchAll\(\(\) => \{\s*\n\s*let q = admin\.from\('student_subjects'\)/);
+  assert.match(gen, /await newIds\(admin, 'invoices'/);
+  assert.match(gen, /if \(error\.code !== '23505'\) throw error/); // duplicate batch falls back to one-by-one
+  assert.doesNotMatch(gen, /\.limit\(2000\)/);
+  // next_ids missing -> falls back to next_id one at a time
+  assert.match(api, /if \(!error && Array\.isArray\(data\) && data\.length === count\) return data\.map\(String\)/);
+  const income = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");
+  assert.match(income, /fetchAll\(\(\) => admin\.from\('student_subjects'\)/);
+  assert.doesNotMatch(api, /\.limit\(10000\)/);
+});
+
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {
   assert.match(api, /'teacherIncome\.generate':\s*'TEACHER_INCOME_MANAGE'/);
   const block = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");

@@ -137,6 +137,49 @@ async function newId(admin: ReturnType<typeof clients>['admin'], counter: string
   return String(data)
 }
 
+// Supabase returns at most 1,000 rows per request. Read every page so large
+// tables are never silently cut short. `build` must return a fresh query with a
+// stable order each time it is called.
+async function fetchAll<T = any>(build: () => any, pageSize = 1000, maxRows = 200000): Promise<T[]> {
+  const rows: T[] = []
+  for (let from = 0; from < maxRows; from += pageSize) {
+    const { data, error } = await build().range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...((data || []) as T[]))
+    if (!data || data.length < pageSize) break
+  }
+  return rows
+}
+
+// Reserve many readable IDs in one database call; falls back to one call per
+// ID if the batch function has not been installed yet.
+async function newIds(admin: ReturnType<typeof clients>['admin'], counter: string, prefix: string, width: number, count: number) {
+  if (count <= 0) return [] as string[]
+  const { data, error } = await admin.rpc('next_ids', { p_counter_name: counter, p_prefix: prefix, p_width: width, p_count: count })
+  if (!error && Array.isArray(data) && data.length === count) return data.map(String)
+  const ids: string[] = []
+  for (let i = 0; i < count; i++) ids.push(await newId(admin, counter, prefix, width))
+  return ids
+}
+
+// Look up rows for a long list of IDs in groups, so the request address never
+// gets too long (a single `in (...)` with thousands of IDs can be rejected).
+async function selectIn<T = any>(ids: string[], build: (chunk: string[]) => any, size = 150): Promise<T[]> {
+  const unique = [...new Set(ids.filter(Boolean))]
+  const out: T[] = []
+  for (let i = 0; i < unique.length; i += size) {
+    const { data, error } = await build(unique.slice(i, i + size))
+    if (error) throw error
+    out.push(...((data || []) as T[]))
+  }
+  return out
+}
+
+// Turn free text into a safe PostgREST filter value (no commas, brackets or quotes).
+function safeSearch(value: unknown, max = 60) {
+  return String(value || '').replace(/[^\p{L}\p{N} @._-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
 async function logAction(admin: ReturnType<typeof clients>['admin'], user: AppUser,
   action: string, entityType: string, entityId: string, details: unknown) {
   await admin.from('admin_logs').insert({
@@ -482,23 +525,32 @@ async function generateInvoices(admin: ReturnType<typeof clients>['admin'], payl
   const monthStart = `${month}-01`
   const monthEnd = new Date(Date.UTC(Number(match[1]), Number(match[2]), 0)).toISOString().slice(0, 10)
   const studentFilter = requireText(payload.studentId, 'Student ID', 40)
-  const [{ data: students, error: studentError }, { data: assignments, error: assignmentError },
-    { data: feeRows, error: feeError }, { data: studentFeeRows, error: studentFeeError }, { data: settingRows }] = await Promise.all([
-    admin.from('students').select('id,name,status').order('id').limit(2000),
-    admin.from('student_subjects').select('*').in('status', ['ACTIVE', 'ENDED']),
+  // Every page is read (no silent 1,000-row cut-off). Assignments are narrowed in
+  // the database to those that can overlap this month; the exact rules below
+  // still decide what is billed (rows without a start date are kept and checked).
+  const [students, assignments, { data: feeRows, error: feeError }, studentFeeRows, { data: settingRows }] = await Promise.all([
+    fetchAll(() => {
+      let q = admin.from('students').select('id,name,status').order('id')
+      return studentFilter ? q.eq('id', studentFilter) : q
+    }),
+    fetchAll(() => {
+      let q = admin.from('student_subjects').select('*').in('status', ['ACTIVE', 'ENDED'])
+        .or(`start_date.is.null,start_date.lte.${monthEnd}`).or(`end_date.is.null,end_date.gte.${monthStart}`)
+        .order('created_at').order('id') // oldest first, so invoice lines keep their usual order
+      return studentFilter ? q.eq('student_id', studentFilter) : q
+    }),
     admin.from('fee_structure').select('*').eq('item_type', 'SUBJECT').eq('status', 'Active'),
-    admin.from('student_fees').select('*').eq('status', 'Active').is('effective_to', null),
+    fetchAll(() => admin.from('student_fees').select('*').eq('status', 'Active').is('effective_to', null).order('id')),
     admin.from('settings').select('setting_key,value').in('setting_key', ['ACADEMIC_YEAR','INVOICE_DUE_DAY']),
   ])
-  if (studentError || assignmentError || feeError || studentFeeError) throw studentError || assignmentError || feeError || studentFeeError
+  if (feeError) throw feeError
   const settings = Object.fromEntries((settingRows || []).map((r) => [r.setting_key, r.value]))
   const academicYear = settings.ACADEMIC_YEAR || '2026-27'
   const dueDay = Math.min(28, Math.max(1, Number.parseInt(settings.INVOICE_DUE_DAY || '10', 10) || 10))
   const dueDate = `${month}-${String(dueDay).padStart(2, '0')}`
   const eligible = (students || []).filter((s) => (!studentFilter || s.id === studentFilter) && String(s.status).toUpperCase() === 'ACTIVE')
   if (!eligible.length) throw new ApiFault('BAD_REQUEST', 'No eligible students found.')
-  const { data: existingRows, error: existingError } = await admin.from('invoices').select('student_id,status').eq('month', month).eq('academic_year', academicYear)
-  if (existingError) throw existingError
+  const existingRows = await fetchAll(() => admin.from('invoices').select('id,student_id,status').eq('month', month).eq('academic_year', academicYear).order('id'))
   const already = new Set((existingRows || []).filter((r) => String(r.status).toUpperCase() !== 'CANCELLED').map((r) => r.student_id))
   const subjectNames = new Map<string, string>()
   const assignedSubjectIds = [...new Set((assignments || []).map((a) => a.subject_id))]
@@ -547,6 +599,8 @@ async function generateInvoices(admin: ReturnType<typeof clients>['admin'], payl
     assignmentByStudent.set(studentId, [...bySubject.values()])
   }
   const result = { generated: 0, skippedExisting: 0, skippedEmpty: 0, total: 0, details: [] as Array<Record<string, unknown>> }
+  // 1) Work out every invoice first (pure calculation, same rules as before).
+  const planned: Array<{ student: any, lines: any[], total: number }> = []
   for (const student of eligible) {
     if (already.has(student.id)) { result.skippedExisting++; continue }
     const active = assignmentByStudent.get(student.id) || []
@@ -559,15 +613,30 @@ async function generateInvoices(admin: ReturnType<typeof clients>['admin'], payl
         standardAmount: standard, discountAmount: discount, finalAmount: Math.max(0, standard - discount), paidAmount: 0 }
     }).filter((line) => line.finalAmount > 0)
     if (!lines.length) { result.skippedEmpty++; continue }
-    const total = Math.round(lines.reduce((sum, line) => sum + line.finalAmount, 0) * 100) / 100
-    const id = await newId(admin, 'invoices', `INV-${month.replace('-', '')}-`, 4)
-    const { error } = await admin.from('invoices').insert({ id, student_id: student.id, month, academic_year: academicYear,
-      line_items: lines, total_amount: total, paid_amount: 0, balance_amount: total, status: 'UNPAID', due_date: dueDate })
-    if (error?.code === '23505') { result.skippedExisting++; continue }
-    if (error) throw error
-    already.add(student.id)
-    result.generated++; result.total = Math.round((result.total + total) * 100) / 100
-    result.details.push({ studentId: student.id, name: student.name, invoiceId: id, amount: total })
+    planned.push({ student, lines, total: Math.round(lines.reduce((sum, line) => sum + line.finalAmount, 0) * 100) / 100 })
+  }
+  // 2) Reserve all invoice numbers in one call, then save in batches of 100.
+  const ids = await newIds(admin, 'invoices', `INV-${month.replace('-', '')}-`, 4, planned.length)
+  const record = (p: typeof planned[number], id: string) => {
+    already.add(p.student.id)
+    result.generated++; result.total = Math.round((result.total + p.total) * 100) / 100
+    result.details.push({ studentId: p.student.id, name: p.student.name, invoiceId: id, amount: p.total })
+  }
+  for (let i = 0; i < planned.length; i += 100) {
+    const chunk = planned.slice(i, i + 100)
+    const rows = chunk.map((p, k) => ({ id: ids[i + k], student_id: p.student.id, month, academic_year: academicYear,
+      line_items: p.lines, total_amount: p.total, paid_amount: 0, balance_amount: p.total, status: 'UNPAID', due_date: dueDate }))
+    const { error } = await admin.from('invoices').insert(rows)
+    if (!error) { chunk.forEach((p, k) => record(p, ids[i + k])); continue }
+    if (error.code !== '23505') throw error
+    // Someone created an invoice at the same moment: save this batch one by one
+    // (exactly the old behaviour) so only the duplicates are skipped.
+    for (let k = 0; k < chunk.length; k++) {
+      const { error: oneError } = await admin.from('invoices').insert(rows[k])
+      if (oneError?.code === '23505') { result.skippedExisting++; continue }
+      if (oneError) throw oneError
+      record(chunk[k], ids[i + k])
+    }
   }
   return { month, result }
 }
@@ -1998,13 +2067,14 @@ Deno.serve(async (request) => {
       const batchFilter = String(payload.batchId || '').trim()
       const subjectFilter = String(payload.subjectId || '').trim()
       const limit = Math.min(Math.max(Number.parseInt(payload.limit, 10) || 500, 1), 2000)
-      let query = admin.from('invoices').select('*').order('month', { ascending: false }).order('id', { ascending: false }).limit(5000)
-      if (month) query = query.eq('month', month)
-      const { data, error } = await query
-      if (error) throw error
-      const studentIds = [...new Set((data || []).map((r) => r.student_id))]
-      const { data: students, error: studentsError } = await admin.from('students').select('id,name,current_class,current_batch_id').in('id', studentIds.length ? studentIds : ['__none__'])
-      if (studentsError) throw studentsError
+      // Only the columns this list needs, every page (newest first, up to 5,000 as before).
+      const data = await fetchAll(() => {
+        let query = admin.from('invoices').select('id,student_id,month,line_items,total_amount,paid_amount,due_date,status')
+          .order('month', { ascending: false }).order('id', { ascending: false })
+        return month ? query.eq('month', month) : query
+      }, 1000, 5000)
+      const students = await selectIn((data || []).map((r) => r.student_id),
+        (chunk) => admin.from('students').select('id,name,current_class,current_batch_id').in('id', chunk))
       const studentMap = new Map((students || []).map((s) => [s.id, s]))
       const linesByInvoice = new Map((data || []).map((r) => [r.id, normalizedInvoiceLines(r)]))
       const invoiceBatchIds = (data || []).flatMap((r) => (linesByInvoice.get(r.id) || []).map((line) => String(line.batchId || '').trim()).filter(Boolean))
@@ -2381,28 +2451,36 @@ Deno.serve(async (request) => {
       const search = String(payload.search || '').trim().toLowerCase().slice(0, 100)
       const from = requireText(payload.from, 'From date', 10), to = requireText(payload.to, 'To date', 10)
       const limit = Math.min(Math.max(Number.parseInt(payload.limit, 10) || 200, 1), 1000)
-      let query = admin.from('receipts').select('id,payment_id,student_id,receipt_date,amount,status,created_by')
-        .order('receipt_date', { ascending: false }).order('id', { ascending: false }).limit(5000)
-      if (from) query = query.gte('receipt_date', from)
-      if (to) query = query.lte('receipt_date', to)
-      const { data, error } = await query
-      if (error) throw error
-      const paymentIds = [...new Set((data || []).map((r) => r.payment_id).filter(Boolean))]
-      const { data: payments, error: paymentError } = paymentIds.length
-        ? await admin.from('payments').select('id,allocations').in('id', paymentIds) : { data: [], error: null }
-      if (paymentError) throw paymentError
-      const ids = [...new Set((data || []).map((r) => r.student_id))]
-      const { data: students, error: studentsError } = await admin.from('students').select('id,name,current_batch_id').in('id', ids.length ? ids : ['__none__'])
-      if (studentsError) throw studentsError
-      const batchIds = [...new Set((students || []).map((s) => s.current_batch_id).filter(Boolean))]
-      const { data: batches, error: batchesError } = batchIds.length
-        ? await admin.from('batches').select('id,name').in('id', batchIds) : { data: [], error: null }
-      if (batchesError) throw batchesError
-      const studentMap = new Map((students || []).map((s) => [s.id, s]))
-      const batchNames = new Map((batches || []).map((b) => [b.id, b.name]))
-      const names = new Map((students || []).map((s) => [s.id, s.name]))
+      // Narrow by search in the database first (receipt number, or students whose
+      // name/ID matches); the exact text match below still decides the result.
+      const term = safeSearch(search)
+      let matchedStudentIds: string[] | null = null
+      if (term) {
+        const hits = await fetchAll(() => admin.from('students').select('id')
+          .or(`name.ilike."%${term}%",id.ilike."%${term}%"`).order('id'), 1000, 2000)
+        matchedStudentIds = hits.length <= 300 ? hits.map((s) => s.id) : null // too many: skip the shortcut
+      }
+      const data = await fetchAll(() => {
+        let query = admin.from('receipts').select('id,payment_id,student_id,receipt_date,amount,status,created_by')
+          .order('receipt_date', { ascending: false }).order('id', { ascending: false })
+        if (from) query = query.gte('receipt_date', from)
+        if (to) query = query.lte('receipt_date', to)
+        if (term && matchedStudentIds) query = query.or(matchedStudentIds.length
+          ? `id.ilike."%${term}%",student_id.in.(${matchedStudentIds.map((id) => `"${id}"`).join(',')})` : `id.ilike."%${term}%"`)
+        return query
+      }, 1000, 5000)
+      const allStudents = await selectIn((data || []).map((r) => r.student_id),
+        (chunk) => admin.from('students').select('id,name,current_batch_id').in('id', chunk))
+      const names = new Map(allStudents.map((s) => [s.id, s.name]))
       const rows = (data || []).filter((r) => !search || r.id.toLowerCase().includes(search) || r.student_id.toLowerCase().includes(search) ||
         String(names.get(r.student_id) || '').toLowerCase().includes(search)).slice(0, limit)
+      // Only now load the extra details, and only for the rows actually shown.
+      const payments = await selectIn(rows.map((r) => r.payment_id), (chunk) => admin.from('payments').select('id,allocations').in('id', chunk))
+      const students = allStudents.filter((s) => rows.some((r) => r.student_id === s.id))
+      const batchIds = [...new Set(students.map((s) => s.current_batch_id).filter(Boolean))]
+      const batches = await selectIn(batchIds, (chunk) => admin.from('batches').select('id,name').in('id', chunk))
+      const studentMap = new Map(students.map((s) => [s.id, s]))
+      const batchNames = new Map(batches.map((b) => [b.id, b.name]))
       const allocationLabels = new Map((payments || []).map((p) => [p.id, allocationsFromPayment(p.allocations).map((a) => a.subjectName).join(', ')]))
       return response({ ok: true, data: rows.map((r) => ({ ReceiptID: r.id, StudentID: r.student_id,
         StudentName: names.get(r.student_id) || r.student_id,
@@ -3109,7 +3187,7 @@ Deno.serve(async (request) => {
         }
         if (subjectFilter) query = query.eq('subject_id', subjectFilter)
         if (['OPEN', 'CLAIMED', 'ANSWERED', 'RESOLVED'].includes(statusFilter)) query = query.eq('status', statusFilter)
-        if (search) query = query.or(`title.ilike.%${search}%,chapter.ilike.%${search}%`)
+        if (search) query = query.or(`title.ilike."%${search}%",chapter.ilike."%${search}%"`)
         const { data: doubts, error } = await query
         if (error) throw error
         const ids = (doubts || []).map((d) => d.id)
@@ -3967,11 +4045,12 @@ Deno.serve(async (request) => {
       if ((from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (to && !/^\d{4}-\d{2}-\d{2}$/.test(to))) throw new ApiFault('BAD_REQUEST', 'Report dates must use yyyy-mm-dd.')
       if (action === 'reports.collection') {
         if (!permissionsFor(user).includes('*') && !permissionsFor(user).includes('FINANCE_VIEW')) throw new ApiFault('FORBIDDEN', 'Finance view permission is required.')
-        let query = admin.from('payments').select('payment_date,amount,payment_mode,status').neq('status', 'VOID').order('payment_date')
-        if (from) query = query.gte('payment_date', from)
-        if (to) query = query.lte('payment_date', to)
-        const { data, error } = await query.limit(10000)
-        if (error) throw error
+        const data = await fetchAll(() => {
+          let query = admin.from('payments').select('id,payment_date,amount,payment_mode,status').neq('status', 'VOID').order('payment_date').order('id')
+          if (from) query = query.gte('payment_date', from)
+          if (to) query = query.lte('payment_date', to)
+          return query
+        })
         const byMonth = new Map<string, number>(), byMode = new Map<string, number>()
         let total = 0
         for (const p of data || []) { const amount = Number(p.amount) || 0, month = p.payment_date.slice(0, 7), mode = p.payment_mode || 'Other'
@@ -3981,14 +4060,15 @@ Deno.serve(async (request) => {
       }
       if (action === 'reports.dues') {
         if (!permissionsFor(user).includes('*') && !permissionsFor(user).includes('FINANCE_VIEW')) throw new ApiFault('FORBIDDEN', 'Finance view permission is required.')
-        let query = admin.from('invoices').select('*').neq('status', 'CANCELLED').order('due_date')
-        const month = requireText(payload.month, 'Month', 7); if (month) query = query.eq('month', month)
-        const { data: invoices, error } = await query.limit(10000); if (error) throw error
+        const month = requireText(payload.month, 'Month', 7)
+        const invoices = await fetchAll(() => {
+          let query = admin.from('invoices').select('*').neq('status', 'CANCELLED').order('due_date').order('id')
+          return month ? query.eq('month', month) : query
+        })
         const eligible = (invoices || []).map((i) => ({ invoice: i, status: invoiceStatus(i.total_amount, i.paid_amount, i.due_date, i.status), balance: Math.max(0, Number(i.total_amount) - Number(i.paid_amount)) }))
           .filter((x) => x.status !== 'CANCELLED' && x.balance > 0)
         const ids = [...new Set(eligible.map((x) => x.invoice.student_id))]
-        const { data: students, error: stError } = ids.length ? await admin.from('students').select('id,name,current_class,mobile,parent_mobile').in('id', ids) : { data: [], error: null }
-        if (stError) throw stError
+        const students = await selectIn(ids, (chunk) => admin.from('students').select('id,name,current_class,mobile,parent_mobile').in('id', chunk))
         const names = new Map((students || []).map((s) => [s.id, s])), groups = new Map<string, { balance: number; overdue: number; invoices: number; oldestDue: string; subjects: Set<string> }>()
         for (const x of eligible) {
           const inv = x.invoice, g = groups.get(inv.student_id) || { balance: 0, overdue: 0, invoices: 0, oldestDue: '', subjects: new Set<string>() }
@@ -4077,23 +4157,27 @@ Deno.serve(async (request) => {
         const month = requireText(payload.month, 'Month', 7, true)
         if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new ApiFault('BAD_REQUEST', 'Pick a valid month (YYYY-MM).')
         const monthStart = `${month}-01`, monthEnd = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).toISOString().slice(0, 10)
-        const [{ data: teachers, error: tError }, { data: assignments, error: aError }, { data: students, error: sError },
-          { data: feeRows, error: feeError }, { data: studentFees, error: studentFeeError }, { data: settings }] = await Promise.all([
+        // Every page is read (no silent 1,000-row cut-off); assignments are narrowed
+        // to those that can overlap the month, and the exact rules below still apply.
+        const [{ data: teachers, error: tError }, assignments, students,
+          { data: feeRows, error: feeError }, studentFees, { data: settings }] = await Promise.all([
           admin.from('teachers').select('id,status').eq('status', 'Active'),
-          admin.from('student_subjects').select('*'), admin.from('students').select('id,name,status'),
+          fetchAll(() => admin.from('student_subjects').select('*')
+            .or(`start_date.is.null,start_date.lte.${monthEnd}`).or(`end_date.is.null,end_date.gte.${monthStart}`).order('id')),
+          fetchAll(() => admin.from('students').select('id,name,status').order('id')),
           admin.from('fee_structure').select('subject_id,amount,academic_year,status').eq('item_type', 'SUBJECT').eq('status', 'Active'),
-          admin.from('student_fees').select('*').eq('status', 'Active'),
+          fetchAll(() => admin.from('student_fees').select('*').eq('status', 'Active').order('id')),
           admin.from('settings').select('setting_key,value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle(),
         ])
-        if (tError) throw tError; if (aError) throw aError; if (sError) throw sError
-        if (feeError) throw feeError; if (studentFeeError) throw studentFeeError
+        if (tError) throw tError
+        if (feeError) throw feeError
         const academicYear = String(settings?.value || `${month.slice(0, 4)}-${Number(month.slice(0, 4)) + 1}`)
-        const [{ data: existing, error: eError }, { data: subjects, error: subError }, { data: batches, error: batchError }, { data: invoices, error: invoiceError }] = await Promise.all([
-          admin.from('teacher_income').select('*').eq('month', month).eq('academic_year', academicYear),
+        const [existing, { data: subjects, error: subError }, { data: batches, error: batchError }, invoices] = await Promise.all([
+          fetchAll(() => admin.from('teacher_income').select('*').eq('month', month).eq('academic_year', academicYear).order('id')),
           admin.from('subjects').select('id,name'), admin.from('batches').select('id,name'),
-          admin.from('invoices').select('id,student_id,line_items,status').eq('month', month).eq('academic_year', academicYear),
+          fetchAll(() => admin.from('invoices').select('id,student_id,line_items,status').eq('month', month).eq('academic_year', academicYear).order('id')),
         ])
-        if (eError) throw eError; if (subError) throw subError; if (batchError) throw batchError; if (invoiceError) throw invoiceError
+        if (subError) throw subError; if (batchError) throw batchError
         const activeStudentIds = new Set((students || []).filter((s) => String(s.status).toUpperCase() === 'ACTIVE').map((s) => s.id))
         const teacherIds = new Set((teachers || []).map((t) => t.id))
         const studentNames = new Map((students || []).map((s) => [s.id, s.name]))
@@ -4197,9 +4281,11 @@ Deno.serve(async (request) => {
       }
       if (action === 'teacherIncome.list') {
         const month = requireText(payload.month, 'Month', 7), teacherId = requireText(payload.teacherId, 'Teacher ID', 60)
-        let query = admin.from('teacher_income').select('*').order('month', { ascending: false }).order('teacher_id')
-        if (month) query = query.eq('month', month); if (teacherId) query = query.eq('teacher_id', teacherId)
-        const { data: rows, error } = await query.limit(5000); if (error) throw error
+        const rows = await fetchAll(() => {
+          let query = admin.from('teacher_income').select('*').order('month', { ascending: false }).order('teacher_id').order('id')
+          if (month) query = query.eq('month', month); if (teacherId) query = query.eq('teacher_id', teacherId)
+          return query
+        })
         const incomeRows = rows || [], ids = incomeRows.map((r) => r.id), paid = await paidMap(ids)
         const [{ data: teachers }, { data: subjects }] = await Promise.all([admin.from('teachers').select('id,name'), admin.from('subjects').select('id,name')])
         const tm = new Map((teachers || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name]))
