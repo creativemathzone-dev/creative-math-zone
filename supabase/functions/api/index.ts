@@ -836,6 +836,7 @@ Deno.serve(async (request) => {
       'studentSubjects.assign': 'STUDENT_EDIT', 'studentSubjects.end': 'STUDENT_EDIT', 'studentSubjects.updateFee': 'STUDENT_EDIT',
       'studentSubjects.updateStart': 'STUDENT_EDIT', 'students.finance': 'FINANCE_VIEW',
       'students.delete': 'STUDENT_EDIT', 'settings.studentDelete.get': 'SETTINGS_VIEW', 'settings.studentDelete.set': 'SETTINGS_EDIT',
+      'push.subscribe': 'SELF_VIEW', 'push.unsubscribe': 'SELF_VIEW', 'reminders.list': 'STUDENT_VIEW', 'reminders.mark': 'STUDENT_VIEW',
       'doubts.list': 'SELF_VIEW', 'doubts.get': 'SELF_VIEW', 'doubts.create': 'SELF_VIEW', 'doubts.answer': 'SELF_VIEW',
       'doubts.claim': 'SELF_VIEW', 'doubts.review': 'SELF_VIEW', 'doubts.resolve': 'SELF_VIEW', 'doubts.meToo': 'SELF_VIEW',
       'doubts.hide': 'SELF_VIEW', 'doubts.leaderboard': 'SELF_VIEW', 'doubts.stats': 'SELF_VIEW',
@@ -2991,6 +2992,52 @@ Deno.serve(async (request) => {
         }) } })
     }
 
+    /* ---------------- Push notifications & reminder list ---------------- */
+    if (action === 'push.subscribe' || action === 'push.unsubscribe') {
+      const sub = payload.subscription && typeof payload.subscription === 'object' ? payload.subscription : {}
+      const endpoint = requireText(sub.endpoint ?? payload.endpoint, 'Endpoint', 1000, true)
+      if (!/^https:\/\//.test(endpoint)) throw new ApiFault('BAD_REQUEST', 'Invalid notification endpoint.')
+      if (action === 'push.unsubscribe') {
+        await admin.from('push_subscriptions').delete().eq('endpoint', endpoint).eq('app_user_id', user.id)
+        return response({ ok: true, data: { removed: true } })
+      }
+      const p256dh = requireText(sub.keys?.p256dh, 'Key', 200, true), authKey = requireText(sub.keys?.auth, 'Key', 100, true)
+      const { error } = await admin.from('push_subscriptions').upsert({ app_user_id: user.id,
+        student_id: user.user_type === 'STUDENT' ? user.linked_id : null, endpoint, p256dh, auth: authKey,
+        user_agent: String(request.headers.get('user-agent') || '').slice(0, 300), fail_count: 0 }, { onConflict: 'endpoint' })
+      if (error) throw error
+      return response({ ok: true, data: { subscribed: true } })
+    }
+
+    if (action === 'reminders.list') {
+      const status = String(payload.status || 'PENDING').toUpperCase()
+      const kind = String(payload.kind || '').toUpperCase()
+      let query = admin.from('reminder_log').select('*').order('created_at', { ascending: false }).limit(300)
+      if (status === 'PENDING') query = query.eq('whatsapp_status', 'PENDING')
+      else query = query.neq('whatsapp_status', 'PENDING').gte('created_at', new Date(Date.now() - 14 * 86400000).toISOString())
+      if (['FEE', 'ABSENT'].includes(kind)) query = query.eq('kind', kind)
+      const { data, error } = await query
+      if (error) throw error
+      const ids = [...new Set((data || []).map((r) => r.student_id))]
+      const { data: students } = await admin.from('students').select('id,name,current_class').in('id', ids.length ? ids : ['__none__'])
+      const sm = new Map((students || []).map((s) => [s.id, s]))
+      const { count: pendingCount } = await admin.from('reminder_log').select('id', { count: 'exact', head: true }).eq('whatsapp_status', 'PENDING')
+      return response({ ok: true, data: { pending: pendingCount || 0, rows: (data || []).map((r) => ({ ID: r.id, Kind: r.kind, Stage: r.stage,
+        StudentID: r.student_id, StudentName: sm.get(r.student_id)?.name || r.student_id, ClassName: sm.get(r.student_id)?.current_class || '',
+        Title: r.title, Message: r.message, Phone: r.phone, PushDevices: r.push_devices, PushDelivered: r.push_delivered,
+        WhatsApp: r.whatsapp_status, CreatedAt: r.created_at, HandledAt: r.handled_at })) } })
+    }
+
+    if (action === 'reminders.mark') {
+      const ids = Array.isArray(payload.ids) ? payload.ids.map((x: unknown) => String(x)).slice(0, 300) : [requireText(payload.id, 'Reminder', 60, true)]
+      const status = String(payload.status || '').toUpperCase()
+      if (!['SENT', 'SKIPPED', 'PENDING'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Choose SENT, SKIPPED or PENDING.')
+      const { error } = await admin.from('reminder_log').update({ whatsapp_status: status,
+        handled_at: status === 'PENDING' ? null : new Date().toISOString(), handled_by: status === 'PENDING' ? null : user.id }).in('id', ids)
+      if (error) throw error
+      return response({ ok: true, data: { updated: ids.length } })
+    }
+
     /* ---------------- Doubt portal ---------------- */
     if (action.startsWith('doubts.')) {
       const isStudent = user.user_type === 'STUDENT', isTeacher = user.user_type === 'TEACHER', isAdmin = user.user_type === 'ADMIN'
@@ -4311,7 +4358,7 @@ Deno.serve(async (request) => {
       for (const [key, raw] of Object.entries(changes)) {
         if (!existing.has(key) || key === 'STUDENT_DELETE_ENABLED') throw new ApiFault('BAD_REQUEST', `Unknown setting: ${key}`)
         const value = requireText(raw, key, 300, key !== 'SUBJECT_BLOCKED_PAIRS')
-        if (['REGISTRATION_ENABLED', 'AUTO_INVOICE_ENABLED', 'AUTO_BACKUP_ENABLED'].includes(key) && !['TRUE', 'FALSE'].includes(value.toUpperCase())) throw new ApiFault('BAD_REQUEST', `${key} must be TRUE or FALSE.`)
+        if (['REGISTRATION_ENABLED', 'AUTO_INVOICE_ENABLED', 'AUTO_BACKUP_ENABLED', 'FEE_REMINDERS_ENABLED', 'ABSENT_ALERTS_ENABLED'].includes(key) && !['TRUE', 'FALSE'].includes(value.toUpperCase())) throw new ApiFault('BAD_REQUEST', `${key} must be TRUE or FALSE.`)
         if (value !== existing.get(key)) {
           const { error } = await admin.from('settings').update({ value, updated_at: new Date().toISOString(), updated_by: user.id }).eq('setting_key', key)
           if (error) throw error

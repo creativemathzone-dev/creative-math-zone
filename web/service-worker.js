@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cmz-pwa-v12';
+const CACHE_NAME = 'cmz-pwa-v13';
 const SHELL_FILES = [
   './',
   './index.html',
@@ -12,6 +12,7 @@ const SHELL_FILES = [
   './config.js',
   './passkeys.js',
   './doubts.js',
+  './push.js',
   './pwa.js',
   './installed-app.js',
   './manifest.webmanifest',
@@ -35,6 +36,29 @@ self.addEventListener('activate', event => {
       .then(keys => Promise.all(keys.filter(key => key.startsWith('cmz-pwa-') && key !== CACHE_NAME).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
   );
+});
+
+// Fee reminders and absent alerts (free Web Push).
+self.addEventListener('push', event => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = { body: event.data ? event.data.text() : '' }; }
+  const base = new URL('./', self.registration.scope);
+  event.waitUntil(self.registration.showNotification(data.title || 'Creative Math Zone', {
+    body: data.body || '',
+    icon: new URL('icons/icon-192.png', base).href,
+    badge: new URL('icons/icon-192.png', base).href,
+    tag: data.tag || undefined,
+    data: { url: data.url || new URL('student.html', base).href }
+  }));
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || new URL('student.html', self.registration.scope).href;
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) if (c.url.split('#')[0] === target.split('#')[0] && 'focus' in c) return c.focus();
+    return self.clients.openWindow(target);
+  }));
 });
 
 self.addEventListener('fetch', event => {

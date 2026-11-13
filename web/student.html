@@ -12,6 +12,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
 <script src="passkeys.js"></script>
 <script src="doubts.js"></script>
+<script src="push.js"></script>
 <title>Creative Math Zone · Student</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -549,6 +550,7 @@ function startApp() {
   $('#who-class').textContent = (S.user.profile && S.user.profile.CurrentClass ? 'Class '+S.user.profile.CurrentClass : '');
   $('#nav-sid').textContent = S.user.linkedId;
   buildNav(); show('app'); go('dashboard'); startClassChangeWatcher();
+  if (window.CMZPush) window.CMZPush.refresh(api);
 }
 $('#login-form').addEventListener('submit', async ev => {
   ev.preventDefault();
@@ -650,6 +652,7 @@ VIEWS.dashboard = async main => {
 
   main.innerHTML =
     '<div class="head"><h1>Welcome, '+esc(st.Name)+'</h1><p>'+esc(st.StudentID)+' · Class '+esc(st.CurrentClass)+' · '+esc(batchLabel(st.CurrentBatch))+'</p></div>' +
+    '<div id="push-card"></div>' +
 
     '<div class="stats">' +
       '<div class="card stat" style="display:flex;gap:1rem;align-items:center"><div class="ring" style="--p:'+s.attendancePct+'"><b>'+s.attendancePct+'%</b></div><div><b style="font:700 1.1rem var(--display);color:var(--navy)">Attendance</b><span class="muted" style="font-size:.85rem">last 30 days</span></div></div>' +
@@ -662,7 +665,38 @@ VIEWS.dashboard = async main => {
     homeworkHtml +
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Latest notices</h2>'+noticesHtml+'</div>';
   main.addEventListener('click', ev => { const b = ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
+  renderPushCard($('#push-card', main), true);
 };
+
+/* ---- free fee/absent alerts on this phone ---- */
+async function renderPushCard(el, compact) {
+  if (!el || !window.CMZPush) return;
+  const state = await window.CMZPush.state();
+  if (compact && state === 'on') { el.innerHTML = ''; return; }
+  if (compact && state === 'unsupported') { el.innerHTML = ''; return; }
+  let dismissed = false; try { dismissed = compact && localStorage.getItem('cmz_push_dismissed') === '1'; } catch (e) {}
+  if (dismissed) { el.innerHTML = ''; return; }
+  const text = {
+    on: 'Notifications are <b>on</b> for this phone. You will get fee reminders and absent alerts here.',
+    off: 'Get <b>fee reminders</b> and <b>absent alerts</b> on this phone, free. Tap the button and choose <b>Allow</b>.',
+    blocked: 'Notifications are blocked for this site. Open the browser’s site settings (the lock icon next to the address), allow Notifications, then reload.',
+    'ios-install': 'On iPhone: tap <b>Share → Add to Home Screen</b>, open Creative Math Zone from the Home Screen, then turn on notifications here.',
+    unsupported: 'This browser cannot show notifications. Open the portal in Chrome to get alerts.'
+  }[state];
+  el.innerHTML = '<div class="card" style="border-left:4px solid var(--pencil)"><h2 style="font-size:1.1rem;margin-bottom:.4rem">🔔 Fee & attendance alerts</h2><p style="margin:0 0 .7rem">' + text + '</p>' +
+    '<div style="display:flex;gap:.5rem;flex-wrap:wrap">' +
+    (state === 'off' ? '<button class="btn primary" type="button" data-push="on">Turn on alerts</button>' : '') +
+    (state === 'on' ? '<button class="btn" type="button" data-push="test">Send a test</button><button class="btn" type="button" data-push="off">Turn off on this phone</button>' : '') +
+    (compact ? '<button class="btn" type="button" data-push="later">Not now</button>' : '') + '</div></div>';
+  el.querySelectorAll('[data-push]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
+    const what = b.dataset.push;
+    if (what === 'later') { try { localStorage.setItem('cmz_push_dismissed', '1'); } catch (e) {} el.innerHTML = ''; return; }
+    if (what === 'on') { await window.CMZPush.enable(api); toast('Alerts are on for this phone.'); await window.CMZPush.test(S.token).catch(() => {}); }
+    if (what === 'off') { await window.CMZPush.disable(api); toast('Alerts turned off for this phone.'); }
+    if (what === 'test') { const r = await window.CMZPush.test(S.token); toast(r.delivered ? 'Test sent — check your notifications.' : 'No phone is registered yet. Turn alerts on again.', !r.delivered); }
+    renderPushCard(el, compact);
+  })));
+}
 
 function batchLabel(id) { return id ? id : 'No batch'; }
 
@@ -855,6 +889,7 @@ VIEWS.profile = async main => {
   const p = me.profile || {};
   const rows = (p) => Object.keys(p).map(k => '<dt>'+esc(k)+'</dt><dd>'+esc(p[k]||'—')+'</dd>').join('');
   main.innerHTML = '<div class="head"><h1>Profile</h1><p>Keep your contact details up to date.</p></div>' +
+    '<div id="push-card-profile"></div>' +
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Student information</h2>' +
     '<dl class="kv">'+
       '<dt>Student ID</dt><dd><b>'+esc(p.StudentID||'')+'</b></dd>' +
@@ -886,6 +921,7 @@ VIEWS.profile = async main => {
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Passkey sign-in</h2><p class="muted">Use your device passkey: fingerprint, face, device PIN, or a security key.</p><div id="passkey-list"></div><button class="btn primary" id="passkey-add" type="button">Add a passkey on this device</button></div>';
 
   if(window.CMZPasskey)window.CMZPasskey.renderManager($('#passkey-list'),$('#passkey-add'),esc,toast);
+  renderPushCard($('#push-card-profile', main), false);
 
   $('#prof-save').addEventListener('click', ev => busy(ev.target, async () => {
     const f=ev.target.form; const changes={};

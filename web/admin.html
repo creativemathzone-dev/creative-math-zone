@@ -672,6 +672,7 @@ const NAV = [
   ['academic', 'Subjects, batches, rooms', 'MASTER_VIEW'],
   ['timetable', 'Timetable', 'MASTER_VIEW'],
   ['attendance', 'Attendance', 'STUDENT_VIEW'],
+  ['reminders', 'Reminders', 'STUDENT_VIEW'],
   ['notices', 'Notices', 'NOTICE_VIEW'],
   ['doubts', 'Doubts', null],
   ['fees', 'Fee structure', 'FINANCE_VIEW'],
@@ -708,6 +709,47 @@ $('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open
 const VIEWS = {};
 
 VIEWS.doubts = main => window.CMZDoubts.view(main, { api, esc, toast, busy, openDlg, closeDlg, fmtTime, role:'ADMIN', token:()=>S.token });
+
+/* ---------- reminders: free one-tap WhatsApp list ---------- */
+VIEWS.reminders = async main => {
+  const st = VIEWS.reminders.st || (VIEWS.reminders.st = { status: 'PENDING', kind: '', hideReached: true });
+  const r = await api('reminders.list', { status: st.status, kind: st.kind });
+  let rows = r.rows;
+  if (st.status === 'PENDING' && st.hideReached) rows = rows.filter(x => !x.PushDelivered);
+  const hidden = r.rows.length - rows.length;
+  const kindPill = x => x.Kind === 'ABSENT' ? '<span class="pill bad">Absent</span>' : '<span class="pill warn">' + esc(x.Stage === 'BEFORE_3' ? 'Fee due in 3 days' : x.Stage === 'DUE' ? 'Fee due today' : 'Fee overdue') + '</span>';
+  const waState = x => x.WhatsApp === 'SENT' ? '<span class="pill ok">Sent on WhatsApp</span>' : x.WhatsApp === 'SKIPPED' ? '<span class="pill">Skipped</span>' : x.WhatsApp === 'NO_PHONE' ? '<span class="pill bad">No phone number</span>' : '';
+  main.innerHTML = '<div class="head"><div><h1>Reminders</h1><p>Fee reminders (3 days before, due day, weekly while overdue) are made at 9 AM; absent alerts after each class closes. Students with app alerts on get them automatically. For the rest, tap <b>WhatsApp</b> — it opens your WhatsApp with the message ready; just press Send.</p></div></div>' +
+    '<div class="row" style="gap:.5rem;flex-wrap:wrap;margin-bottom:1rem">' +
+      '<select id="rm-status"><option value="PENDING"' + (st.status === 'PENDING' ? ' selected' : '') + '>To send (' + r.pending + ')</option><option value="DONE"' + (st.status !== 'PENDING' ? ' selected' : '') + '>Done (last 14 days)</option></select>' +
+      '<select id="rm-kind"><option value="">Fees and absences</option><option value="FEE"' + (st.kind === 'FEE' ? ' selected' : '') + '>Fees only</option><option value="ABSENT"' + (st.kind === 'ABSENT' ? ' selected' : '') + '>Absences only</option></select>' +
+      (st.status === 'PENDING' ? '<label style="display:flex;gap:.4rem;align-items:center"><input type="checkbox" id="rm-hide"' + (st.hideReached ? ' checked' : '') + '> Hide ones already delivered by app' + (hidden ? ' (' + hidden + ')' : '') + '</label>' : '') +
+      (st.status === 'PENDING' && rows.length ? '<button class="btn" id="rm-skip-all" type="button">Skip all shown</button>' : '') +
+    '</div>' +
+    (rows.length ? rows.map(x => '<div class="card" data-rm="' + esc(x.ID) + '"><div style="display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap"><div>' + kindPill(x) + ' <b>' + studentProfileLink(x.StudentID, x.StudentName) + '</b>' + (x.ClassName ? ' <span class="muted">· Class ' + esc(x.ClassName) + '</span>' : '') + '</div>' +
+      '<span class="muted" style="font-size:.85rem">' + esc(new Date(x.CreatedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })) + '</span></div>' +
+      '<p style="margin:.5rem 0;white-space:pre-wrap">' + esc(x.Message) + '</p>' +
+      '<div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">' +
+        (x.PushDelivered ? '<span class="pill ok">📱 Delivered by app</span>' : x.PushDevices ? '<span class="pill">📱 App alert failed</span>' : '<span class="muted" style="font-size:.85rem">No app alerts on this student’s phone</span>') + ' ' + waState(x) +
+        (x.WhatsApp === 'PENDING' && x.Phone ? '<button class="btn primary small" type="button" data-wa="' + esc(x.ID) + '">WhatsApp ' + esc(x.Phone) + '</button><button class="btn small" type="button" data-skip="' + esc(x.ID) + '">Skip</button>' : '') +
+        (x.WhatsApp === 'SENT' || x.WhatsApp === 'SKIPPED' ? '<button class="btn small" type="button" data-undo="' + esc(x.ID) + '">Move back to “To send”</button>' : '') +
+      '</div></div>').join('')
+      : '<div class="card empty"><b>' + (st.status === 'PENDING' ? 'Nothing to send right now' : 'Nothing here yet') + '</b>' + (st.status === 'PENDING' ? 'New reminders appear here automatically.' : '') + '</div>');
+  const reload = () => go('reminders');
+  $('#rm-status', main).addEventListener('change', e => { st.status = e.target.value; reload(); });
+  $('#rm-kind', main).addEventListener('change', e => { st.kind = e.target.value; reload(); });
+  const hide = $('#rm-hide', main); if (hide) hide.addEventListener('change', e => { st.hideReached = e.target.checked; reload(); });
+  const mark = async (ids, status) => api('reminders.mark', { ids, status });
+  $$('[data-wa]', main).forEach(b => b.addEventListener('click', () => {
+    const x = rows.find(y => y.ID === b.dataset.wa); if (!x) return;
+    window.open('https://wa.me/91' + x.Phone + '?text=' + encodeURIComponent(x.Message), '_blank', 'noopener');
+    busy(b, async () => { await mark([x.ID], 'SENT'); const card = b.closest('[data-rm]'); if (card) card.remove(); toast('Marked as sent.'); });
+  }));
+  $$('[data-skip]', main).forEach(b => b.addEventListener('click', () => busy(b, async () => { await mark([b.dataset.skip], 'SKIPPED'); const card = b.closest('[data-rm]'); if (card) card.remove(); })));
+  $$('[data-undo]', main).forEach(b => b.addEventListener('click', () => busy(b, async () => { await mark([b.dataset.undo], 'PENDING'); reload(); })));
+  const all = $('#rm-skip-all', main);
+  if (all) all.addEventListener('click', () => { if (!confirm('Skip all ' + rows.length + ' reminders shown?')) return; busy(all, async () => { await mark(rows.map(x => x.ID), 'SKIPPED'); reload(); }); });
+};
 
 /* ---------- dashboard ---------- */
 VIEWS.dashboard = async main => {

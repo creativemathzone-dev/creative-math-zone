@@ -117,6 +117,22 @@ test('weekly backup goes to Google Drive (never GitHub), Super Admin only, keeps
   }
 });
 
+test('free reminders: correct fee schedule, cron secret, no duplicates, no paid services', async () => {
+  const fn = await readFile(new URL('../supabase/functions/notify/index.ts', import.meta.url), 'utf8');
+  assert.match(fn, /days === -3 \? 'BEFORE_3' : days === 0 \? 'DUE' : days > 0 && days % 7 === 0 \? `OVERDUE_W\$\{days \/ 7\}`/);
+  assert.match(fn, /req\.headers\.get\('x-archive-secret'\) !== secret/);
+  assert.match(fn, /onConflict: 'kind,ref_id,student_id,stage', ignoreDuplicates: true/);
+  assert.match(fn, /FEE_REMINDERS_ENABLED/);
+  assert.match(fn, /ABSENT_ALERTS_ENABLED/);
+  // Only closed classes from the last few hours, so the first run cannot flood old absences.
+  assert.match(fn, /Date\.now\(\) - 6 \* 3600000/);
+  assert.doesNotMatch(fn, /twilio|graph\.facebook\.com|msg91|interakt|wati/i);
+  const sql = await readFile(new URL('../supabase/migrations/20261114020000_reminders_and_push.sql', import.meta.url), 'utf8');
+  assert.match(sql, /'backup_runs','app_secrets','push_subscriptions'/);
+  const sw = await readFile(new URL('../web/service-worker.js', import.meta.url), 'utf8');
+  assert.match(sw, /addEventListener\('push'/);
+});
+
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {
   assert.match(api, /'teacherIncome\.generate':\s*'TEACHER_INCOME_MANAGE'/);
   const block = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");
