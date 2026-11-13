@@ -2734,12 +2734,37 @@ VIEWS.settings = async main => {
     '<div class="card"><form id="set-f">' + rows.map(r => '<label class="f"><span>' + esc(r.description || r.key) + '</span><input name="' + esc(r.key) + '" value="' + esc(r.value) + '"' + (edit ? '' : ' readonly') + '><small>' + esc(r.key) +
       (r.key === 'SUBJECT_BLOCKED_PAIRS' ? ' — subject IDs: ' + L('subjects').map(s => s.SubjectID + ' = ' + s.SubjectName).join(', ') : '') + '</small></label>').join('') + '</form></div>' +
     (superAdmin?'<section class="section"><h2>Homework file archive</h2><div class="card"><p>Connect the centre Google account used to archive homework and student submissions after deadlines. Older accounts stay connected so archived files remain available. Use transfer to move an old account’s archive to the current account; it disconnects the old account after all files move.</p><div id="drive-connections">'+(driveConnections.length?driveConnections.map(c=>'<div class="row" style="padding:.65rem 0;border-top:1px solid var(--line)"><b>'+esc(c.account_email)+'</b><span class="pill '+(c.is_primary?'ok':'')+'">'+(c.is_primary?'Current archive account':'Previous archive account')+'</span>'+(c.is_primary?'':'<button class="btn small" data-drive-transfer="'+esc(c.id)+'">Transfer archive and disconnect</button>')+'</div>').join(''):'<p class="muted">No Google Drive account connected yet.</p>')+'</div><button class="btn primary" id="drive-connect">Connect / change Google account</button><p class="muted" style="margin-bottom:0">Files remain in Supabase if Drive is not connected or an upload fails. Drive copies are kept until a teacher deletes them from the homework page.</p></div></section>':'') +
+    (superAdmin ? '<section class="section"><h2>AI assistant (free)</h2><div class="card"><p>Teachers can ask for an <b>AI draft solution</b> on a doubt, check it and post it. Uses Google Gemini’s free plan. Only the question and its photos are sent — never student names or numbers.</p>' +
+      '<div id="ai-status"><span class="muted">Checking…</span></div>' +
+      '<details style="margin-top:.6rem"><summary><b>How to get the free key</b></summary><ol style="margin:.5rem 0 0 1.1rem;padding:0"><li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and sign in with the centre Google account.</li><li>Click <b>Create API key</b> and copy it.</li><li><b>Do not add billing or a card</b> — without billing Google cannot charge anything; the AI simply pauses when the free daily quota is used.</li><li>Paste it below and click Save.</li></ol></details>' +
+      '<form id="ai-key-form" style="margin-top:.7rem"><label class="f"><span>Gemini API key</span><input name="key" type="password" autocomplete="off" placeholder="Paste the key here"></label>' +
+      '<div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn primary" id="ai-key-save" type="button">Save key</button><button class="btn" id="ai-key-remove" type="button">Remove key</button></div></form>' +
+      '<p class="muted" style="margin-bottom:0;font-size:.86rem">Switch off with <b>AI_DOUBT_DRAFTS_ENABLED</b> and change the daily cap with <b>AI_DAILY_LIMIT</b> in the list above.</p></div></section>' : '') +
     (superAdmin ? '<section class="section"><h2>Database backups</h2><div class="card"><p>Every Sunday at 2 AM the whole database is saved as one compressed file in the connected Google Drive (folder “Creative Math Zone Backups”). The newest 8 backups are kept. Turn it off with <b>AUTO_BACKUP_ENABLED</b> above. Invoices are also generated automatically on the 1st of each month at 6 AM (<b>AUTO_INVOICE_ENABLED</b>).</p>' +
       '<div id="backup-list"><span class="muted">Loading backups…</span></div><button class="btn primary" id="backup-now" type="button">Back up now</button></div></section>' : '') +
     (superAdmin ? '<section class="section"><h2>Danger zone</h2><div class="card"><p><b>Permanent student delete</b> is <span class="pill ' + (delOn ? 'bad' : 'ok') + '">' + (delOn ? 'ON' : 'OFF') + '</span></p>' +
       '<p class="muted">When ON, a “Delete student” button appears on each student’s page. It erases the student and all their records (subjects, attendance, invoices, payments, receipts, homework, history and login) forever. Keep it OFF when you are not cleaning up data.</p>' +
       '<form id="del-toggle"><label class="f"><span>Your admin password</span><input name="password" type="password" autocomplete="current-password"></label>' +
       '<button class="btn ' + (delOn ? 'primary' : 'danger') + '" id="del-toggle-go">' + (delOn ? 'Turn OFF' : 'Turn ON') + '</button></form></div></section>' : '');
+  if (superAdmin) {
+    const showAi = async () => {
+      const s = await api('ai.status');
+      $('#ai-status').innerHTML = s.configured
+        ? '<p style="margin:0"><span class="pill ok">Key saved</span> ' + (s.enabled ? '<span class="pill ok">ON</span>' : '<span class="pill bad">OFF</span>') +
+          ' &nbsp;Used today: <b>' + s.usedToday + '</b> of ' + s.limit + ' drafts · model ' + esc(s.model) + (s.fromServerSecret ? ' · key from Supabase secret' : '') + '</p>'
+        : '<p style="margin:0"><span class="pill warn">Not set up</span> Add the free key below to turn on AI drafts.</p>';
+      $('#ai-key-remove').hidden = !s.configured || s.fromServerSecret;
+    };
+    showAi().catch(() => { $('#ai-status').innerHTML = '<p class="muted">Could not load AI status.</p>'; });
+    $('#ai-key-save').addEventListener('click', ev => busy(ev.target, async () => {
+      const input = $('#ai-key-form [name=key]'), key = input.value.trim();
+      if (!key) { toast('Paste the key first.', true); return; }
+      ev.target.textContent = 'Checking key with Google…';
+      try { await api('ai.setKey', { key }); } finally { ev.target.textContent = 'Save key'; }
+      input.value = ''; toast('AI key saved. Teachers now see “Get AI draft” on doubts.'); await showAi();
+    }));
+    $('#ai-key-remove').addEventListener('click', ev => { if (!confirm('Remove the AI key? AI drafts will stop until a new key is added.')) return; busy(ev.target, async () => { await api('ai.setKey', { remove: true }); toast('AI key removed.'); await showAi(); }); });
+  }
   if (superAdmin) {
     const cfg = window.CMZ_CONFIG || {}, backupUrl = cfg.supabaseUrl.replace(/\/$/, '') + '/functions/v1/backup-drive';
     const backupHeaders = { 'Content-Type': 'application/json', apikey: cfg.supabasePublishableKey, Authorization: 'Bearer ' + S.token };

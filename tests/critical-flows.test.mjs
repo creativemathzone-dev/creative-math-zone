@@ -147,6 +147,23 @@ test('large tables are read page by page (no silent 1,000-row cut-off) and invoi
   assert.doesNotMatch(api, /\.limit\(10000\)/);
 });
 
+test('AI drafts: teachers only, no student personal data sent, daily cap, key never returned', async () => {
+  const fn = await readFile(new URL('../supabase/functions/doubt-files/index.ts', import.meta.url), 'utf8');
+  const draft = fn.slice(fn.indexOf('async function aiDraft('), fn.indexOf('Deno.serve('));
+  assert.match(draft, /if \(!\['TEACHER', 'ADMIN'\]\.includes\(user\.user_type\)\)/);
+  assert.match(draft, /admin\.rpc\('ai_take'/);
+  // The prompt is built only from subject, class, chapter, title, body - not the student record.
+  const prompt = draft.slice(draft.indexOf('const text = ['), draft.indexOf("].filter(Boolean).join('\\n')"));
+  assert.doesNotMatch(prompt, /student_id|students|\.name\b(?!\s*\|\|\s*doubt\.subject_id)|mobile|phone|parent/);
+  const get = actionBlock("if (action === 'doubts.get')", "if (action === 'doubts.create')");
+  assert.match(get, /const aiAllowed = teachesIt\(d\) \|\| \(isAdmin && user\.role === 'SUPER_ADMIN'\)/);
+  const status = actionBlock("if (action === 'ai.status' || action === 'ai.setKey')", '/* ---------------- Push notifications');
+  assert.doesNotMatch(status.slice(status.indexOf("admin.from('app_secrets').select('key,created_at')")), /value:\s*stored|stored\.value|key:\s*key\b.*response/);
+  assert.match(status, /user\.role !== 'SUPER_ADMIN'/);
+  const sql = await readFile(new URL('../supabase/migrations/20261114040000_ai_doubt_drafts.sql', import.meta.url), 'utf8');
+  assert.match(sql, /calls < greatest\(p_limit, 0\)/);
+});
+
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {
   assert.match(api, /'teacherIncome\.generate':\s*'TEACHER_INCOME_MANAGE'/);
   const block = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");

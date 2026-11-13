@@ -91,6 +91,127 @@ async function canView(admin: any, user: any, doubt: any, answer: any) {
   return !!st && st.current_class === doubt.class_name && (subs || []).length > 0
 }
 
+// Load a stored photo from Google Drive (or the temporary Supabase copy).
+// Throws a ready-made error Response when it cannot be loaded.
+async function photoBlob(admin: any, file: any): Promise<Blob> {
+  if (file.drive_file_id && file.drive_connection_id) {
+    const { data: connection } = await admin.from('google_drive_connections').select('*').eq('id', file.drive_connection_id).maybeSingle()
+    if (!connection) throw json({ error: 'The Google Drive account for this photo is no longer connected.' }, 410)
+    let access = ''
+    try { if (connection.refresh_token_ciphertext && !connection.disconnected_at) access = await accessToken(connection) } catch { access = '' }
+    if (!access) {
+      // Old login expired: use the current login of the same Google account and re-point the photo.
+      const current = await primaryDrive(admin)
+      if (!current || String(current.account_email).toLowerCase() !== String(connection.account_email).toLowerCase())
+        throw json({ error: 'The Google Drive login for this photo has expired. Reconnect Google Drive in Settings.' }, 410)
+      access = await accessToken(current)
+      await admin.from('doubt_files').update({ drive_connection_id: current.id }).eq('id', file.id)
+    }
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.drive_file_id)}?alt=media`,
+      { headers: { Authorization: `Bearer ${access}` } })
+    if (!res.ok) throw json({ error: 'Could not load this photo from Google Drive.' }, 502)
+    return await res.blob()
+  }
+  const { data, error } = await admin.storage.from('doubt-files').download(file.storage_path)
+  if (error || !data) throw json({ error: 'Photo not found.' }, 404)
+  return data
+}
+
+/* ---------------- Free AI draft (Google Gemini, no billing) ---------------- */
+const AI_SYSTEM = [
+  'You are an experienced, patient mathematics/science tutor at an Indian coaching centre (CBSE, ICSE, ISC, WBBSE, WBCHSE, WBJEE/JEE).',
+  'Write a model solution that a teacher will check before a student sees it.',
+  'Rules:',
+  '- Solve step by step with short numbered steps a school student can follow; show the key formula used.',
+  '- Plain text only: no Markdown headings, no LaTeX. Use Unicode maths symbols (√ ² ³ π θ ≤ ≥ ≠ ± × ÷ ∫ Σ →) and fractions like (a+b)/2.',
+  '- End with a line starting "Answer:".',
+  '- If the question or photo is unclear, incomplete or has several possible readings, say exactly what is unclear and solve the most likely reading.',
+  '- If you are not confident, start with "Teacher please check:" and explain why.',
+  '- Reply in the language of the question (English by default; Bengali or Hindi if the student wrote in it).',
+  '- Keep it under 350 words. Do not mention that you are an AI.',
+].join('\n')
+
+async function settingValue(admin: any, key: string, fallback: string) {
+  const { data } = await admin.from('settings').select('value').eq('setting_key', key).maybeSingle()
+  return data?.value != null && String(data.value).trim() !== '' ? String(data.value).trim() : fallback
+}
+async function geminiKey(admin: any) {
+  const env = Deno.env.get('GEMINI_API_KEY')
+  if (env) return env
+  const { data } = await admin.from('app_secrets').select('value').eq('key', 'GEMINI_API_KEY').maybeSingle()
+  return data?.value ? String(data.value) : ''
+}
+const toB64 = (bytes: Uint8Array) => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s) }
+
+async function callGemini(key: string, model: string, text: string, images: Array<{ mime: string, data: string }>) {
+  const models = [...new Set([model, 'gemini-flash-latest', 'gemini-2.5-flash'])].filter(Boolean)
+  let lastError = 'AI did not answer.'
+  for (const m of models) {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: AI_SYSTEM }] },
+        contents: [{ role: 'user', parts: [{ text }, ...images.map((i) => ({ inline_data: { mime_type: i.mime, data: i.data } }))] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+      }),
+    })
+    const out = await res.json().catch(() => ({}))
+    if (res.ok) {
+      const answer = (out.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('').trim()
+      if (answer) return { text: answer.slice(0, 6000), model: m }
+      lastError = out.candidates?.[0]?.finishReason === 'SAFETY' ? 'The AI declined this question.' : 'The AI returned an empty answer.'
+      continue
+    }
+    if (res.status === 404) { lastError = `Model ${m} is not available.`; continue }   // try the next model name
+    if (res.status === 429) throw new Error('The free AI limit from Google is used up for now. Try again later or tomorrow.')
+    const msg = String(out.error?.message || '')
+    if (res.status === 401 || res.status === 403 || /api key/i.test(msg)) throw new Error('The AI key was rejected. Check the key in Admin → Settings → AI assistant.')
+    if (res.status === 400) throw new Error('The AI could not read this question' + (msg ? ': ' + msg.slice(0, 200) : '.'))
+    lastError = out.error?.message || `AI request failed (${res.status}).`
+  }
+  throw new Error(lastError)
+}
+
+async function aiDraft(admin: any, user: any, doubtId: string) {
+  if (!['TEACHER', 'ADMIN'].includes(user.user_type)) return json({ error: 'Only teachers can use AI drafts.' }, 403)
+  if ((await settingValue(admin, 'AI_DOUBT_DRAFTS_ENABLED', 'TRUE')).toUpperCase() !== 'TRUE') return json({ error: 'AI drafts are switched off in Settings.' }, 403)
+  const { data: doubt } = await admin.from('doubts').select('*').eq('id', doubtId).maybeSingle()
+  if (!doubt) return json({ error: 'Doubt not found.' }, 404)
+  if (user.user_type === 'TEACHER') {
+    const [{ data: slots }, { data: assigned }] = await Promise.all([
+      admin.from('timetable').select('subject_id,co_subject_id').eq('teacher_id', user.linked_id).ilike('status', 'active'),
+      admin.from('student_subjects').select('subject_id').eq('teacher_id', user.linked_id).ilike('status', 'active'),
+    ])
+    const mine = new Set([...(slots || []).flatMap((s: any) => [s.subject_id, s.co_subject_id]), ...(assigned || []).map((s: any) => s.subject_id)].filter(Boolean))
+    if (!mine.has(doubt.subject_id)) return json({ error: 'Only teachers of this subject can use AI drafts here.' }, 403)
+  } else if (user.role !== 'SUPER_ADMIN') return json({ error: 'Only teachers or the Super Admin can use AI drafts.' }, 403)
+  const key = await geminiKey(admin)
+  if (!key) return json({ error: 'The AI assistant is not set up yet. Super Admin: add the free Gemini key in Settings → AI assistant.' }, 400)
+  const limit = Number.parseInt(await settingValue(admin, 'AI_DAILY_LIMIT', '40'), 10) || 0
+  const { data: allowed, error: capError } = await admin.rpc('ai_take', { p_limit: limit })
+  if (capError) throw capError
+  if (!allowed) return json({ error: `Today's AI limit (${limit} drafts) is reached. It resets at midnight.` }, 429)
+  // Only the question goes to the AI: no student name, ID, phone or class roster.
+  const { data: subject } = await admin.from('subjects').select('name').eq('id', doubt.subject_id).maybeSingle()
+  const text = [`Subject: ${subject?.name || doubt.subject_id}`, `Class: ${doubt.class_name}`, doubt.chapter ? `Chapter/topic: ${doubt.chapter}` : '',
+    `Question: ${doubt.title}`, doubt.body ? `Details from the student: ${doubt.body}` : '', 'Photos of the question are attached if any.'].filter(Boolean).join('\n')
+  const { data: files } = await admin.from('doubt_files').select('*').eq('doubt_id', doubt.id).is('answer_id', null).is('expired_at', null).order('created_at').limit(3)
+  const images: Array<{ mime: string, data: string }> = []
+  for (const f of files || []) {
+    try { const blob = await photoBlob(admin, f); images.push({ mime: f.mime_type, data: toB64(new Uint8Array(await blob.arrayBuffer())) }) } catch { /* skip unreadable photo */ }
+  }
+  const model = await settingValue(admin, 'AI_MODEL', 'gemini-flash-latest')
+  try {
+    const out = await callGemini(key, model, text, images)
+    const row = { doubt_id: doubt.id, status: 'OK', body: out.text, model: out.model, error: '', requested_by: String(user.linked_id || user.id), created_at: new Date().toISOString() }
+    await admin.from('doubt_ai_drafts').upsert(row, { onConflict: 'doubt_id' })
+    return json({ draft: { Body: out.text, Model: out.model, CreatedAt: row.created_at, Photos: images.length } })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'AI draft failed.'
+    return json({ error: message }, 502)
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   try {
@@ -104,29 +225,7 @@ Deno.serve(async (req) => {
       const { data: answer } = file.answer_id ? await admin.from('doubt_answers').select('*').eq('id', file.answer_id).maybeSingle() : { data: null }
       if (!doubt || !(await canView(admin, user, doubt, answer))) return json({ error: 'You cannot open this photo.' }, 403)
       if (file.expired_at) return json({ error: 'This photo was removed after 7 days because it could not be saved to Google Drive.' }, 410)
-      let blob: Blob
-      if (file.drive_file_id && file.drive_connection_id) {
-        const { data: connection } = await admin.from('google_drive_connections').select('*').eq('id', file.drive_connection_id).maybeSingle()
-        if (!connection) return json({ error: 'The Google Drive account for this photo is no longer connected.' }, 410)
-        let access = ''
-        try { if (connection.refresh_token_ciphertext && !connection.disconnected_at) access = await accessToken(connection) } catch { access = '' }
-        if (!access) {
-          // Old login expired: use the current login of the same Google account and re-point the photo.
-          const current = await primaryDrive(admin)
-          if (!current || String(current.account_email).toLowerCase() !== String(connection.account_email).toLowerCase())
-            return json({ error: 'The Google Drive login for this photo has expired. Reconnect Google Drive in Settings.' }, 410)
-          access = await accessToken(current)
-          await admin.from('doubt_files').update({ drive_connection_id: current.id }).eq('id', file.id)
-        }
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.drive_file_id)}?alt=media`,
-          { headers: { Authorization: `Bearer ${access}` } })
-        if (!res.ok) return json({ error: 'Could not load this photo from Google Drive.' }, 502)
-        blob = await res.blob()
-      } else {
-        const { data, error } = await admin.storage.from('doubt-files').download(file.storage_path)
-        if (error || !data) return json({ error: 'Photo not found.' }, 404)
-        blob = data
-      }
+      const blob = await photoBlob(admin, file)
       return new Response(blob, { headers: { ...cors, 'Content-Type': file.mime_type, 'Cache-Control': 'private, max-age=86400' } })
     }
 
@@ -165,6 +264,11 @@ Deno.serve(async (req) => {
         }
       }
       return json({ moved, expired, retained })
+    }
+
+    if (body.action === 'aiDraft') {
+      const user = await signedInUser(req, admin, auth)
+      return await aiDraft(admin, user, String(body.doubtId || ''))
     }
 
     if (body.action === 'upload') {

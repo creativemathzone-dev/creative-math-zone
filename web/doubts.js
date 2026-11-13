@@ -250,6 +250,7 @@
       (can.hide ? '<button class="btn small" type="button" id="dz-hide">' + (d.Hidden ? 'Show doubt again' : 'Hide doubt') + '</button>' : '') +
       '</div></div>' +
       '<section class="card"><h2 style="font-size:1.15rem;margin:0 0 .3rem">Answers</h2>' + answersHtml + '</section>' +
+      aiPanelHtml(esc, r.ai, can) +
       (can.answer ? '<section class="card"><form class="dz-form" id="dz-answer"><label><span>' + esc(answerLabel) + '</span>' +
         '<textarea name="body" rows="5" maxlength="6000" placeholder="Explain step by step…"></textarea></label>' + photoInput('Photos of your working (optional)') +
         (ctx.role === 'STUDENT' && !d.IsMine ? '<p class="muted" style="margin-top:0">A teacher checks your answer before others can see it. Approved answers earn points.</p>' : '') +
@@ -283,6 +284,7 @@
         ctx.busy(b, async function () { await ctx.api('doubts.hide', { answerId: id, hidden: hide }); again(hide ? 'Answer hidden.' : 'Answer visible again.'); });
       });
     });
+    wireAiPanel(main, ctx, doubtId);
     var form = main.querySelector('#dz-answer');
     if (form) form.addEventListener('submit', function (ev) {
       ev.preventDefault();
@@ -293,6 +295,59 @@
         var res = await ctx.api('doubts.answer', { doubtId: doubtId, body: text, hasPhotos: n > 0 });
         if (n) { btn.textContent = 'Uploading photos…'; await uploadPhotos(ctx, doubtId, res.AnswerID, form.elements.photos.files); }
         again(res.status === 'PENDING' ? 'Sent to the teacher for approval.' : res.followUp ? 'Added. The doubt is open again for teachers.' : 'Answer posted.');
+      });
+    });
+  }
+
+  /* ---------------- free AI draft (teachers only) ---------------- */
+  function aiPanelHtml(esc, ai, can) {
+    if (!ai || !ai.enabled) return '';
+    if (!ai.configured) return '<section class="card dz-ai"><b>✨ AI draft</b><p class="muted" style="margin:.3rem 0 0">The free AI assistant is not set up yet. The Super Admin can add the key in Settings → AI assistant.</p></section>';
+    var d = ai.draft;
+    return '<section class="card dz-ai" id="dz-ai"><div style="display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap;align-items:center">' +
+      '<b>✨ AI draft solution</b><button class="btn small" type="button" id="dz-ai-go">' + (d ? 'Try again' : 'Get AI draft') + '</button></div>' +
+      '<p class="muted" style="margin:.3rem 0 .6rem;font-size:.86rem">Only teachers see this. AI can make mistakes — check every step before posting. Only the question and its photos are sent, never the student’s name.</p>' +
+      '<div id="dz-ai-body">' + (d ? aiDraftHtml(esc, d, can) : '') + '</div></section>';
+  }
+  function aiDraftHtml(esc, d, can) {
+    return '<div class="dz-body" style="background:rgba(243,177,28,.10);border:1px dashed var(--pencil,#f3b11c);border-radius:8px;padding:.7rem">' + esc(d.Body) + '</div>' +
+      '<div class="dz-meta">' + esc(fmtWhen(d.CreatedAt)) + '</div>' +
+      (can.answer ? '<div class="dz-actions"><button class="btn small primary" type="button" id="dz-ai-use">Use in my answer</button></div>' : '');
+  }
+  function wireAiPanel(main, ctx, doubtId) {
+    var box = main.querySelector('#dz-ai');
+    if (!box) return;
+    var current = null;
+    var bindUse = function () {
+      var use = main.querySelector('#dz-ai-use');
+      if (use) use.addEventListener('click', function () {
+        var ta = main.querySelector('#dz-answer textarea[name=body]');
+        var text = current || (main.querySelector('#dz-ai-body .dz-body') || {}).textContent || '';
+        if (!ta) return;
+        ta.value = text; ta.focus(); ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        ctx.toast('Draft copied into your answer. Check it, edit if needed, then press Post.');
+      });
+    };
+    bindUse();
+    var go = main.querySelector('#dz-ai-go');
+    if (go) go.addEventListener('click', function () {
+      ctx.busy(go, async function () {
+        go.textContent = 'Thinking… (up to a minute)';
+        main.querySelector('#dz-ai-body').innerHTML = '<div class="cmz-loader"><i></i></div>';
+        try {
+          var res = await fetch(fnUrl(), { method: 'POST', headers: headers(ctx, true), body: JSON.stringify({ action: 'aiDraft', doubtId: doubtId }) });
+          var out = await res.json().catch(function () { return {}; });
+          if (!res.ok || !out.draft) throw { error: out.error || 'The AI could not make a draft. Try again.' };
+          current = out.draft.Body;
+          var canAnswer = !!main.querySelector('#dz-answer');
+          main.querySelector('#dz-ai-body').innerHTML = aiDraftHtml(ctx.esc, out.draft, { answer: canAnswer });
+          bindUse();
+          go.textContent = 'Try again';
+        } catch (e) {
+          main.querySelector('#dz-ai-body').innerHTML = '<p class="muted">' + ctx.esc((e && e.error) || 'AI draft failed.') + '</p>';
+          go.textContent = 'Get AI draft';
+          throw e;
+        }
       });
     });
   }

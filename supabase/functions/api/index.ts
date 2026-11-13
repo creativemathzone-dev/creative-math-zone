@@ -905,6 +905,7 @@ Deno.serve(async (request) => {
       'studentSubjects.assign': 'STUDENT_EDIT', 'studentSubjects.end': 'STUDENT_EDIT', 'studentSubjects.updateFee': 'STUDENT_EDIT',
       'studentSubjects.updateStart': 'STUDENT_EDIT', 'students.finance': 'FINANCE_VIEW',
       'students.delete': 'STUDENT_EDIT', 'settings.studentDelete.get': 'SETTINGS_VIEW', 'settings.studentDelete.set': 'SETTINGS_EDIT',
+      'ai.status': 'SETTINGS_VIEW', 'ai.setKey': 'SETTINGS_EDIT',
       'push.subscribe': 'SELF_VIEW', 'push.unsubscribe': 'SELF_VIEW', 'reminders.list': 'STUDENT_VIEW', 'reminders.mark': 'STUDENT_VIEW',
       'doubts.list': 'SELF_VIEW', 'doubts.get': 'SELF_VIEW', 'doubts.create': 'SELF_VIEW', 'doubts.answer': 'SELF_VIEW',
       'doubts.claim': 'SELF_VIEW', 'doubts.review': 'SELF_VIEW', 'doubts.resolve': 'SELF_VIEW', 'doubts.meToo': 'SELF_VIEW',
@@ -3070,6 +3071,37 @@ Deno.serve(async (request) => {
         }) } })
     }
 
+    /* ---------------- Free AI assistant (Gemini key + usage) ---------------- */
+    if (action === 'ai.status' || action === 'ai.setKey') {
+      if (user.user_type !== 'ADMIN' || user.role !== 'SUPER_ADMIN') throw new ApiFault('FORBIDDEN', 'Only the Super Admin can manage the AI assistant.')
+      if (action === 'ai.setKey') {
+        const remove = payload.remove === true
+        if (remove) {
+          await admin.from('app_secrets').delete().eq('key', 'GEMINI_API_KEY')
+          await logAction(admin, user, 'AI_KEY_REMOVED', 'SETTING', 'GEMINI_API_KEY', {})
+          return response({ ok: true, data: { configured: !!Deno.env.get('GEMINI_API_KEY') } })
+        }
+        const key = requireText(payload.key, 'AI key', 200, true)
+        if (!/^[A-Za-z0-9_\-]{20,200}$/.test(key)) throw new ApiFault('BAD_REQUEST', 'That does not look like a Gemini API key.')
+        // Check the key with Google before saving it (free call, lists available models).
+        const check = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key } })
+        if (!check.ok) throw new ApiFault('BAD_REQUEST', 'Google rejected this key. Create a new one at aistudio.google.com and paste it again.')
+        const { error } = await admin.from('app_secrets').upsert({ key: 'GEMINI_API_KEY', value: key }, { onConflict: 'key' })
+        if (error) throw error
+        await logAction(admin, user, 'AI_KEY_SET', 'SETTING', 'GEMINI_API_KEY', {})
+        return response({ ok: true, data: { configured: true } })
+      }
+      const [{ data: stored }, { data: usage }, { data: settingRows }] = await Promise.all([
+        admin.from('app_secrets').select('key,created_at').eq('key', 'GEMINI_API_KEY').maybeSingle(),
+        admin.from('ai_usage').select('calls').eq('day', todayDate()).maybeSingle(),
+        admin.from('settings').select('setting_key,value').in('setting_key', ['AI_DOUBT_DRAFTS_ENABLED', 'AI_DAILY_LIMIT', 'AI_MODEL']),
+      ])
+      const s = Object.fromEntries((settingRows || []).map((r) => [r.setting_key, r.value]))
+      return response({ ok: true, data: { configured: !!(Deno.env.get('GEMINI_API_KEY') || stored), fromServerSecret: !!Deno.env.get('GEMINI_API_KEY'),
+        enabled: String(s.AI_DOUBT_DRAFTS_ENABLED || 'TRUE').toUpperCase() === 'TRUE', limit: Number(s.AI_DAILY_LIMIT || 40),
+        usedToday: usage?.calls || 0, model: s.AI_MODEL || 'gemini-flash-latest' } })
+    }
+
     /* ---------------- Push notifications & reminder list ---------------- */
     if (action === 'push.subscribe' || action === 'push.unsubscribe') {
       const sub = payload.subscription && typeof payload.subscription === 'object' ? payload.subscription : {}
@@ -3235,6 +3267,19 @@ Deno.serve(async (request) => {
           isStudent ? admin.from('doubt_me_too').select('doubt_id').eq('doubt_id', d.id).eq('student_id', me).maybeSingle() : Promise.resolve({ data: null }),
         ])
         if (aError || fError) throw aError || fError
+        // AI drafts are for teachers/admin only; students never receive them.
+        let ai: Record<string, unknown> | null = null
+        const aiAllowed = teachesIt(d) || (isAdmin && user.role === 'SUPER_ADMIN')
+        if (aiAllowed) {
+          const [{ data: draft }, { data: flag }, { data: storedKey }] = await Promise.all([
+            admin.from('doubt_ai_drafts').select('*').eq('doubt_id', d.id).maybeSingle(),
+            admin.from('settings').select('value').eq('setting_key', 'AI_DOUBT_DRAFTS_ENABLED').maybeSingle(),
+            admin.from('app_secrets').select('key').eq('key', 'GEMINI_API_KEY').maybeSingle(),
+          ])
+          const enabled = String(flag?.value || 'TRUE').toUpperCase() === 'TRUE'
+          ai = { enabled, configured: !!(Deno.env.get('GEMINI_API_KEY') || storedKey),
+            draft: draft && draft.status === 'OK' ? { Body: draft.body, Model: draft.model, CreatedAt: draft.created_at } : null }
+        }
         const visible = (answers || []).filter((a) => isTeacher || isAdmin || a.status === 'APPROVED' ||
           (a.author_type === 'STUDENT' && a.author_id === me))
         const names = await nameMaps([...new Set([d.student_id, ...visible.filter((a) => a.author_type === 'STUDENT').map((a) => a.author_id)])],
@@ -3255,6 +3300,7 @@ Deno.serve(async (request) => {
             Body: a.body, Status: a.status, FollowUp: a.is_follow_up, ReviewNote: a.review_note, Points: a.points_awarded,
             ReviewedBy: a.reviewed_by ? names.teachers.get(a.reviewed_by) || '' : '', CreatedAt: a.created_at,
             Files: (files || []).filter((f) => f.answer_id === a.id).map(fileRow) })),
+          ai,
           can: {
             answer: !d.hidden && (teachesIt(d) || (isStudent && !resolvedDoubt)),
             claim: teachesIt(d) && d.status === 'OPEN', release: isTeacher && d.claimed_by === me && d.status === 'CLAIMED',
@@ -4444,7 +4490,8 @@ Deno.serve(async (request) => {
       for (const [key, raw] of Object.entries(changes)) {
         if (!existing.has(key) || key === 'STUDENT_DELETE_ENABLED') throw new ApiFault('BAD_REQUEST', `Unknown setting: ${key}`)
         const value = requireText(raw, key, 300, key !== 'SUBJECT_BLOCKED_PAIRS')
-        if (['REGISTRATION_ENABLED', 'AUTO_INVOICE_ENABLED', 'AUTO_BACKUP_ENABLED', 'FEE_REMINDERS_ENABLED', 'ABSENT_ALERTS_ENABLED'].includes(key) && !['TRUE', 'FALSE'].includes(value.toUpperCase())) throw new ApiFault('BAD_REQUEST', `${key} must be TRUE or FALSE.`)
+        if (key === 'AI_DAILY_LIMIT' && !/^\d{1,4}$/.test(value)) throw new ApiFault('BAD_REQUEST', 'AI_DAILY_LIMIT must be a number (for example 40).')
+        if (['REGISTRATION_ENABLED', 'AUTO_INVOICE_ENABLED', 'AUTO_BACKUP_ENABLED', 'FEE_REMINDERS_ENABLED', 'ABSENT_ALERTS_ENABLED', 'AI_DOUBT_DRAFTS_ENABLED'].includes(key) && !['TRUE', 'FALSE'].includes(value.toUpperCase())) throw new ApiFault('BAD_REQUEST', `${key} must be TRUE or FALSE.`)
         if (value !== existing.get(key)) {
           const { error } = await admin.from('settings').update({ value, updated_at: new Date().toISOString(), updated_by: user.id }).eq('setting_key', key)
           if (error) throw error
