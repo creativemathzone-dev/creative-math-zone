@@ -48,7 +48,7 @@ test('one-day class rescheduling is teacher-owned, date-scoped, and leaves the w
 });
 
 test('invoice generation bills each subject once and skips same-day mistakes', () => {
-  const block = actionBlock("if (action === 'invoices.generate')", "if (action === 'invoices.list')");
+  const block = actionBlock('async function generateInvoices(', 'Deno.serve(');
   assert.match(block, /assignmentEnd <= assignmentStart\) continue/);
   assert.match(block, /const bySubject = new Map/);
   assert.match(block, /assignmentByStudent\.set\(studentId, \[\.\.\.bySubject\.values\(\)\]\)/);
@@ -88,6 +88,33 @@ test('doubt portal: visibility, teacher-only answering, approval before points',
   assert.match(files, /if \(answer && answer\.status !== 'APPROVED'/);
   const workflow = await readFile(new URL('../.github/workflows/deploy-supabase-api.yml', import.meta.url), 'utf8');
   assert.match(workflow, /supabase functions deploy doubt-files/);
+});
+
+test('subject assignment blocks periods overlapping an earlier ended period', () => {
+  const block = actionBlock("if (action === 'studentSubjects.assign')", "if (action === 'studentSubjects.end')");
+  assert.match(block, /r\.end_date > r\.start_date && String\(r\.end_date\) > startDate/);
+  assert.match(block, /throw new ApiFault\('OVERLAP'/);
+});
+
+test('monthly auto-invoices reuse the button logic and need the private secret', () => {
+  const block = actionBlock("if (action === 'cron.autoInvoices')", 'const token = String(');
+  assert.match(block, /request\.headers\.get\('x-archive-secret'\) !== secret/);
+  assert.match(block, /AUTO_INVOICE_ENABLED/);
+  assert.match(block, /await generateInvoices\(admin, \{ month \}\)/);
+  assert.match(api, /if \(action === 'invoices\.generate'\) \{\s*\n\s*const \{ month, result \} = await generateInvoices\(admin, payload\)/);
+});
+
+test('weekly backup goes to Google Drive (never GitHub), Super Admin only, keeps 8', async () => {
+  const fn = await readFile(new URL('../supabase/functions/backup-drive/index.ts', import.meta.url), 'utf8');
+  assert.match(fn, /const KEEP = 8/);
+  assert.match(fn, /user\.role !== 'SUPER_ADMIN'/);
+  assert.match(fn, /googleapis\.com\/upload\/drive/);
+  const sql = await readFile(new URL('../supabase/migrations/20261114010000_auto_invoices_and_backups.sql', import.meta.url), 'utf8');
+  assert.match(sql, /not in \('google_drive_connections'/);
+  for (const wf of ['deploy-supabase-api.yml', 'publish-pages.yml']) {
+    const text = await readFile(new URL(`../.github/workflows/${wf}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(text, /backup/i.test(wf) ? /x^/ : /upload-artifact@/);
+  }
 });
 
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {

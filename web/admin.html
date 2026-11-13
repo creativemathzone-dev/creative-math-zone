@@ -2692,10 +2692,43 @@ VIEWS.settings = async main => {
     '<div class="card"><form id="set-f">' + rows.map(r => '<label class="f"><span>' + esc(r.description || r.key) + '</span><input name="' + esc(r.key) + '" value="' + esc(r.value) + '"' + (edit ? '' : ' readonly') + '><small>' + esc(r.key) +
       (r.key === 'SUBJECT_BLOCKED_PAIRS' ? ' — subject IDs: ' + L('subjects').map(s => s.SubjectID + ' = ' + s.SubjectName).join(', ') : '') + '</small></label>').join('') + '</form></div>' +
     (superAdmin?'<section class="section"><h2>Homework file archive</h2><div class="card"><p>Connect the centre Google account used to archive homework and student submissions after deadlines. Older accounts stay connected so archived files remain available. Use transfer to move an old account’s archive to the current account; it disconnects the old account after all files move.</p><div id="drive-connections">'+(driveConnections.length?driveConnections.map(c=>'<div class="row" style="padding:.65rem 0;border-top:1px solid var(--line)"><b>'+esc(c.account_email)+'</b><span class="pill '+(c.is_primary?'ok':'')+'">'+(c.is_primary?'Current archive account':'Previous archive account')+'</span>'+(c.is_primary?'':'<button class="btn small" data-drive-transfer="'+esc(c.id)+'">Transfer archive and disconnect</button>')+'</div>').join(''):'<p class="muted">No Google Drive account connected yet.</p>')+'</div><button class="btn primary" id="drive-connect">Connect / change Google account</button><p class="muted" style="margin-bottom:0">Files remain in Supabase if Drive is not connected or an upload fails. Drive copies are kept until a teacher deletes them from the homework page.</p></div></section>':'') +
+    (superAdmin ? '<section class="section"><h2>Database backups</h2><div class="card"><p>Every Sunday at 2 AM the whole database is saved as one compressed file in the connected Google Drive (folder “Creative Math Zone Backups”). The newest 8 backups are kept. Turn it off with <b>AUTO_BACKUP_ENABLED</b> above. Invoices are also generated automatically on the 1st of each month at 6 AM (<b>AUTO_INVOICE_ENABLED</b>).</p>' +
+      '<div id="backup-list"><span class="muted">Loading backups…</span></div><button class="btn primary" id="backup-now" type="button">Back up now</button></div></section>' : '') +
     (superAdmin ? '<section class="section"><h2>Danger zone</h2><div class="card"><p><b>Permanent student delete</b> is <span class="pill ' + (delOn ? 'bad' : 'ok') + '">' + (delOn ? 'ON' : 'OFF') + '</span></p>' +
       '<p class="muted">When ON, a “Delete student” button appears on each student’s page. It erases the student and all their records (subjects, attendance, invoices, payments, receipts, homework, history and login) forever. Keep it OFF when you are not cleaning up data.</p>' +
       '<form id="del-toggle"><label class="f"><span>Your admin password</span><input name="password" type="password" autocomplete="current-password"></label>' +
       '<button class="btn ' + (delOn ? 'primary' : 'danger') + '" id="del-toggle-go">' + (delOn ? 'Turn OFF' : 'Turn ON') + '</button></form></div></section>' : '');
+  if (superAdmin) {
+    const cfg = window.CMZ_CONFIG || {}, backupUrl = cfg.supabaseUrl.replace(/\/$/, '') + '/functions/v1/backup-drive';
+    const backupHeaders = { 'Content-Type': 'application/json', apikey: cfg.supabasePublishableKey, Authorization: 'Bearer ' + S.token };
+    const kb = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+    const loadBackups = async () => {
+      const res = await fetch(backupUrl, { method: 'POST', headers: backupHeaders, body: JSON.stringify({ action: 'list' }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { $('#backup-list').innerHTML = '<p class="muted">' + esc(data.error || 'Could not load backups.') + '</p>'; return; }
+      $('#backup-list').innerHTML = data.runs.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>When</th><th>Type</th><th>Status</th><th>Size</th><th>Rows</th><th></th></tr></thead><tbody>' +
+        data.runs.map(r => '<tr><td data-l="When">' + esc(new Date(r.started_at).toLocaleString('en-IN')) + '</td><td data-l="Type">' + esc(r.trigger === 'MANUAL' ? 'Manual' : 'Weekly') + '</td><td data-l="Status">' +
+          (r.status === 'OK' ? '<span class="pill ok">Saved</span>' : r.status === 'FAILED' ? '<span class="pill bad" title="' + esc(r.error) + '">Failed</span><div class="muted" style="font-size:.8rem">' + esc(r.error) + '</div>' : '<span class="pill">Running</span>') +
+          '</td><td data-l="Size">' + (r.size_bytes ? kb(r.size_bytes) : '—') + '</td><td data-l="Rows">' + (r.row_count || '—') + '</td><td>' +
+          (r.in_drive ? '<button class="btn small" data-backup-dl="' + esc(r.id) + '" data-name="' + esc(r.file_name) + '">Download</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>'
+        : '<p class="muted">No backups yet. The first weekly backup runs this Sunday, or click “Back up now”.</p>';
+      $$('[data-backup-dl]', main).forEach(b => b.addEventListener('click', () => busy(b, async () => {
+        const res2 = await fetch(backupUrl + '?run=' + encodeURIComponent(b.dataset.backupDl), { headers: backupHeaders });
+        if (!res2.ok) { const e = await res2.json().catch(() => ({})); throw { error: e.error || 'Could not download this backup.' }; }
+        const url = URL.createObjectURL(await res2.blob()), a = document.createElement('a'); a.href = url; a.download = b.dataset.name || 'cmz-backup.json.gz'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+      })));
+    };
+    loadBackups().catch(() => { $('#backup-list').innerHTML = '<p class="muted">Could not load backups.</p>'; });
+    $('#backup-now').addEventListener('click', ev => busy(ev.target, async () => {
+      ev.target.textContent = 'Backing up…';
+      const res = await fetch(backupUrl, { method: 'POST', headers: backupHeaders, body: JSON.stringify({ action: 'run' }) });
+      const data = await res.json().catch(() => ({}));
+      ev.target.textContent = 'Back up now';
+      await loadBackups();
+      if (!res.ok || !data.ok) throw { error: data.error || 'Backup failed.' };
+      toast('Backup saved to Google Drive (' + kb(data.sizeBytes) + ', ' + data.rows + ' rows).');
+    }));
+  }
   if (superAdmin) $('#del-toggle-go').addEventListener('click', ev => { ev.preventDefault(); busy(ev.target, async () => {
     const password = $('#del-toggle [name=password]').value;
     if (!password) { toast('Enter your admin password.', true); return; }

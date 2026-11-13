@@ -45,7 +45,7 @@ jobs:
           cp .well-known/assetlinks.json _site/.well-known/assetlinks.json
 
       - name: Configure Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload website
         uses: actions/upload-pages-artifact@v5
@@ -55,4 +55,4 @@ jobs:
 
       - name: Publish website
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

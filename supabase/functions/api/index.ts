@@ -474,6 +474,104 @@ function allocationsFromPayment(value: unknown) {
   return value.map((x: any) => ({ subjectId: String(x?.subjectId || ''), subjectName: String(x?.subjectName || ''), amount: Number(x?.amount) || 0 }))
 }
 
+// Shared by the "Generate invoices" button and the monthly scheduled job.
+async function generateInvoices(admin: ReturnType<typeof clients>['admin'], payload: Record<string, any>) {
+  const month = requireText(payload.month, 'Month', 7, true)
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month)
+  if (!match) throw new ApiFault('BAD_REQUEST', 'Pick a valid month (YYYY-MM).')
+  const monthStart = `${month}-01`
+  const monthEnd = new Date(Date.UTC(Number(match[1]), Number(match[2]), 0)).toISOString().slice(0, 10)
+  const studentFilter = requireText(payload.studentId, 'Student ID', 40)
+  const [{ data: students, error: studentError }, { data: assignments, error: assignmentError },
+    { data: feeRows, error: feeError }, { data: studentFeeRows, error: studentFeeError }, { data: settingRows }] = await Promise.all([
+    admin.from('students').select('id,name,status').order('id').limit(2000),
+    admin.from('student_subjects').select('*').in('status', ['ACTIVE', 'ENDED']),
+    admin.from('fee_structure').select('*').eq('item_type', 'SUBJECT').eq('status', 'Active'),
+    admin.from('student_fees').select('*').eq('status', 'Active').is('effective_to', null),
+    admin.from('settings').select('setting_key,value').in('setting_key', ['ACADEMIC_YEAR','INVOICE_DUE_DAY']),
+  ])
+  if (studentError || assignmentError || feeError || studentFeeError) throw studentError || assignmentError || feeError || studentFeeError
+  const settings = Object.fromEntries((settingRows || []).map((r) => [r.setting_key, r.value]))
+  const academicYear = settings.ACADEMIC_YEAR || '2026-27'
+  const dueDay = Math.min(28, Math.max(1, Number.parseInt(settings.INVOICE_DUE_DAY || '10', 10) || 10))
+  const dueDate = `${month}-${String(dueDay).padStart(2, '0')}`
+  const eligible = (students || []).filter((s) => (!studentFilter || s.id === studentFilter) && String(s.status).toUpperCase() === 'ACTIVE')
+  if (!eligible.length) throw new ApiFault('BAD_REQUEST', 'No eligible students found.')
+  const { data: existingRows, error: existingError } = await admin.from('invoices').select('student_id,status').eq('month', month).eq('academic_year', academicYear)
+  if (existingError) throw existingError
+  const already = new Set((existingRows || []).filter((r) => String(r.status).toUpperCase() !== 'CANCELLED').map((r) => r.student_id))
+  const subjectNames = new Map<string, string>()
+  const assignedSubjectIds = [...new Set((assignments || []).map((a) => a.subject_id))]
+  const { data: subjects } = await admin.from('subjects').select('id,name').in('id', assignedSubjectIds.length ? assignedSubjectIds : ['__none__'])
+  for (const s of subjects || []) subjectNames.set(s.id, s.name)
+  const standardByKey = new Map((feeRows || []).filter((f) => f.academic_year === academicYear).map((f) => [f.subject_id, Number(f.amount)]))
+  const overrideByKey = new Map((studentFeeRows || []).filter((r) => r.effective_from <= todayDate())
+    .map((r) => [`${r.student_id}|${r.subject_id}`, r]))
+  const assignmentByStudent = new Map<string, any[]>()
+  for (const a of assignments || []) {
+    // Bill only for months when this student was actually assigned the
+    // subject. This also allows a past month to be generated after a
+    // subject has ended, while excluding future starts from earlier bills.
+    // Older rows may have no start_date; created_at is the safest available
+    // fallback so a newly-created assignment cannot be billed retroactively.
+    const assignmentStart = a.start_date
+      ? String(a.start_date).slice(0, 10)
+      : a.created_at
+        ? (() => {
+          const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' })
+            .formatToParts(new Date(a.created_at))
+          const part = (type: string) => parts.find((item) => item.type === type)?.value || ''
+          return `${part('year')}-${part('month')}-${part('day')}`
+        })()
+        : ''
+    const assignmentEnd = a.end_date ? String(a.end_date).slice(0, 10) : ''
+    if ((assignmentStart && assignmentStart > monthEnd) || (assignmentEnd && assignmentEnd < monthStart)) continue
+    // A subject ended on (or before) the day it started was given by mistake;
+    // it never ran, so it must not be billed.
+    if (String(a.status).toUpperCase() === 'ENDED' && assignmentStart && assignmentEnd && assignmentEnd <= assignmentStart) continue
+    a._start = assignmentStart
+    assignmentByStudent.set(a.student_id, [...(assignmentByStudent.get(a.student_id) || []), a])
+  }
+  // Bill each subject at most once per month. When a subject was ended and
+  // given again (for example to correct its start date), keep the current
+  // assignment: ACTIVE first, then the latest start, then the newest record.
+  for (const [studentId, rows] of assignmentByStudent) {
+    const bySubject = new Map<string, any>()
+    for (const a of rows) {
+      const prior = bySubject.get(a.subject_id)
+      const rank = (x: any) => [String(x.status).toUpperCase() === 'ACTIVE' ? 1 : 0, String(x._start || ''), String(x.created_at || '')]
+      if (!prior) { bySubject.set(a.subject_id, a); continue }
+      const [pa, ps, pc] = rank(prior), [na, ns, nc] = rank(a)
+      if (na > pa || (na === pa && (ns > ps || (ns === ps && nc > pc)))) bySubject.set(a.subject_id, a)
+    }
+    assignmentByStudent.set(studentId, [...bySubject.values()])
+  }
+  const result = { generated: 0, skippedExisting: 0, skippedEmpty: 0, total: 0, details: [] as Array<Record<string, unknown>> }
+  for (const student of eligible) {
+    if (already.has(student.id)) { result.skippedExisting++; continue }
+    const active = assignmentByStudent.get(student.id) || []
+    const lines = active.map((a) => {
+      const feeOverride = overrideByKey.get(`${student.id}|${a.subject_id}`)
+      const standard = feeOverride ? Number(feeOverride.standard_amount) : a.fee_override !== null ? Number(a.fee_override) : standardByKey.get(a.subject_id) || 0
+      const discount = feeOverride ? Number(feeOverride.discount_amount) : 0
+      return { subjectId: a.subject_id, subjectName: subjectNames.get(a.subject_id) || a.subject_id,
+        teacherId: a.teacher_id || '', batchId: a.batch_id || '',
+        standardAmount: standard, discountAmount: discount, finalAmount: Math.max(0, standard - discount), paidAmount: 0 }
+    }).filter((line) => line.finalAmount > 0)
+    if (!lines.length) { result.skippedEmpty++; continue }
+    const total = Math.round(lines.reduce((sum, line) => sum + line.finalAmount, 0) * 100) / 100
+    const id = await newId(admin, 'invoices', `INV-${month.replace('-', '')}-`, 4)
+    const { error } = await admin.from('invoices').insert({ id, student_id: student.id, month, academic_year: academicYear,
+      line_items: lines, total_amount: total, paid_amount: 0, balance_amount: total, status: 'UNPAID', due_date: dueDate })
+    if (error?.code === '23505') { result.skippedExisting++; continue }
+    if (error) throw error
+    already.add(student.id)
+    result.generated++; result.total = Math.round((result.total + total) * 100) / 100
+    result.details.push({ studentId: student.id, name: student.name, invoiceId: id, amount: total })
+  }
+  return { month, result }
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response(fail('METHOD_NOT_ALLOWED', 'Use POST.'))
@@ -637,6 +735,26 @@ Deno.serve(async (request) => {
           linkedId: user.linked_id, displayName: user.username,
           mustChangePassword: user.must_change_password, permissions: permissionsFor(user) },
       } })
+    }
+
+    // Monthly scheduled job (pg_cron on the 1st): generate this month's invoices.
+    // Authenticated by the private archive secret, never by a browser.
+    if (action === 'cron.autoInvoices') {
+      const secret = Deno.env.get('HOMEWORK_ARCHIVE_CRON_SECRET')
+      if (!secret || request.headers.get('x-archive-secret') !== secret) return response(fail('FORBIDDEN', 'Unauthorized scheduled job.'))
+      const { data: flag } = await admin.from('settings').select('value').eq('setting_key', 'AUTO_INVOICE_ENABLED').maybeSingle()
+      if (String(flag?.value || 'TRUE').toUpperCase() !== 'TRUE') return response({ ok: true, data: { skipped: 'AUTO_INVOICE_ENABLED is FALSE' } })
+      const month = todayDate().slice(0, 7)
+      let outcome: Record<string, unknown>
+      try {
+        const { result } = await generateInvoices(admin, { month })
+        outcome = { generated: result.generated, skipped: result.skippedExisting + result.skippedEmpty, total: result.total }
+      } catch (e) {
+        outcome = { error: e instanceof Error ? e.message : String(e) }
+      }
+      await admin.from('admin_logs').insert({ id: `LOG-${crypto.randomUUID()}`, user_id: null, username: 'system', role: 'SYSTEM',
+        action: 'AUTO_GENERATE_INVOICES', entity_type: 'INVOICES', entity_id: month, details: JSON.stringify(outcome), result: outcome.error ? 'FAILED' : 'OK' })
+      return response({ ok: !outcome.error, data: { month, ...outcome } })
     }
 
     const token = String(body?.token || request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') || '')
@@ -1866,99 +1984,7 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'invoices.generate') {
-      const month = requireText(payload.month, 'Month', 7, true)
-      const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month)
-      if (!match) throw new ApiFault('BAD_REQUEST', 'Pick a valid month (YYYY-MM).')
-      const monthStart = `${month}-01`
-      const monthEnd = new Date(Date.UTC(Number(match[1]), Number(match[2]), 0)).toISOString().slice(0, 10)
-      const studentFilter = requireText(payload.studentId, 'Student ID', 40)
-      const [{ data: students, error: studentError }, { data: assignments, error: assignmentError },
-        { data: feeRows, error: feeError }, { data: studentFeeRows, error: studentFeeError }, { data: settingRows }] = await Promise.all([
-        admin.from('students').select('id,name,status').order('id').limit(2000),
-        admin.from('student_subjects').select('*').in('status', ['ACTIVE', 'ENDED']),
-        admin.from('fee_structure').select('*').eq('item_type', 'SUBJECT').eq('status', 'Active'),
-        admin.from('student_fees').select('*').eq('status', 'Active').is('effective_to', null),
-        admin.from('settings').select('setting_key,value').in('setting_key', ['ACADEMIC_YEAR','INVOICE_DUE_DAY']),
-      ])
-      if (studentError || assignmentError || feeError || studentFeeError) throw studentError || assignmentError || feeError || studentFeeError
-      const settings = Object.fromEntries((settingRows || []).map((r) => [r.setting_key, r.value]))
-      const academicYear = settings.ACADEMIC_YEAR || '2026-27'
-      const dueDay = Math.min(28, Math.max(1, Number.parseInt(settings.INVOICE_DUE_DAY || '10', 10) || 10))
-      const dueDate = `${month}-${String(dueDay).padStart(2, '0')}`
-      const eligible = (students || []).filter((s) => (!studentFilter || s.id === studentFilter) && String(s.status).toUpperCase() === 'ACTIVE')
-      if (!eligible.length) throw new ApiFault('BAD_REQUEST', 'No eligible students found.')
-      const { data: existingRows, error: existingError } = await admin.from('invoices').select('student_id,status').eq('month', month).eq('academic_year', academicYear)
-      if (existingError) throw existingError
-      const already = new Set((existingRows || []).filter((r) => String(r.status).toUpperCase() !== 'CANCELLED').map((r) => r.student_id))
-      const subjectNames = new Map<string, string>()
-      const assignedSubjectIds = [...new Set((assignments || []).map((a) => a.subject_id))]
-      const { data: subjects } = await admin.from('subjects').select('id,name').in('id', assignedSubjectIds.length ? assignedSubjectIds : ['__none__'])
-      for (const s of subjects || []) subjectNames.set(s.id, s.name)
-      const standardByKey = new Map((feeRows || []).filter((f) => f.academic_year === academicYear).map((f) => [f.subject_id, Number(f.amount)]))
-      const overrideByKey = new Map((studentFeeRows || []).filter((r) => r.effective_from <= todayDate())
-        .map((r) => [`${r.student_id}|${r.subject_id}`, r]))
-      const assignmentByStudent = new Map<string, any[]>()
-      for (const a of assignments || []) {
-        // Bill only for months when this student was actually assigned the
-        // subject. This also allows a past month to be generated after a
-        // subject has ended, while excluding future starts from earlier bills.
-        // Older rows may have no start_date; created_at is the safest available
-        // fallback so a newly-created assignment cannot be billed retroactively.
-        const assignmentStart = a.start_date
-          ? String(a.start_date).slice(0, 10)
-          : a.created_at
-            ? (() => {
-              const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' })
-                .formatToParts(new Date(a.created_at))
-              const part = (type: string) => parts.find((item) => item.type === type)?.value || ''
-              return `${part('year')}-${part('month')}-${part('day')}`
-            })()
-            : ''
-        const assignmentEnd = a.end_date ? String(a.end_date).slice(0, 10) : ''
-        if ((assignmentStart && assignmentStart > monthEnd) || (assignmentEnd && assignmentEnd < monthStart)) continue
-        // A subject ended on (or before) the day it started was given by mistake;
-        // it never ran, so it must not be billed.
-        if (String(a.status).toUpperCase() === 'ENDED' && assignmentStart && assignmentEnd && assignmentEnd <= assignmentStart) continue
-        a._start = assignmentStart
-        assignmentByStudent.set(a.student_id, [...(assignmentByStudent.get(a.student_id) || []), a])
-      }
-      // Bill each subject at most once per month. When a subject was ended and
-      // given again (for example to correct its start date), keep the current
-      // assignment: ACTIVE first, then the latest start, then the newest record.
-      for (const [studentId, rows] of assignmentByStudent) {
-        const bySubject = new Map<string, any>()
-        for (const a of rows) {
-          const prior = bySubject.get(a.subject_id)
-          const rank = (x: any) => [String(x.status).toUpperCase() === 'ACTIVE' ? 1 : 0, String(x._start || ''), String(x.created_at || '')]
-          if (!prior) { bySubject.set(a.subject_id, a); continue }
-          const [pa, ps, pc] = rank(prior), [na, ns, nc] = rank(a)
-          if (na > pa || (na === pa && (ns > ps || (ns === ps && nc > pc)))) bySubject.set(a.subject_id, a)
-        }
-        assignmentByStudent.set(studentId, [...bySubject.values()])
-      }
-      const result = { generated: 0, skippedExisting: 0, skippedEmpty: 0, total: 0, details: [] as Array<Record<string, unknown>> }
-      for (const student of eligible) {
-        if (already.has(student.id)) { result.skippedExisting++; continue }
-        const active = assignmentByStudent.get(student.id) || []
-        const lines = active.map((a) => {
-          const feeOverride = overrideByKey.get(`${student.id}|${a.subject_id}`)
-          const standard = feeOverride ? Number(feeOverride.standard_amount) : a.fee_override !== null ? Number(a.fee_override) : standardByKey.get(a.subject_id) || 0
-          const discount = feeOverride ? Number(feeOverride.discount_amount) : 0
-          return { subjectId: a.subject_id, subjectName: subjectNames.get(a.subject_id) || a.subject_id,
-            teacherId: a.teacher_id || '', batchId: a.batch_id || '',
-            standardAmount: standard, discountAmount: discount, finalAmount: Math.max(0, standard - discount), paidAmount: 0 }
-        }).filter((line) => line.finalAmount > 0)
-        if (!lines.length) { result.skippedEmpty++; continue }
-        const total = Math.round(lines.reduce((sum, line) => sum + line.finalAmount, 0) * 100) / 100
-        const id = await newId(admin, 'invoices', `INV-${month.replace('-', '')}-`, 4)
-        const { error } = await admin.from('invoices').insert({ id, student_id: student.id, month, academic_year: academicYear,
-          line_items: lines, total_amount: total, paid_amount: 0, balance_amount: total, status: 'UNPAID', due_date: dueDate })
-        if (error?.code === '23505') { result.skippedExisting++; continue }
-        if (error) throw error
-        already.add(student.id)
-        result.generated++; result.total = Math.round((result.total + total) * 100) / 100
-        result.details.push({ studentId: student.id, name: student.name, invoiceId: id, amount: total })
-      }
+      const { month, result } = await generateInvoices(admin, payload)
       await logAction(admin, user, 'GENERATE_INVOICES', 'INVOICES', month,
         { generated: result.generated, skipped: result.skippedExisting + result.skippedEmpty })
       return response({ ok: true, data: result })
@@ -2832,6 +2858,17 @@ Deno.serve(async (request) => {
       const { data: current, error: currentError } = await admin.from('student_subjects').select('subject_id').eq('student_id', studentId).ilike('status', 'ACTIVE')
       if (currentError) throw currentError
       if ((current || []).some((r) => r.subject_id === subjectId)) throw new ApiFault('DUPLICATE', 'Student already takes this subject.')
+      // Block a new period that overlaps an earlier (ended) period of the same
+      // subject; otherwise the same months look doubly assigned.
+      const { data: earlier, error: earlierError } = await admin.from('student_subjects').select('start_date,end_date')
+        .eq('student_id', studentId).eq('subject_id', subjectId).eq('status', 'ENDED')
+      if (earlierError) throw earlierError
+      const clash = (earlier || []).find((r) => r.end_date && r.start_date && r.end_date > r.start_date && String(r.end_date) > startDate)
+      if (clash) {
+        const shown = (v: string) => `${v.slice(8, 10)}/${v.slice(5, 7)}/${v.slice(0, 4)}`
+        throw new ApiFault('OVERLAP', `This subject was already given from ${shown(String(clash.start_date))} to ${shown(String(clash.end_date))}. ` +
+          `Choose a start date on or after ${shown(String(clash.end_date))}, or remove the old entry with “Remove (mistake)” first.`)
+      }
       const { data: settings } = await admin.from('settings').select('setting_key,value').in('setting_key', ['ACADEMIC_YEAR', 'SUBJECT_BLOCKED_PAIRS'])
       const settingMap = Object.fromEntries((settings || []).map((r) => [r.setting_key, r.value]))
       const selected = [...(current || []).map((r) => r.subject_id), subjectId]
@@ -4274,7 +4311,7 @@ Deno.serve(async (request) => {
       for (const [key, raw] of Object.entries(changes)) {
         if (!existing.has(key) || key === 'STUDENT_DELETE_ENABLED') throw new ApiFault('BAD_REQUEST', `Unknown setting: ${key}`)
         const value = requireText(raw, key, 300, key !== 'SUBJECT_BLOCKED_PAIRS')
-        if (key === 'REGISTRATION_ENABLED' && !['TRUE', 'FALSE'].includes(value.toUpperCase())) throw new ApiFault('BAD_REQUEST', 'REGISTRATION_ENABLED must be TRUE or FALSE.')
+        if (['REGISTRATION_ENABLED', 'AUTO_INVOICE_ENABLED', 'AUTO_BACKUP_ENABLED'].includes(key) && !['TRUE', 'FALSE'].includes(value.toUpperCase())) throw new ApiFault('BAD_REQUEST', `${key} must be TRUE or FALSE.`)
         if (value !== existing.get(key)) {
           const { error } = await admin.from('settings').update({ value, updated_at: new Date().toISOString(), updated_by: user.id }).eq('setting_key', key)
           if (error) throw error

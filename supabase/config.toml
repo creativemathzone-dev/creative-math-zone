@@ -14,6 +14,10 @@ verify_jwt = false
 # The function validates user tokens for downloads and a private cron secret for archive runs.
 verify_jwt = false
 
+[functions.backup-drive]
+# The function validates the Super Admin token for manual backups and a private cron secret for weekly runs.
+verify_jwt = false
+
 [functions.doubt-files]
 # The function validates user tokens for photo upload/view and a private cron secret for the worker.
 verify_jwt = false

@@ -14,7 +14,7 @@ jobs:
       PROJECT_ID: krjkkkwxqvvxeifxmgjx
     steps:
       - name: Get the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check critical application flows
         run: node --test tests/critical-flows.test.mjs
@@ -38,3 +38,6 @@ jobs:
 
       - name: Deploy doubt portal photos
         run: supabase functions deploy doubt-files --project-ref "$PROJECT_ID" --yes
+
+      - name: Deploy weekly Google Drive backup
+        run: supabase functions deploy backup-drive --project-ref "$PROJECT_ID" --yes
