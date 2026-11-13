@@ -3082,7 +3082,8 @@ Deno.serve(async (request) => {
           return response({ ok: true, data: { configured: !!Deno.env.get('GEMINI_API_KEY') } })
         }
         const key = requireText(payload.key, 'AI key', 200, true)
-        if (!/^[A-Za-z0-9_\-]{20,200}$/.test(key)) throw new ApiFault('BAD_REQUEST', 'That does not look like a Gemini API key.')
+        // Google issues both older "AIza…" keys and newer "AQ.…" keys (which contain dots).
+        if (!/^[A-Za-z0-9_.\-]{20,300}$/.test(key)) throw new ApiFault('BAD_REQUEST', 'That does not look like a Gemini API key. Copy it again with the Copy key button.')
         // Check the key with Google before saving it (free call, lists available models).
         const check = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key } })
         if (!check.ok) throw new ApiFault('BAD_REQUEST', 'Google rejected this key. Create a new one at aistudio.google.com and paste it again.')
