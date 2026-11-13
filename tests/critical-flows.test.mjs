@@ -164,6 +164,26 @@ test('AI drafts: teachers only, no student personal data sent, daily cap, key ne
   assert.match(sql, /calls < greatest\(p_limit, 0\)/);
 });
 
+test('worksheets: no Supabase Storage, text moves to Drive after 7 days, keys hidden until deadline, no student data to AI', async () => {
+  const fn = await readFile(new URL('../supabase/functions/worksheets/index.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(fn, /\.storage\./); // never uses Supabase Storage
+  assert.match(fn, /const KEEP_DAYS = 7/);
+  // text is cleared only after Drive confirmed the copy, and not if edited meanwhile
+  assert.match(fn, /update\(\{ questions: '', answer_key: '', archived_at: new Date\(\)\.toISOString\(\),\s*\n\s*drive_file_id: made\.id/);
+  assert.match(fn, /\.eq\('updated_at', w\.updated_at\)\.is\('archived_at', null\)/);
+  // students get the answer key only after the due time
+  assert.match(fn, /const keyOpen = !!hw\.due_at && new Date\(hw\.due_at\)\.getTime\(\) <= Date\.now\(\)/);
+  assert.match(fn, /AnswerKey: keyOpen \? c\.answerKey : ''/);
+  // prompt built from class/board/subject/topic only
+  const prompt = fn.slice(fn.indexOf('let prompt = ['), fn.indexOf("if (parent) {"));
+  assert.doesNotMatch(prompt, /student|mobile|phone|parent_/i);
+  assert.match(fn, /admin\.rpc\('ai_take'/);
+  const sql = await readFile(new URL('../supabase/migrations/20261114050000_worksheets.sql', import.meta.url), 'utf8');
+  assert.doesNotMatch(sql, /storage\.buckets/);
+  const wf = await readFile(new URL('../.github/workflows/deploy-supabase-api.yml', import.meta.url), 'utf8');
+  assert.match(wf, /supabase functions deploy worksheets/);
+});
+
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {
   assert.match(api, /'teacherIncome\.generate':\s*'TEACHER_INCOME_MANAGE'/);
   const block = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");

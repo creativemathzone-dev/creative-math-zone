@@ -1257,7 +1257,7 @@ Deno.serve(async (request) => {
       ])
       const tm = new Map((teachers || []).map((x) => [x.id, x.name])), sm = new Map((subjects || []).map((x) => [x.id, x.name])), bm = new Map((batches || []).map((x) => [x.id, x.name]))
       return response({ ok: true, data: currentRows.map((r) => { const sub = subMap.get(r.id); return { HomeworkID: r.id, Title: r.title,
-        Instructions: r.instructions, TeacherName: tm.get(r.teacher_id) || '', SubjectName: sm.get(r.subject_id) || '', BatchName: bm.get(r.batch_id) || '',
+        Instructions: r.instructions, WorksheetID: r.worksheet_id || '', TeacherName: tm.get(r.teacher_id) || '', SubjectName: sm.get(r.subject_id) || '', BatchName: bm.get(r.batch_id) || '',
         Materials: Array.isArray(r.materials) ? r.materials : [], Files:assignmentFileMap.get(r.id)||[], DueAt: r.due_at || '', Submission: sub ? { Answer: sub.answer,
           AttachmentURL: sub.attachment_url, Files:studentFileMap.get(r.id)||[], Status: sub.status, Feedback: sub.feedback, SubmittedAt: sub.submitted_at } : null } }) })
     }

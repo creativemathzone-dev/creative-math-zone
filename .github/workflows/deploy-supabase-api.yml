@@ -44,3 +44,6 @@ jobs:
 
       - name: Deploy fee reminders and absent alerts
         run: supabase functions deploy notify --project-ref "$PROJECT_ID" --yes
+
+      - name: Deploy AI worksheet maker
+        run: supabase functions deploy worksheets --project-ref "$PROJECT_ID" --yes

@@ -12,6 +12,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
 <script src="passkeys.js"></script>
 <script src="doubts.js"></script>
+<script src="worksheets.js"></script>
 <title>Creative Math Zone · Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -675,6 +676,7 @@ const NAV = [
   ['reminders', 'Reminders', 'STUDENT_VIEW'],
   ['notices', 'Notices', 'NOTICE_VIEW'],
   ['doubts', 'Doubts', null],
+  ['worksheets', 'Worksheets', null],
   ['fees', 'Fee structure', 'FINANCE_VIEW'],
   ['invoices', 'Invoices', 'FINANCE_VIEW'],
   ['paymentreview', 'Student payment review', 'FINANCE_VIEW'],
@@ -687,7 +689,7 @@ const NAV = [
   ['logs', 'Activity log', 'LOG_VIEW']
 ];
 function buildNav() {
-  $('#nav-items').innerHTML = NAV.filter(n => (!n[2] || can(n[2])) && (n[0] !== 'promotions' || can('MASTER_VIEW'))).map(n => '<button class="item" data-go="' + n[0] + '">' + esc(n[1]) + '</button>').join('');
+  $('#nav-items').innerHTML = NAV.filter(n => (!n[2] || can(n[2])) && (n[0] !== 'promotions' || can('MASTER_VIEW')) && (n[0] !== 'worksheets' || (S.user && S.user.role === 'SUPER_ADMIN'))).map(n => '<button class="item" data-go="' + n[0] + '">' + esc(n[1]) + '</button>').join('');
 }
 function go(view, arg){ S.view=view; S.arg=arg; SYNC.stale=false; liveState('Live'); $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
@@ -709,6 +711,7 @@ $('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open
 const VIEWS = {};
 
 VIEWS.doubts = main => window.CMZDoubts.view(main, { api, esc, toast, busy, openDlg, closeDlg, fmtTime, role:'ADMIN', token:()=>S.token });
+VIEWS.worksheets = main => window.CMZWorksheets.view(main, { esc, toast, busy, openDlg, closeDlg, role:'ADMIN', token:()=>S.token, centreName:()=>(S.cfg && S.cfg.centreName) || 'Creative Math Zone' });
 
 /* ---------- reminders: free one-tap WhatsApp list ---------- */
 VIEWS.reminders = async main => {

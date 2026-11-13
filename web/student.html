@@ -13,6 +13,7 @@
 <script src="passkeys.js"></script>
 <script src="doubts.js"></script>
 <script src="push.js"></script>
+<script src="worksheets.js"></script>
 <title>Creative Math Zone · Student</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -848,9 +849,11 @@ VIEWS.homework = async main => {
   const rows = await api('student.homework.list');
   const dueLabel = due => due ? new Date(due).toLocaleString() : 'No deadline';
   main.innerHTML = '<div class="head"><h1>Homework</h1><p>Assignments, lesson materials, deadlines, and your submissions</p></div>' +
+    '<div id="ws-keys"></div>' +
     (rows.length ? rows.map(h => '<div class="card"><div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:center"><div><h2 style="font-size:1.15rem">'+esc(h.Title)+'</h2><div class="muted">'+esc(h.SubjectName||'Class work')+' · '+esc(h.TeacherName)+' · '+esc(h.BatchName)+'</div></div>'+
       '<span class="pill '+(h.Submission?'ok':'warn')+'">'+(h.Submission?(h.Submission.Status==='REVIEWED'?'Reviewed':'Submitted'):'Not submitted')+'</span></div>'+
       '<p class="muted">Due: '+esc(dueLabel(h.DueAt))+'</p><div style="white-space:pre-wrap">'+esc(h.Instructions||'')+'</div>'+
+      (h.WorksheetID?'<p style="margin:.7rem 0 0"><button type="button" class="btn primary" data-ws-open="'+esc(h.HomeworkID)+'">📄 Open worksheet</button></p>':'')+
       (h.Materials.length?'<div style="margin-top:.7rem"><b>Class materials</b><ul>'+h.Materials.map(u=>'<li><a href="'+esc(u)+'" target="_blank" rel="noopener">Open material</a></li>').join('')+'</ul></div>':'')+
       (h.Files.length?'<div style="margin-top:.7rem"><b>Homework files</b><ul>'+h.Files.map(f=>'<li><button type="button" class="link" data-hw-file="'+esc(f.FileID)+'">'+esc(f.FileName)+(f.Archived?' · Drive archive':f.ArchiveError?' · Archive pending retry':'')+'</button></li>').join('')+'</ul></div>':'')+
       (h.Submission&&h.Submission.Files&&h.Submission.Files.length?'<div style="margin-top:.7rem"><b>Your uploaded files</b><ul>'+h.Submission.Files.map(f=>'<li><button type="button" class="link" data-hw-file="'+esc(f.FileID)+'">'+esc(f.FileName)+(f.Archived?' · Drive archive':f.ArchiveError?' · Archive pending retry':'')+'</button></li>').join('')+'</ul></div>':'')+
@@ -868,6 +871,9 @@ VIEWS.homework = async main => {
     form.addEventListener('submit',ev=>{ev.preventDefault();const b=form.querySelector('button');busy(b,async()=>{if(form.elements.files.files.length>5)throw {error:'Choose up to five files.'};await api('student.homework.submit',{homeworkId:form.dataset.hwForm,answer:form.elements.answer.value.trim(),attachmentUrl:form.elements.attachmentUrl.value.trim(),hasFiles:form.elements.files.files.length>0});await uploadHomeworkFiles(form.dataset.hwForm,form.elements.files.files);try{localStorage.removeItem(key)}catch(e){}toast('Homework submitted.');go('homework');});});
   });
   $$('[data-hw-file]',main).forEach(b=>b.addEventListener('click',()=>busy(b,()=>openHomeworkFile(b.dataset.hwFile))));
+  const wsCtx={esc,toast,busy,openDlg,closeDlg,role:'STUDENT',token:()=>S.token,centreName:()=>(S.cfg&&S.cfg.centreName)||'Creative Math Zone'};
+  $$('[data-ws-open]',main).forEach(b=>b.addEventListener('click',()=>busy(b,()=>window.CMZWorksheets.studentOpen(wsCtx,b.dataset.wsOpen))));
+  if(window.CMZWorksheets)window.CMZWorksheets.studentKeys($('#ws-keys',main),wsCtx);
   $$('[data-hw-delete]',main).forEach(b=>b.addEventListener('click',()=>{if(!confirm('Delete this uploaded file?'))return;busy(b,async()=>{await api('homework.files.delete',{homeworkId:b.dataset.homeworkId,fileId:b.dataset.hwDelete});toast('File deleted.');go('homework');});}));
 };
 
