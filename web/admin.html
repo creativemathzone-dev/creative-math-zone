@@ -954,24 +954,32 @@ VIEWS.students = async main => {
 VIEWS.student = async (main, id) => {
   await loadLookups();
   const canFinance = can('FINANCE_VIEW');
-  const [d, hist, fees] = await Promise.all([
+  const superAdmin = S.user && S.user.role === 'SUPER_ADMIN';
+  const [d, hist, fees, money, delState] = await Promise.all([
     api('students.get', { studentId: id }),
     api('changes.list', { studentId: id }),
-    canFinance ? api('finance.studentFee.list', { studentId: id }).catch(() => null) : Promise.resolve(null)
+    canFinance ? api('finance.studentFee.list', { studentId: id }).catch(() => null) : Promise.resolve(null),
+    canFinance ? api('students.finance', { studentId: id }).catch(() => null) : Promise.resolve(null),
+    superAdmin ? api('settings.studentDelete.get').catch(() => null) : Promise.resolve(null)
   ]);
   const s = d.student, fields = studentFields(true, d.student.Board, d.student.CurrentClass), editable = can('STUDENT_EDIT');
-  const subjRows = d.subjects.slice().reverse();
+  const deleteEnabled = !!(delState && delState.enabled);
+  // Entries removed as "given by mistake" are hidden from the subject list.
+  const subjRows = d.subjects.filter(x => String(x.Status).toUpperCase() !== 'REMOVED').slice().reverse();
+  const inr = n => '₹' + (Number(n) || 0).toLocaleString('en-IN');
 
   const activeSubjects = d.subjects.filter(x => String(x.Status).toUpperCase() === 'ACTIVE').length;
 
   main.innerHTML = '<p><button class="link" data-go-back>← All students</button></p>' +
     '<div class="head"><div><h1>' + esc(s.Name) + '</h1><p>' + esc(s.StudentID) + ' · Class ' + esc(s.CurrentClass) + ' · ' + esc(nameOf('batches', 'BatchID', 'BatchName', s.CurrentBatch) || 'No batch') + ' · ' + pill(s.Status) + '</p></div>' +
-    '<div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn" id="student-id-print">Print ID card</button><button class="btn" id="student-cert-print">Print certificate</button>' + (editable ? '<button class="btn" id="reset-pw">Reset password</button>' : '') + '</div></div>' +
+    '<div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn" id="student-id-print">Print ID card</button><button class="btn" id="student-cert-print">Print certificate</button>' + (editable ? '<button class="btn" id="reset-pw">Reset password</button>' : '') + (superAdmin && deleteEnabled ? '<button class="btn danger" id="student-delete">Delete student</button>' : '') + '</div></div>' +
     '<div class="tabs" role="tablist">' +
       '<button role="tab" aria-selected="true" data-tab="p">Profile</button>' +
       '<button role="tab" aria-selected="false" data-tab="s">Subjects (' + activeSubjects + ')</button>' +
       (canFinance && fees ? '<button role="tab" aria-selected="false" data-tab="f">Fees</button>' : '') +
       '<button role="tab" aria-selected="false" data-tab="h">History</button>' +
+      (money ? '<button role="tab" aria-selected="false" data-tab="i">Invoices (' + money.invoices.length + ')</button>' +
+        '<button role="tab" aria-selected="false" data-tab="r">Receipts (' + money.receipts.length + ')</button>' : '') +
     '</div>' +
     '<div id="tab-p" class="card"><form id="ef">' + formHtml(fields, s) +
       (editable ? '<label class="f"><span>Reason for change (optional)</span><input name="reason" placeholder="e.g. promoted to Class XII"><small>Saved in the student’s history when class, batch or status changes.</small></label><button class="btn primary" id="ef-save">Save changes</button>' : '') + '</form>' +
@@ -981,14 +989,37 @@ VIEWS.student = async (main, id) => {
     '<div id="tab-h" class="hidden">' + (hist.length
       ? '<div class="tablewrap"><table class="stack"><thead><tr><th>When</th><th>What</th><th>From</th><th>To</th><th>By</th><th>Reason</th></tr></thead><tbody>' +
         hist.map(h => '<tr><td data-l="When">' + esc(fmtTime(h.ChangedAt)) + '</td><td data-l="What">' + esc(h.Field) + '</td><td data-l="From">' + esc(h.OldValue || '—') + '</td><td data-l="To">' + esc(h.NewValue) + '</td><td data-l="By">' + esc(h.ChangedBy) + '</td><td data-l="Reason">' + esc(h.Reason) + '</td></tr>').join('') + '</tbody></table></div>'
-      : '<div class="card empty"><b>No changes yet</b>Class, batch, status and subject changes will be listed here.</div>') + '</div>';
+      : '<div class="card empty"><b>No changes yet</b>Class, batch, status and subject changes will be listed here.</div>') + '</div>' +
+    (money ? '<div id="tab-i" class="hidden">' + (money.invoices.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Invoice</th><th>Month</th><th>Subjects</th><th>Total</th><th>Paid</th><th>Balance</th><th>Due</th><th>Status</th></tr></thead><tbody>' +
+        money.invoices.map(v => '<tr class="click" data-sinv="' + esc(v.InvoiceID) + '"><td data-l="Invoice"><b>' + esc(v.InvoiceID) + '</b></td><td data-l="Month">' + esc(v.MonthLabel) + '</td><td data-l="Subjects">' + esc(v.Classes || '—') + '</td><td data-l="Total">' + inr(v.TotalAmount) + '</td><td data-l="Paid">' + inr(v.PaidAmount) + '</td><td data-l="Balance"><b>' + inr(v.BalanceAmount) + '</b></td><td data-l="Due">' + esc(fmtDate(v.DueDate)) + '</td><td>' + invoiceStatusPill(v.Status) + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="card empty"><b>No invoices yet</b>Invoices for this student will be listed here.</div>') + '</div>' +
+    '<div id="tab-r" class="hidden">' + (money.receipts.length
+      ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Receipt</th><th>Date</th><th>Subjects</th><th>Mode</th><th>Amount</th><th>Invoice</th><th>Status</th></tr></thead><tbody>' +
+        money.receipts.map(r => '<tr class="click" data-srec="' + esc(r.ReceiptID) + '"><td data-l="Receipt"><b>' + esc(r.ReceiptID) + '</b></td><td data-l="Date">' + esc(fmtDate(r.ReceiptDate)) + '</td><td data-l="Subjects">' + esc(r.Classes || '—') + '</td><td data-l="Mode">' + esc(r.PaymentMode || '—') + '</td><td data-l="Amount"><b>' + inr(r.Amount) + '</b></td><td data-l="Invoice">' + esc(r.InvoiceID || '—') + '</td><td>' + pill(r.Status) + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="card empty"><b>No receipts yet</b>Receipts appear here after a payment is recorded.</div>') + '</div>' : '');
 
   wireClassBatch($('#ef'), s.CurrentBatch, s.Board);
+  $$('[data-sinv]', main).forEach(tr => tr.addEventListener('click', () => go('invoice', tr.dataset.sinv)));
+  $$('[data-srec]', main).forEach(tr => tr.addEventListener('click', () => go('receipt', tr.dataset.srec)));
+  const delBtn = $('#student-delete');
+  if (delBtn) delBtn.addEventListener('click', () => openDlg('Delete ' + s.Name + ' permanently',
+    '<form><p><b style="color:#b42318">This cannot be undone.</b> Everything about this student will be erased: profile, login, subjects, attendance, invoices, payments, receipts, fee discounts, homework submissions and history.</p>' +
+    '<label class="f"><span>Type the student ID <b>' + esc(s.StudentID) + '</b> to confirm</span><input name="confirmId" autocomplete="off" required></label>' +
+    '<label class="f"><span>Your admin password</span><input name="password" type="password" autocomplete="current-password" required></label></form>',
+    '<button class="btn" type="button" data-close>Cancel</button><button class="btn danger" id="del-go">Delete forever</button>',
+    dl => $('#del-go', dl).addEventListener('click', ev => { ev.preventDefault(); busy(ev.target, async () => {
+      const confirmId = dl.querySelector('[name=confirmId]').value.trim(), password = dl.querySelector('[name=password]').value;
+      if (confirmId !== s.StudentID) { toast('The student ID does not match.', true); return; }
+      if (!password) { toast('Enter your admin password.', true); return; }
+      await api('students.delete', { studentId: s.StudentID, confirmStudentId: confirmId, password: password });
+      closeDlg(); toast(s.Name + ' was deleted permanently.'); go('students');
+    }); })));
   $('[data-go-back]', main).addEventListener('click', () => go('students'));
   $('#student-id-print').addEventListener('click', () => printStudentDocument(s, 'id'));
   $('#student-cert-print').addEventListener('click', () => printStudentDocument(s, 'certificate'));
 
-  const tabKeys = canFinance && fees ? ['p', 's', 'f', 'h'] : ['p', 's', 'h'];
+  const tabKeys = (canFinance && fees ? ['p', 's', 'f', 'h'] : ['p', 's', 'h']).concat(money ? ['i', 'r'] : []);
   $$('[data-tab]', main).forEach(b => b.addEventListener('click', () => {
     $$('[data-tab]', main).forEach(x => x.setAttribute('aria-selected', x === b ? 'true' : 'false'));
     tabKeys.forEach(k => $('#tab-' + k).classList.toggle('hidden', k !== b.dataset.tab));
@@ -1115,7 +1146,8 @@ function subjectsPanel(s, rows, editable) {
     '</div><button class="btn primary" id="af-save">Give subject</button></form></div>' : '') +
     (rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Subject</th><th>Teacher</th><th>Batch</th><th>Special fee</th><th>From</th><th>To</th><th>Status</th><th></th></tr></thead><tbody>' +
       rows.map(r => '<tr><td data-l="Subject"><b>' + esc(nameOf('subjects', 'SubjectID', 'SubjectName', r.SubjectID)) + '</b></td><td data-l="Teacher">' + esc(nameOf('teachers', 'TeacherID', 'Name', r.TeacherID)) + '</td><td data-l="Batch">' + esc(nameOf('batches', 'BatchID', 'BatchName', r.BatchID)) + '</td><td data-l="Special fee">' + (r.FeeOverride === null || r.FeeOverride === undefined ? 'Standard' : '₹' + Number(r.FeeOverride).toLocaleString('en-IN')) + '</td><td data-l="From">' + esc(fmtDate(r.StartDate)) + '</td><td data-l="To">' + esc(fmtDate(r.EndDate) || '—') + '</td><td>' + pill(r.Status) + '</td><td>' +
-        (editable && String(r.Status).toUpperCase() === 'ACTIVE' ? '<button class="btn small" data-edit-fee="' + esc(r.StudentSubjectID) + '">Edit fee</button> <button class="btn small danger" data-end="' + esc(r.StudentSubjectID) + '">End</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' :
+        (editable && String(r.Status).toUpperCase() === 'ACTIVE' ? '<button class="btn small" data-edit-fee="' + esc(r.StudentSubjectID) + '">Edit</button> <button class="btn small danger" data-end="' + esc(r.StudentSubjectID) + '">End</button>' : '') +
+        (editable && String(r.Status).toUpperCase() === 'ENDED' ? '<button class="btn small" data-remove-mistake="' + esc(r.StudentSubjectID) + '" title="Remove this entry completely; it will never be billed">Remove (mistake)</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' :
       '<div class="card empty"><b>No subjects yet</b>' + (editable ? 'Choose a subject, teacher and batch above.' : '') + '</div>');
 }
 function wireSubjectPanel(s, id, rows) {
@@ -1130,19 +1162,50 @@ function wireSubjectPanel(s, id, rows) {
     const row = rows.find(x => x.StudentSubjectID === b.dataset.editFee);
     if (!row) return;
     const subjectName = nameOf('subjects', 'SubjectID', 'SubjectName', row.SubjectID);
-    openDlg('Special monthly fee · ' + subjectName,
-      '<form><div class="grid2"><label class="f full"><span>Special monthly fee (₹)</span><input name="feeOverride" type="number" min="0" max="100000" step="any" value="' + esc(row.FeeOverride == null ? '' : row.FeeOverride) + '"><small>Leave empty to use the standard subject fee.</small></label><label class="f full"><span>Reason (optional)</span><input name="reason" maxlength="200" placeholder="Reason for this fee change"></label></div></form>',
-      '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="fee-override-save">Save fee</button>',
+    const today = new Date().toISOString().slice(0, 10);
+    const oldStart = String(row.StartDate || '').slice(0, 10);
+    const oldFee = row.FeeOverride == null ? '' : String(row.FeeOverride);
+    openDlg('Edit subject · ' + subjectName,
+      '<form><div class="grid2"><label class="f full"><span>Start date</span><input name="startDate" type="date" max="' + today + '" value="' + esc(oldStart) + '"><small>Fix this if the subject was given with the wrong date (for example it really started in October). The student is billed from this month.</small></label><label class="f full"><span>Special monthly fee (₹)</span><input name="feeOverride" type="number" min="0" max="100000" step="any" value="' + esc(oldFee) + '"><small>Leave empty to use the standard subject fee.</small></label><label class="f full"><span>Reason (optional)</span><input name="reason" maxlength="200" placeholder="Reason for this change"></label></div></form>',
+      '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="fee-override-save">Save</button>',
       d => $('#fee-override-save', d).addEventListener('click', ev => busy(ev.target, async () => {
-        const input = d.querySelector('[name=feeOverride]');
+        const input = d.querySelector('[name=feeOverride]'), startInput = d.querySelector('[name=startDate]'), reason = d.querySelector('[name=reason]').value;
         if (input.value !== '' && (!Number.isFinite(Number(input.value)) || Number(input.value) < 0 || Number(input.value) > 100000)) { toast('Enter a fee from ₹0 to ₹100,000.', true); return; }
-        await api('studentSubjects.updateFee', { studentSubjectId: row.StudentSubjectID, feeOverride: input.value === '' ? null : input.value, reason: d.querySelector('[name=reason]').value });
-        closeDlg(); toast('Special monthly fee updated.'); go('student', id); setTimeout(() => { const t = $('[data-tab=s]'); if (t) t.click(); }, 50);
+        if (!startInput.value) { toast('Choose a start date.', true); return; }
+        if (startInput.value > today) { toast('Start date cannot be in the future.', true); return; }
+        let changed = false;
+        if (startInput.value !== oldStart) { await api('studentSubjects.updateStart', { studentSubjectId: row.StudentSubjectID, startDate: startInput.value, reason: reason }); changed = true; }
+        if (input.value.trim() !== oldFee) { await api('studentSubjects.updateFee', { studentSubjectId: row.StudentSubjectID, feeOverride: input.value === '' ? null : input.value, reason: reason }); changed = true; }
+        closeDlg(); toast(changed ? 'Subject updated.' : 'Nothing has changed.'); go('student', id); setTimeout(() => { const t = $('[data-tab=s]'); if (t) t.click(); }, 50);
       })))
   }));
+  const reopenSubjects = () => { go('student', id); setTimeout(() => { const t = $('[data-tab=s]'); if (t) t.click(); }, 50); };
   $$('[data-end]').forEach(b => b.addEventListener('click', () => {
-    if (!confirm('End this subject for ' + s.Name + ' from today? The record stays in their history.')) return;
-    busy(b, async () => { await api('studentSubjects.end', { studentSubjectId: b.dataset.end }); toast('Subject ended.'); go('student', id); setTimeout(() => { const t = $('[data-tab=s]'); if (t) t.click(); }, 50); });
+    const row = rows.find(x => x.StudentSubjectID === b.dataset.end);
+    if (!row) return;
+    const subjectName = nameOf('subjects', 'SubjectID', 'SubjectName', row.SubjectID);
+    const today = new Date().toISOString().slice(0, 10);
+    openDlg('End subject · ' + subjectName,
+      '<form><label class="f"><input type="radio" name="mode" value="end" checked> <b>Student stopped this subject</b><small>Billing stops after the end date. The record stays in their history.</small></label>' +
+      '<label class="f"><span>End date</span><input name="endDate" type="date" min="' + esc(String(row.StartDate || '').slice(0, 10)) + '" value="' + today + '"></label>' +
+      '<label class="f"><input type="radio" name="mode" value="mistake"> <b>Given by mistake — remove it</b><small>Use this if the subject was given with a wrong date or to the wrong student. It is removed and never billed. To fix only the start date, cancel and use “Edit” instead.</small></label>' +
+      '<label class="f"><span>Reason (optional)</span><input name="reason" maxlength="200"></label></form>',
+      '<button class="btn" type="button" data-close>Cancel</button><button class="btn danger" id="end-go">Confirm</button>',
+      d => $('#end-go', d).addEventListener('click', ev => { ev.preventDefault(); busy(ev.target, async () => {
+        const mode = d.querySelector('[name=mode]:checked').value, reason = d.querySelector('[name=reason]').value;
+        if (mode === 'mistake') {
+          await api('studentSubjects.end', { studentSubjectId: row.StudentSubjectID, removeMistake: true, reason: reason });
+          closeDlg(); toast('Subject removed.'); reopenSubjects(); return;
+        }
+        const endDate = d.querySelector('[name=endDate]').value;
+        if (!endDate) { toast('Choose an end date.', true); return; }
+        await api('studentSubjects.end', { studentSubjectId: row.StudentSubjectID, endDate: endDate, reason: reason });
+        closeDlg(); toast('Subject ended.'); reopenSubjects();
+      }); }));
+  }));
+  $$('[data-remove-mistake]').forEach(b => b.addEventListener('click', () => {
+    if (!confirm('Remove this ended subject entry completely? Use this only if it was given by mistake. It will no longer be counted in new invoices or teacher income.')) return;
+    busy(b, async () => { await api('studentSubjects.end', { studentSubjectId: b.dataset.removeMistake, removeMistake: true }); toast('Entry removed.'); reopenSubjects(); });
   }));
 }
 
@@ -2618,11 +2681,23 @@ VIEWS.settings = async main => {
     }
     driveConnections=await api('drive.connections.list');
   }
+  const delState = superAdmin ? await api('settings.studentDelete.get').catch(() => null) : null;
+  const delOn = !!(delState && delState.enabled);
   main.innerHTML = '<div class="head"><div><h1>Settings</h1><p>Changes apply straight away. Nothing else needs editing in the code.</p></div>' + (edit ? '<button class="btn primary" id="set-save">Save changes</button>' : '') + '</div>' +
     '<section class="section"><h2>Passkey sign-in</h2><div class="card"><p>Use this device’s passkey (fingerprint, face, device PIN, or security key) for future sign-ins.</p><div id="passkey-list"><span class="muted">Loading passkeys…</span></div><button class="btn primary" id="passkey-add" type="button">Add a passkey on this device</button></div></section>' +
     '<div class="card"><form id="set-f">' + rows.map(r => '<label class="f"><span>' + esc(r.description || r.key) + '</span><input name="' + esc(r.key) + '" value="' + esc(r.value) + '"' + (edit ? '' : ' readonly') + '><small>' + esc(r.key) +
       (r.key === 'SUBJECT_BLOCKED_PAIRS' ? ' — subject IDs: ' + L('subjects').map(s => s.SubjectID + ' = ' + s.SubjectName).join(', ') : '') + '</small></label>').join('') + '</form></div>' +
-    (superAdmin?'<section class="section"><h2>Homework file archive</h2><div class="card"><p>Connect the centre Google account used to archive homework and student submissions after deadlines. Older accounts stay connected so archived files remain available. Use transfer to move an old account’s archive to the current account; it disconnects the old account after all files move.</p><div id="drive-connections">'+(driveConnections.length?driveConnections.map(c=>'<div class="row" style="padding:.65rem 0;border-top:1px solid var(--line)"><b>'+esc(c.account_email)+'</b><span class="pill '+(c.is_primary?'ok':'')+'">'+(c.is_primary?'Current archive account':'Previous archive account')+'</span>'+(c.is_primary?'':'<button class="btn small" data-drive-transfer="'+esc(c.id)+'">Transfer archive and disconnect</button>')+'</div>').join(''):'<p class="muted">No Google Drive account connected yet.</p>')+'</div><button class="btn primary" id="drive-connect">Connect / change Google account</button><p class="muted" style="margin-bottom:0">Files remain in Supabase if Drive is not connected or an upload fails. Drive copies are kept until a teacher deletes them from the homework page.</p></div></section>':'');
+    (superAdmin?'<section class="section"><h2>Homework file archive</h2><div class="card"><p>Connect the centre Google account used to archive homework and student submissions after deadlines. Older accounts stay connected so archived files remain available. Use transfer to move an old account’s archive to the current account; it disconnects the old account after all files move.</p><div id="drive-connections">'+(driveConnections.length?driveConnections.map(c=>'<div class="row" style="padding:.65rem 0;border-top:1px solid var(--line)"><b>'+esc(c.account_email)+'</b><span class="pill '+(c.is_primary?'ok':'')+'">'+(c.is_primary?'Current archive account':'Previous archive account')+'</span>'+(c.is_primary?'':'<button class="btn small" data-drive-transfer="'+esc(c.id)+'">Transfer archive and disconnect</button>')+'</div>').join(''):'<p class="muted">No Google Drive account connected yet.</p>')+'</div><button class="btn primary" id="drive-connect">Connect / change Google account</button><p class="muted" style="margin-bottom:0">Files remain in Supabase if Drive is not connected or an upload fails. Drive copies are kept until a teacher deletes them from the homework page.</p></div></section>':'') +
+    (superAdmin ? '<section class="section"><h2>Danger zone</h2><div class="card"><p><b>Permanent student delete</b> is <span class="pill ' + (delOn ? 'bad' : 'ok') + '">' + (delOn ? 'ON' : 'OFF') + '</span></p>' +
+      '<p class="muted">When ON, a “Delete student” button appears on each student’s page. It erases the student and all their records (subjects, attendance, invoices, payments, receipts, homework, history and login) forever. Keep it OFF when you are not cleaning up data.</p>' +
+      '<form id="del-toggle"><label class="f"><span>Your admin password</span><input name="password" type="password" autocomplete="current-password"></label>' +
+      '<button class="btn ' + (delOn ? 'primary' : 'danger') + '" id="del-toggle-go">' + (delOn ? 'Turn OFF' : 'Turn ON') + '</button></form></div></section>' : '');
+  if (superAdmin) $('#del-toggle-go').addEventListener('click', ev => { ev.preventDefault(); busy(ev.target, async () => {
+    const password = $('#del-toggle [name=password]').value;
+    if (!password) { toast('Enter your admin password.', true); return; }
+    const r = await api('settings.studentDelete.set', { enabled: !delOn, password: password });
+    toast('Permanent student delete is now ' + (r.enabled ? 'ON' : 'OFF') + '.'); go('settings');
+  }); });
   if (window.CMZPasskey) window.CMZPasskey.renderManager($('#passkey-list'), $('#passkey-add'), esc, toast);
   if(superAdmin){
     $('#drive-connect').addEventListener('click',ev=>busy(ev.target,async()=>{const result=await api('drive.oauthStart');location.href=result.url;}));

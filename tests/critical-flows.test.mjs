@@ -47,6 +47,32 @@ test('one-day class rescheduling is teacher-owned, date-scoped, and leaves the w
   assert.doesNotMatch(block, /admin\.from\('timetable'\)\.update\(/);
 });
 
+test('invoice generation bills each subject once and skips same-day mistakes', () => {
+  const block = actionBlock("if (action === 'invoices.generate')", "if (action === 'invoices.list')");
+  assert.match(block, /assignmentEnd <= assignmentStart\) continue/);
+  assert.match(block, /const bySubject = new Map/);
+  assert.match(block, /assignmentByStudent\.set\(studentId, \[\.\.\.bySubject\.values\(\)\]\)/);
+  assert.match(block, /\.in\('status', \['ACTIVE', 'ENDED'\]\)/);
+});
+
+test('subjects given by mistake can be removed and start dates corrected', () => {
+  assert.match(api, /'studentSubjects\.updateStart':\s*'STUDENT_EDIT'/);
+  const end = actionBlock("if (action === 'studentSubjects.end')", "if (action === 'studentSubjects.updateStart')");
+  assert.match(end, /update\(\{ status: 'REMOVED'/);
+  const start = actionBlock("if (action === 'studentSubjects.updateStart')", "if (action === 'students.finance')");
+  assert.match(start, /if \(overlap\) throw new ApiFault/);
+});
+
+test('permanent student delete needs Super Admin, the switch, the typed ID and the password', () => {
+  const block = actionBlock("if (action === 'settings.studentDelete.get'", "if (action === 'studentSubjects.updateFee')");
+  assert.match(block, /user\.role !== 'SUPER_ADMIN'/);
+  assert.match(block, /if \(!enabled\) throw new ApiFault\('FORBIDDEN'/);
+  assert.match(block, /confirmStudentId/);
+  assert.match(block, /await verifyPassword\(payload\.password\)\s*\n\s*const \{ data: student/);
+  assert.match(block, /admin\.rpc\('delete_student_permanently'/);
+  assert.match(api, /key === 'STUDENT_DELETE_ENABLED'\) throw new ApiFault/);
+});
+
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {
   assert.match(api, /'teacherIncome\.generate':\s*'TEACHER_INCOME_MANAGE'/);
   const block = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");

@@ -181,7 +181,7 @@ function canonicalStudentBoard(value: unknown, currentClass: unknown): string {
     if (higher) throw new ApiFault('BAD_REQUEST', 'CBSE (Lower) is available only for Classes I to X.')
     return 'CBSE (Lower)'
   }
-  const allowed = higher ? { WBCHSE: 'WBCHSE', ISC: 'ISC' } : { WBBSE: 'WBBSE', ICSE: 'ICSE' }
+  const allowed: Record<string, string> = higher ? { WBCHSE: 'WBCHSE', ISC: 'ISC' } : { WBBSE: 'WBBSE', ICSE: 'ICSE' }
   const board = allowed[key]
   if (board) return board
   throw new ApiFault('BAD_REQUEST', higher
@@ -716,6 +716,8 @@ Deno.serve(async (request) => {
       'promotions.fees.save': 'STUDENT_EDIT', 'promotions.fees.delete': 'STUDENT_EDIT', 'promotions.apply': 'STUDENT_EDIT',
       'students.resetPassword': 'STUDENT_EDIT',
       'studentSubjects.assign': 'STUDENT_EDIT', 'studentSubjects.end': 'STUDENT_EDIT', 'studentSubjects.updateFee': 'STUDENT_EDIT',
+      'studentSubjects.updateStart': 'STUDENT_EDIT', 'students.finance': 'FINANCE_VIEW',
+      'students.delete': 'STUDENT_EDIT', 'settings.studentDelete.get': 'SETTINGS_VIEW', 'settings.studentDelete.set': 'SETTINGS_EDIT',
       'changes.list': 'STUDENT_VIEW',
       'teachers.add': 'TEACHER_EDIT', 'teachers.update': 'TEACHER_EDIT',
       'teachers.resetPassword': 'TEACHER_EDIT',
@@ -1077,7 +1079,7 @@ Deno.serve(async (request) => {
     if (action === 'settings.get') {
       const { data, error } = await admin.from('settings').select('*').order('setting_key')
       if (error) throw error
-      return response({ ok: true, data: (data || []).filter((r) => !String(r.setting_key).startsWith('PUBLIC_LANDING_NOTICE_')).map((r) => ({ key: r.setting_key, value: r.value,
+      return response({ ok: true, data: (data || []).filter((r) => !String(r.setting_key).startsWith('PUBLIC_LANDING_NOTICE_') && r.setting_key !== 'STUDENT_DELETE_ENABLED').map((r) => ({ key: r.setting_key, value: r.value,
         description: r.description, updatedAt: r.updated_at, updatedBy: r.updated_by })) })
     }
 
@@ -1909,9 +1911,27 @@ Deno.serve(async (request) => {
               return `${part('year')}-${part('month')}-${part('day')}`
             })()
             : ''
-        if ((assignmentStart && assignmentStart > monthEnd) ||
-            (a.end_date && String(a.end_date).slice(0, 10) < monthStart)) continue
+        const assignmentEnd = a.end_date ? String(a.end_date).slice(0, 10) : ''
+        if ((assignmentStart && assignmentStart > monthEnd) || (assignmentEnd && assignmentEnd < monthStart)) continue
+        // A subject ended on (or before) the day it started was given by mistake;
+        // it never ran, so it must not be billed.
+        if (String(a.status).toUpperCase() === 'ENDED' && assignmentStart && assignmentEnd && assignmentEnd <= assignmentStart) continue
+        a._start = assignmentStart
         assignmentByStudent.set(a.student_id, [...(assignmentByStudent.get(a.student_id) || []), a])
+      }
+      // Bill each subject at most once per month. When a subject was ended and
+      // given again (for example to correct its start date), keep the current
+      // assignment: ACTIVE first, then the latest start, then the newest record.
+      for (const [studentId, rows] of assignmentByStudent) {
+        const bySubject = new Map<string, any>()
+        for (const a of rows) {
+          const prior = bySubject.get(a.subject_id)
+          const rank = (x: any) => [String(x.status).toUpperCase() === 'ACTIVE' ? 1 : 0, String(x._start || ''), String(x.created_at || '')]
+          if (!prior) { bySubject.set(a.subject_id, a); continue }
+          const [pa, ps, pc] = rank(prior), [na, ns, nc] = rank(a)
+          if (na > pa || (na === pa && (ns > ps || (ns === ps && nc > pc)))) bySubject.set(a.subject_id, a)
+        }
+        assignmentByStudent.set(studentId, [...bySubject.values()])
       }
       const result = { generated: 0, skippedExisting: 0, skippedEmpty: 0, total: 0, details: [] as Array<Record<string, unknown>> }
       for (const student of eligible) {
@@ -2842,7 +2862,30 @@ Deno.serve(async (request) => {
       const { data: row, error: findError } = await admin.from('student_subjects').select('*').eq('id', id).maybeSingle()
       if (findError) throw findError
       if (!row) throw new ApiFault('NOT_FOUND', 'Record not found.')
-      if (row.status !== 'ACTIVE') throw new ApiFault('BAD_REQUEST', 'This subject is already ended.')
+      // "Given by mistake" removes the assignment completely from billing,
+      // teacher income and the student's subject list. It can also clean up
+      // an already-ended row that was a mistake.
+      const removeMistake = payload.removeMistake === true
+      const currentStatus = String(row.status).toUpperCase()
+      if (removeMistake) {
+        if (currentStatus === 'REMOVED') throw new ApiFault('BAD_REQUEST', 'This subject is already removed.')
+        const { data: billed, error: billedError } = await admin.from('invoices').select('id,line_items,status,paid_amount')
+          .eq('student_id', row.student_id).neq('status', 'CANCELLED')
+        if (billedError) throw billedError
+        const paidForSubject = (billed || []).some((inv) => Number(inv.paid_amount) > 0 &&
+          normalizedInvoiceLines(inv).some((line) => String(line.subjectId) === String(row.subject_id) && Number(line.paidAmount) > 0))
+        if (paidForSubject && currentStatus === 'ACTIVE' && payload.force !== true) {
+          throw new ApiFault('BAD_REQUEST', 'Payments were already received for this subject. End it with an end date instead of removing it.')
+        }
+        const { error } = await admin.from('student_subjects').update({ status: 'REMOVED', end_date: row.start_date || todayDate() }).eq('id', id)
+        if (error) throw error
+        await admin.from('change_history').insert({ id: `CHG-${crypto.randomUUID()}`, student_id: row.student_id, field: 'Subject',
+          old_value: `${row.subject_id} / ${row.teacher_id || ''} / ${row.batch_id || ''}`, new_value: 'REMOVED (given by mistake)', changed_by: user.id,
+          reason: requireText(payload.reason, 'Reason', 200), academic_year: row.academic_year || '' })
+        await logAction(admin, user, 'REMOVE_STUDENT_SUBJECT', 'STUDENT_SUBJECT', id, { previousStatus: currentStatus })
+        return response({ ok: true, data: { removed: true } })
+      }
+      if (currentStatus !== 'ACTIVE') throw new ApiFault('BAD_REQUEST', 'This subject is already ended.')
       if (row.start_date && endDate < row.start_date) throw new ApiFault('BAD_REQUEST', 'End date cannot be before the start date.')
       const { error } = await admin.from('student_subjects').update({ end_date: endDate, status: 'ENDED' }).eq('id', id)
       if (error) throw error
@@ -2851,6 +2894,112 @@ Deno.serve(async (request) => {
         reason: requireText(payload.reason, 'Reason', 200), academic_year: row.academic_year || '' })
       await logAction(admin, user, 'END_STUDENT_SUBJECT', 'STUDENT_SUBJECT', id, { endDate })
       return response({ ok: true, data: { ended: true } })
+    }
+
+    if (action === 'studentSubjects.updateStart') {
+      const id = requireText(payload.studentSubjectId, 'Student subject ID', 40, true)
+      const startDate = requireText(payload.startDate, 'Start date', 10, true)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new ApiFault('BAD_REQUEST', 'Start date must use yyyy-mm-dd.')
+      const { data: row, error: findError } = await admin.from('student_subjects').select('*').eq('id', id).maybeSingle()
+      if (findError) throw findError
+      if (!row) throw new ApiFault('NOT_FOUND', 'Subject assignment not found.')
+      if (String(row.status).toUpperCase() !== 'ACTIVE') throw new ApiFault('BAD_REQUEST', 'Only an active subject can have its start date changed.')
+      if (startDate > todayDate()) throw new ApiFault('BAD_REQUEST', 'Start date cannot be in the future.')
+      if (String(row.start_date || '') === startDate) return response({ ok: true, data: { unchanged: true } })
+      // Do not let the corrected period overlap an earlier assignment of the
+      // same subject, otherwise the same month would look doubly assigned.
+      const { data: others, error: othersError } = await admin.from('student_subjects').select('id,start_date,end_date,status')
+        .eq('student_id', row.student_id).eq('subject_id', row.subject_id).neq('id', id).eq('status', 'ENDED')
+      if (othersError) throw othersError
+      const overlap = (others || []).find((o) => o.end_date && o.start_date && o.end_date > o.start_date && String(o.end_date) > startDate)
+      if (overlap) throw new ApiFault('BAD_REQUEST', `This subject was already running until ${overlap.end_date}. Pick a later start date, or remove that older entry as “given by mistake” first.`)
+      const { error } = await admin.from('student_subjects').update({ start_date: startDate }).eq('id', id)
+      if (error) throw error
+      await admin.from('change_history').insert({ id: `CHG-${crypto.randomUUID()}`, student_id: row.student_id, field: 'Subject start date',
+        old_value: String(row.start_date || ''), new_value: startDate, changed_by: user.id,
+        reason: requireText(payload.reason, 'Reason', 200), academic_year: row.academic_year || '' })
+      await logAction(admin, user, 'EDIT_STUDENT_SUBJECT_START', 'STUDENT_SUBJECT', id, { from: row.start_date, to: startDate })
+      return response({ ok: true, data: { startDate } })
+    }
+
+    if (action === 'students.finance') {
+      const studentId = requireText(payload.studentId, 'Student ID', 40, true)
+      const [{ data: invoices, error: invoiceError }, { data: receipts, error: receiptError }] = await Promise.all([
+        admin.from('invoices').select('*').eq('student_id', studentId).order('month', { ascending: false }).limit(500),
+        admin.from('receipts').select('id,payment_id,receipt_date,amount,status').eq('student_id', studentId)
+          .order('receipt_date', { ascending: false }).order('id', { ascending: false }).limit(500),
+      ])
+      if (invoiceError || receiptError) throw invoiceError || receiptError
+      const paymentIds = [...new Set((receipts || []).map((r) => r.payment_id).filter(Boolean))]
+      const { data: payments, error: paymentError } = paymentIds.length
+        ? await admin.from('payments').select('id,invoice_id,payment_mode,allocations').in('id', paymentIds) : { data: [], error: null }
+      if (paymentError) throw paymentError
+      const paymentMap = new Map((payments || []).map((p) => [p.id, p]))
+      return response({ ok: true, data: {
+        invoices: (invoices || []).map((r) => {
+          const total = Number(r.total_amount) || 0, paid = Number(r.paid_amount) || 0
+          return { InvoiceID: r.id, Month: r.month, MonthLabel: monthLabel(r.month),
+            Classes: normalizedInvoiceLines(r).map((line) => line.subjectName || line.subjectId).filter(Boolean).join(', '),
+            TotalAmount: total, PaidAmount: paid, BalanceAmount: Math.max(0, total - paid), DueDate: r.due_date,
+            Status: invoiceStatus(r.total_amount, r.paid_amount, r.due_date, r.status) }
+        }),
+        receipts: (receipts || []).map((r) => {
+          const p = paymentMap.get(r.payment_id)
+          return { ReceiptID: r.id, ReceiptDate: r.receipt_date, Amount: Number(r.amount), Status: r.status,
+            InvoiceID: p?.invoice_id || '', PaymentMode: p?.payment_mode || '',
+            Classes: p ? allocationsFromPayment(p.allocations).map((a) => a.subjectName).join(', ') : '' }
+        }) } })
+    }
+
+    if (action === 'settings.studentDelete.get' || action === 'settings.studentDelete.set' || action === 'students.delete') {
+      if (user.user_type !== 'ADMIN' || user.role !== 'SUPER_ADMIN') throw new ApiFault('FORBIDDEN', 'Only the Super Admin can use permanent student deletion.')
+      const verifyPassword = async (password: unknown) => {
+        const value = String(password || '')
+        if (!value || value.length > 200) throw new ApiFault('BAD_PASSWORD', 'Enter your admin password.')
+        const { data: authUser } = await admin.auth.admin.getUserById(authData.user.id)
+        const email = authUser.user?.email
+        if (!email) throw new ApiFault('BAD_PASSWORD', 'Admin password is incorrect.')
+        const { data: check, error: checkError } = await auth.auth.signInWithPassword({ email, password: value })
+        if (checkError || !check.session) throw new ApiFault('BAD_PASSWORD', 'Admin password is incorrect.')
+        // Close the session that was opened only to check the password.
+        await (admin.auth.admin as any).signOut(check.session.access_token, 'local').catch(() => null)
+      }
+      const { data: flag } = await admin.from('settings').select('value').eq('setting_key', 'STUDENT_DELETE_ENABLED').maybeSingle()
+      const enabled = String(flag?.value || '').toUpperCase() === 'TRUE'
+      if (action === 'settings.studentDelete.get') return response({ ok: true, data: { enabled } })
+      if (action === 'settings.studentDelete.set') {
+        const nextEnabled = payload.enabled === true
+        await verifyPassword(payload.password)
+        const { error } = await admin.from('settings').upsert({ setting_key: 'STUDENT_DELETE_ENABLED', value: nextEnabled ? 'TRUE' : 'FALSE',
+          description: 'Allow the Super Admin to permanently delete students (changed only with the admin password).',
+          updated_at: new Date().toISOString(), updated_by: user.id }, { onConflict: 'setting_key' })
+        if (error) throw error
+        await logAction(admin, user, nextEnabled ? 'ENABLE_STUDENT_DELETE' : 'DISABLE_STUDENT_DELETE', 'SETTING', 'STUDENT_DELETE_ENABLED', {})
+        return response({ ok: true, data: { enabled: nextEnabled } })
+      }
+      // students.delete
+      if (!enabled) throw new ApiFault('FORBIDDEN', 'Permanent student deletion is switched off. Turn it on in Settings first.')
+      const studentId = requireText(payload.studentId, 'Student ID', 40, true)
+      if (String(payload.confirmStudentId || '').trim() !== studentId) throw new ApiFault('BAD_REQUEST', 'Type the student ID exactly to confirm.')
+      await verifyPassword(payload.password)
+      const { data: student, error: studentError } = await admin.from('students').select('id,name').eq('id', studentId).maybeSingle()
+      if (studentError) throw studentError
+      if (!student) throw new ApiFault('NOT_FOUND', 'Student not found.')
+      const { data: loginRows } = await admin.from('app_users').select('id,auth_user_id').eq('user_type', 'STUDENT').eq('linked_id', studentId)
+      // Uploaded homework files in storage are removed after the database rows.
+      const { data: submissions } = await admin.from('homework_submissions').select('id').eq('student_id', studentId)
+      const submissionIds = (submissions || []).map((s) => s.id)
+      const { data: files } = submissionIds.length
+        ? await admin.from('homework_files').select('file_path').in('submission_id', submissionIds) : { data: [] }
+      const { data: result, error: deleteError } = await admin.rpc('delete_student_permanently', { p_student_id: studentId })
+      if (deleteError) throw deleteError
+      const paths = (files || []).map((f) => f.file_path).filter(Boolean)
+      if (paths.length) await admin.storage.from('homework-files').remove(paths).catch(() => null)
+      for (const login of loginRows || []) {
+        if (login.auth_user_id) await admin.auth.admin.deleteUser(login.auth_user_id).catch(() => null)
+      }
+      await logAction(admin, user, 'DELETE_STUDENT_PERMANENTLY', 'STUDENT', studentId, { name: student.name, removed: result })
+      return response({ ok: true, data: { deleted: true, studentId, name: student.name } })
     }
 
     if (action === 'studentSubjects.updateFee') {
@@ -2986,7 +3135,7 @@ Deno.serve(async (request) => {
       if (!student) throw new ApiFault('NOT_FOUND', 'Student record not found.')
       const { data: subjects, error: subjectsError } = await admin.from('student_subjects').select('*').eq('student_id', student.id).order('start_date', { ascending: false })
       if (subjectsError) throw subjectsError
-      const subjectRows = subjects || []
+      const subjectRows = (subjects || []).filter((r) => String(r.status).toUpperCase() !== 'REMOVED')
       if (action === 'student.subjects') {
         if (!subjectRows.length) return response({ ok: true, data: [] })
         const [{ data: sub }, { data: teachers }, { data: batches }] = await Promise.all([
@@ -3103,7 +3252,7 @@ Deno.serve(async (request) => {
         const studentId = requireText(payload.studentId, 'Student ID', 60, true)
         const { data: assignedRows, error: assignedError } = await admin.from('student_subjects')
           .select('subject_id,batch_id,status,start_date,end_date,academic_year')
-          .eq('teacher_id', teacher.id).eq('student_id', studentId).order('start_date', { ascending: false })
+          .eq('teacher_id', teacher.id).eq('student_id', studentId).neq('status', 'REMOVED').order('start_date', { ascending: false })
         if (assignedError) throw assignedError
         if (!assignedRows?.length) throw new ApiFault('FORBIDDEN', 'This student is not assigned to your classes.')
         const { data: student, error: studentError } = await admin.from('students')
@@ -3534,6 +3683,8 @@ Deno.serve(async (request) => {
           if (!prior || String(fee.effective_from) > String(prior.effective_from)) studentFeeByKey.set(key, fee)
         }
         const candidates = (assignments || []).filter((a) => a.teacher_id && a.subject_id && activeStudentIds.has(a.student_id) && teacherIds.has(a.teacher_id) &&
+          ['ACTIVE', 'ENDED'].includes(String(a.status).toUpperCase()) &&
+          !(String(a.status).toUpperCase() === 'ENDED' && a.start_date && a.end_date && a.end_date <= a.start_date) &&
           (!a.start_date || a.start_date <= monthEnd) && (!a.end_date || a.end_date >= monthStart))
         // When a subject was reassigned during a month, attribute the monthly fee
         // once to the latest assignment overlapping that month.
@@ -3781,7 +3932,7 @@ Deno.serve(async (request) => {
       const existing = new Map((known || []).map((r) => [r.setting_key, r.value]))
       const updated: string[] = []
       for (const [key, raw] of Object.entries(changes)) {
-        if (!existing.has(key)) throw new ApiFault('BAD_REQUEST', `Unknown setting: ${key}`)
+        if (!existing.has(key) || key === 'STUDENT_DELETE_ENABLED') throw new ApiFault('BAD_REQUEST', `Unknown setting: ${key}`)
         const value = requireText(raw, key, 300, key !== 'SUBJECT_BLOCKED_PAIRS')
         if (key === 'REGISTRATION_ENABLED' && !['TRUE', 'FALSE'].includes(value.toUpperCase())) throw new ApiFault('BAD_REQUEST', 'REGISTRATION_ENABLED must be TRUE or FALSE.')
         if (value !== existing.get(key)) {
