@@ -35,3 +35,6 @@ jobs:
 
       - name: Deploy homework archive and file access
         run: supabase functions deploy homework-drive --project-ref "$PROJECT_ID" --yes
+
+      - name: Deploy doubt portal photos
+        run: supabase functions deploy doubt-files --project-ref "$PROJECT_ID" --yes

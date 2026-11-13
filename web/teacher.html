@@ -11,6 +11,7 @@
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
 <script src="passkeys.js"></script>
+<script src="doubts.js"></script>
 <title>Creative Math Zone · Teacher</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -525,7 +526,7 @@ $('#logout').addEventListener('click', doLogout);
 $('#pw-out').addEventListener('click', doLogout);
 
 /* ---- nav ---- */
-const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['students','My students'],['sessions','Past classes'],['homework','Homework'],['notices','Notices'],['income','Income'],['profile','Profile']];
+const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['students','My students'],['sessions','Past classes'],['homework','Homework'],['doubts','Doubts'],['notices','Notices'],['income','Income'],['profile','Profile']];
 function buildNav(){
   const list = NAV.filter(n => n[0] !== 'income' || can('TEACHER_INCOME_VIEW'));
   $('#nav-items').innerHTML = list.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join('');
@@ -546,6 +547,8 @@ $('#nav-items').addEventListener('click', ev => { const b=ev.target.closest('[da
 $('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open'));
 
 const VIEWS = {};
+
+VIEWS.doubts = main => window.CMZDoubts.view(main, { api, esc, toast, busy, openDlg, closeDlg, fmtTime, role:'TEACHER', token:()=>S.token });
 
 VIEWS.studentProfile = async (main, id) => {
   if (!id) throw { code:'VALIDATION', error:'Student ID is missing.' };

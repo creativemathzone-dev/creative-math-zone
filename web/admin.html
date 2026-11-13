@@ -11,6 +11,7 @@
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
 <script src="passkeys.js"></script>
+<script src="doubts.js"></script>
 <title>Creative Math Zone · Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -672,6 +673,7 @@ const NAV = [
   ['timetable', 'Timetable', 'MASTER_VIEW'],
   ['attendance', 'Attendance', 'STUDENT_VIEW'],
   ['notices', 'Notices', 'NOTICE_VIEW'],
+  ['doubts', 'Doubts', null],
   ['fees', 'Fee structure', 'FINANCE_VIEW'],
   ['invoices', 'Invoices', 'FINANCE_VIEW'],
   ['paymentreview', 'Student payment review', 'FINANCE_VIEW'],
@@ -704,6 +706,8 @@ $('#nav-items').addEventListener('click', ev => { const b = ev.target.closest('[
 $('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open'));
 
 const VIEWS = {};
+
+VIEWS.doubts = main => window.CMZDoubts.view(main, { api, esc, toast, busy, openDlg, closeDlg, fmtTime, role:'ADMIN', token:()=>S.token });
 
 /* ---------- dashboard ---------- */
 VIEWS.dashboard = async main => {

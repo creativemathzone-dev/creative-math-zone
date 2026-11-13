@@ -11,6 +11,7 @@
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
 <script src="passkeys.js"></script>
+<script src="doubts.js"></script>
 <title>Creative Math Zone · Student</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -598,7 +599,7 @@ $('#logout').addEventListener('click', doLogout);
 $('#pw-out').addEventListener('click', doLogout);
 
 /* ---- nav ---- */
-const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['subjects','Subjects'],['attendance','Attendance'],['fees','Fees'],['homework','Homework'],['materials','Class PDFs'],['notices','Notices'],['profile','Profile']];
+const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['subjects','Subjects'],['attendance','Attendance'],['fees','Fees'],['homework','Homework'],['doubts','Doubts'],['materials','Class PDFs'],['notices','Notices'],['profile','Profile']];
 let classChangeWatcher=null;
 function startClassChangeWatcher(){
   if(classChangeWatcher)clearInterval(classChangeWatcher);
@@ -835,6 +836,9 @@ VIEWS.homework = async main => {
   $$('[data-hw-file]',main).forEach(b=>b.addEventListener('click',()=>busy(b,()=>openHomeworkFile(b.dataset.hwFile))));
   $$('[data-hw-delete]',main).forEach(b=>b.addEventListener('click',()=>{if(!confirm('Delete this uploaded file?'))return;busy(b,async()=>{await api('homework.files.delete',{homeworkId:b.dataset.homeworkId,fileId:b.dataset.hwDelete});toast('File deleted.');go('homework');});}));
 };
+
+/* ---- doubts ---- */
+VIEWS.doubts = main => window.CMZDoubts.view(main, { api, esc, toast, busy, openDlg, closeDlg, fmtTime, role:'STUDENT', token:()=>S.token });
 
 /* ---- class PDFs ---- */
 VIEWS.materials = async main => {

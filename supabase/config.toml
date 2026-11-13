@@ -13,3 +13,7 @@ verify_jwt = false
 [functions.homework-drive]
 # The function validates user tokens for downloads and a private cron secret for archive runs.
 verify_jwt = false
+
+[functions.doubt-files]
+# The function validates user tokens for photo upload/view and a private cron secret for the worker.
+verify_jwt = false

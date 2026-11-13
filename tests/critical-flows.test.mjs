@@ -73,6 +73,23 @@ test('permanent student delete needs Super Admin, the switch, the typed ID and t
   assert.match(api, /key === 'STUDENT_DELETE_ENABLED'\) throw new ApiFault/);
 });
 
+test('doubt portal: visibility, teacher-only answering, approval before points', async () => {
+  const block = actionBlock("if (action.startsWith('doubts.'))", "if (action === 'settings.studentDelete.get'");
+  // Students only see their own doubts or non-hidden ones of their class and subjects.
+  assert.match(block, /d\.class_name === sCtx\.cls && sCtx\.subjects\.has\(String\(d\.subject_id\)\)/);
+  assert.match(block, /if \(!teachesIt\(d\)\) throw new ApiFault\('FORBIDDEN', 'Only teachers of this subject can answer it\.'\)/);
+  // Classmate answers start PENDING; only an approval awards points.
+  assert.match(block, /author_type: 'STUDENT', author_id: me, body, status: 'PENDING'/);
+  assert.match(block, /const points = approve \? await settingNumber\('DOUBT_APPROVAL_POINTS', 10\) : 0/);
+  assert.match(block, /DOUBT_DAILY_LIMIT/);
+  const files = await readFile(new URL('../supabase/functions/doubt-files/index.ts', import.meta.url), 'utf8');
+  assert.match(files, /const KEEP_DAYS = 7/);
+  assert.match(files, /uploadDrive\(access, fileName, mime, bytes/);
+  assert.match(files, /if \(answer && answer\.status !== 'APPROVED'/);
+  const workflow = await readFile(new URL('../.github/workflows/deploy-supabase-api.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /supabase functions deploy doubt-files/);
+});
+
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {
   assert.match(api, /'teacherIncome\.generate':\s*'TEACHER_INCOME_MANAGE'/);
   const block = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");

@@ -718,6 +718,9 @@ Deno.serve(async (request) => {
       'studentSubjects.assign': 'STUDENT_EDIT', 'studentSubjects.end': 'STUDENT_EDIT', 'studentSubjects.updateFee': 'STUDENT_EDIT',
       'studentSubjects.updateStart': 'STUDENT_EDIT', 'students.finance': 'FINANCE_VIEW',
       'students.delete': 'STUDENT_EDIT', 'settings.studentDelete.get': 'SETTINGS_VIEW', 'settings.studentDelete.set': 'SETTINGS_EDIT',
+      'doubts.list': 'SELF_VIEW', 'doubts.get': 'SELF_VIEW', 'doubts.create': 'SELF_VIEW', 'doubts.answer': 'SELF_VIEW',
+      'doubts.claim': 'SELF_VIEW', 'doubts.review': 'SELF_VIEW', 'doubts.resolve': 'SELF_VIEW', 'doubts.meToo': 'SELF_VIEW',
+      'doubts.hide': 'SELF_VIEW', 'doubts.leaderboard': 'SELF_VIEW', 'doubts.stats': 'SELF_VIEW',
       'changes.list': 'STUDENT_VIEW',
       'teachers.add': 'TEACHER_EDIT', 'teachers.update': 'TEACHER_EDIT',
       'teachers.resetPassword': 'TEACHER_EDIT',
@@ -2949,6 +2952,343 @@ Deno.serve(async (request) => {
             InvoiceID: p?.invoice_id || '', PaymentMode: p?.payment_mode || '',
             Classes: p ? allocationsFromPayment(p.allocations).map((a) => a.subjectName).join(', ') : '' }
         }) } })
+    }
+
+    /* ---------------- Doubt portal ---------------- */
+    if (action.startsWith('doubts.')) {
+      const isStudent = user.user_type === 'STUDENT', isTeacher = user.user_type === 'TEACHER', isAdmin = user.user_type === 'ADMIN'
+      if ((isStudent || isTeacher) && !user.linked_id) throw new ApiFault('FORBIDDEN', 'Your account is not linked to a student or teacher record.')
+      const me = String(user.linked_id || '')
+      const studentCtx = async () => {
+        const [{ data: st, error }, { data: subs, error: subError }] = await Promise.all([
+          admin.from('students').select('id,name,current_class,status').eq('id', me).maybeSingle(),
+          admin.from('student_subjects').select('subject_id').eq('student_id', me).ilike('status', 'active'),
+        ])
+        if (error || subError) throw error || subError
+        if (!st) throw new ApiFault('NOT_FOUND', 'Student record not found.')
+        return { cls: String(st.current_class || ''), subjects: new Set<string>((subs || []).map((r) => String(r.subject_id))),
+          active: String(st.status).toUpperCase() === 'ACTIVE' }
+      }
+      const teacherSubjects = async () => {
+        const [{ data: slots, error: e1 }, { data: assigned, error: e2 }] = await Promise.all([
+          admin.from('timetable').select('subject_id,co_subject_id').eq('teacher_id', me).ilike('status', 'active'),
+          admin.from('student_subjects').select('subject_id').eq('teacher_id', me).ilike('status', 'active'),
+        ])
+        if (e1 || e2) throw e1 || e2
+        return new Set<string>([...(slots || []).flatMap((s) => [s.subject_id, s.co_subject_id]), ...(assigned || []).map((s) => s.subject_id)]
+          .filter(Boolean).map(String))
+      }
+      const sCtx = isStudent ? await studentCtx() : null
+      const tSubs = isTeacher ? await teacherSubjects() : null
+      const canSee = (d: any) => isAdmin || isTeacher || d.student_id === me ||
+        (!!sCtx && !d.hidden && d.class_name === sCtx.cls && sCtx.subjects.has(String(d.subject_id)))
+      const teachesIt = (d: any) => !!tSubs && tSubs.has(String(d.subject_id))
+      const canModerate = (d: any) => (isAdmin && user.role === 'SUPER_ADMIN') || teachesIt(d)
+      const loadDoubt = async (id: unknown) => {
+        const doubtId = requireText(id, 'Doubt', 60, true)
+        const { data: d, error } = await admin.from('doubts').select('*').eq('id', doubtId).maybeSingle()
+        if (error) throw error
+        if (!d || !canSee(d)) throw new ApiFault('NOT_FOUND', 'Doubt not found.')
+        return d
+      }
+      const nameMaps = async (studentIds: string[], teacherIds: string[], subjectIds: string[]) => {
+        const none = ['__none__']
+        const [{ data: st }, { data: te }, { data: su }] = await Promise.all([
+          admin.from('students').select('id,name').in('id', studentIds.length ? studentIds : none),
+          admin.from('teachers').select('id,name').in('id', teacherIds.length ? teacherIds : none),
+          admin.from('subjects').select('id,name').in('id', subjectIds.length ? subjectIds : none),
+        ])
+        return { students: new Map((st || []).map((r) => [r.id, r.name])), teachers: new Map((te || []).map((r) => [r.id, r.name])),
+          subjects: new Map((su || []).map((r) => [r.id, r.name])) }
+      }
+      const settingNumber = async (key: string, fallback: number) => {
+        const { data } = await admin.from('settings').select('value').eq('setting_key', key).maybeSingle()
+        const n = Number.parseInt(String(data?.value ?? ''), 10)
+        return Number.isFinite(n) && n >= 0 ? n : fallback
+      }
+      const touch = (id: string, changes: Record<string, unknown>) =>
+        admin.from('doubts').update({ ...changes, updated_at: new Date().toISOString() }).eq('id', id)
+
+      if (action === 'doubts.list') {
+        const scope = String(payload.scope || 'feed')
+        const subjectFilter = String(payload.subjectId || '').trim()
+        const statusFilter = String(payload.status || '').toUpperCase()
+        const search = String(payload.search || '').replace(/[^\p{L}\p{N} ]/gu, ' ').trim().slice(0, 60)
+        let query = admin.from('doubts').select('*').order('created_at', { ascending: false }).limit(300)
+        if (isStudent && scope === 'mine') query = query.eq('student_id', me)
+        else if (isStudent) {
+          const subs = [...sCtx!.subjects]
+          query = query.eq('class_name', sCtx!.cls).eq('hidden', false).in('subject_id', subs.length ? subs : ['__none__'])
+        } else if (isTeacher && scope !== 'all') {
+          const subs = [...tSubs!]
+          query = query.in('subject_id', subs.length ? subs : ['__none__'])
+        }
+        if (subjectFilter) query = query.eq('subject_id', subjectFilter)
+        if (['OPEN', 'CLAIMED', 'ANSWERED', 'RESOLVED'].includes(statusFilter)) query = query.eq('status', statusFilter)
+        if (search) query = query.or(`title.ilike.%${search}%,chapter.ilike.%${search}%`)
+        const { data: doubts, error } = await query
+        if (error) throw error
+        const ids = (doubts || []).map((d) => d.id)
+        const none = ['__none__']
+        const [{ data: answers }, { data: files }, { data: mine }] = await Promise.all([
+          admin.from('doubt_answers').select('doubt_id,status,is_follow_up').in('doubt_id', ids.length ? ids : none),
+          admin.from('doubt_files').select('doubt_id').is('answer_id', null).is('expired_at', null).in('doubt_id', ids.length ? ids : none),
+          isStudent ? admin.from('doubt_me_too').select('doubt_id').eq('student_id', me).in('doubt_id', ids.length ? ids : none) : Promise.resolve({ data: [] }),
+        ])
+        const count = (rows: any[] | null, pick: (r: any) => boolean) => {
+          const m = new Map<string, number>()
+          for (const r of rows || []) if (pick(r)) m.set(r.doubt_id, (m.get(r.doubt_id) || 0) + 1)
+          return m
+        }
+        const approved = count(answers, (r) => r.status === 'APPROVED' && !r.is_follow_up)
+        const pending = count(answers, (r) => r.status === 'PENDING')
+        const photos = count(files, () => true)
+        const meToo = new Set((mine || []).map((r: any) => r.doubt_id))
+        let rows = doubts || []
+        if (isTeacher && scope === 'pending') rows = rows.filter((d) => (pending.get(d.id) || 0) > 0)
+        const names = await nameMaps([...new Set(rows.map((d) => d.student_id))],
+          [...new Set(rows.map((d) => d.claimed_by).filter(Boolean))], [...new Set(rows.map((d) => d.subject_id))])
+        const rank: Record<string, number> = { OPEN: 0, CLAIMED: 1, ANSWERED: 2, RESOLVED: 3 }
+        if (!isStudent || scope !== 'mine') rows = rows.slice().sort((a, b) =>
+          (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || b.me_too_count - a.me_too_count || String(b.created_at).localeCompare(String(a.created_at)))
+        // Filter options: subjects this user can browse.
+        const optionIds = isStudent ? [...sCtx!.subjects] : isTeacher ? [...tSubs!] : [...new Set(rows.map((d) => d.subject_id))]
+        const optionNames = await nameMaps([], [], optionIds)
+        return response({ ok: true, data: {
+          rows: rows.map((d) => ({ DoubtID: d.id, Title: d.title, Chapter: d.chapter, SubjectID: d.subject_id,
+            SubjectName: names.subjects.get(d.subject_id) || d.subject_id, ClassName: d.class_name,
+            StudentName: names.students.get(d.student_id) || 'Student', IsMine: d.student_id === me && isStudent,
+            Status: d.status, Hidden: d.hidden, MeToo: d.me_too_count, MeTooMine: meToo.has(d.id),
+            Answers: approved.get(d.id) || 0, Pending: isStudent ? 0 : pending.get(d.id) || 0, Photos: photos.get(d.id) || 0,
+            ClaimedBy: d.claimed_by ? names.teachers.get(d.claimed_by) || '' : '', CreatedAt: d.created_at })),
+          subjects: optionIds.map((id) => ({ id, name: optionNames.subjects.get(id) || id })).sort((a, b) => a.name.localeCompare(b.name)),
+          canAsk: isStudent && !!sCtx?.active && sCtx.subjects.size > 0 } })
+      }
+
+      if (action === 'doubts.get') {
+        const d = await loadDoubt(payload.doubtId)
+        const [{ data: answers, error: aError }, { data: files, error: fError }, { data: mt }] = await Promise.all([
+          admin.from('doubt_answers').select('*').eq('doubt_id', d.id).order('created_at'),
+          admin.from('doubt_files').select('id,answer_id,file_name,drive_file_id,storage_path,expired_at').eq('doubt_id', d.id).order('created_at'),
+          isStudent ? admin.from('doubt_me_too').select('doubt_id').eq('doubt_id', d.id).eq('student_id', me).maybeSingle() : Promise.resolve({ data: null }),
+        ])
+        if (aError || fError) throw aError || fError
+        const visible = (answers || []).filter((a) => isTeacher || isAdmin || a.status === 'APPROVED' ||
+          (a.author_type === 'STUDENT' && a.author_id === me))
+        const names = await nameMaps([...new Set([d.student_id, ...visible.filter((a) => a.author_type === 'STUDENT').map((a) => a.author_id)])],
+          [...new Set([d.claimed_by, d.first_answered_by, ...visible.filter((a) => a.author_type === 'TEACHER').map((a) => a.author_id), ...visible.map((a) => a.reviewed_by)].filter(Boolean))],
+          [d.subject_id])
+        const fileRow = (f: any) => ({ FileID: f.id, FileName: f.file_name, Expired: !!f.expired_at, InDrive: !!f.drive_file_id })
+        const resolvedDoubt = d.status === 'RESOLVED'
+        return response({ ok: true, data: {
+          doubt: { DoubtID: d.id, Title: d.title, Body: d.body, Chapter: d.chapter, SubjectID: d.subject_id,
+            SubjectName: names.subjects.get(d.subject_id) || d.subject_id, ClassName: d.class_name,
+            StudentName: names.students.get(d.student_id) || 'Student', IsMine: isStudent && d.student_id === me,
+            Status: d.status, Hidden: d.hidden, MeToo: d.me_too_count, MeTooMine: !!mt,
+            ClaimedBy: d.claimed_by ? names.teachers.get(d.claimed_by) || '' : '', ClaimedByMe: isTeacher && d.claimed_by === me,
+            CreatedAt: d.created_at, ResolvedAt: d.resolved_at,
+            Files: (files || []).filter((f) => !f.answer_id).map(fileRow) },
+          answers: visible.map((a) => ({ AnswerID: a.id, AuthorType: a.author_type, IsMine: a.author_id === me && a.author_type === user.user_type,
+            AuthorName: a.author_type === 'TEACHER' ? names.teachers.get(a.author_id) || 'Teacher' : names.students.get(a.author_id) || 'Student',
+            Body: a.body, Status: a.status, FollowUp: a.is_follow_up, ReviewNote: a.review_note, Points: a.points_awarded,
+            ReviewedBy: a.reviewed_by ? names.teachers.get(a.reviewed_by) || '' : '', CreatedAt: a.created_at,
+            Files: (files || []).filter((f) => f.answer_id === a.id).map(fileRow) })),
+          can: {
+            answer: !d.hidden && (teachesIt(d) || (isStudent && !resolvedDoubt)),
+            claim: teachesIt(d) && d.status === 'OPEN', release: isTeacher && d.claimed_by === me && d.status === 'CLAIMED',
+            review: teachesIt(d), resolve: isStudent && d.student_id === me, meToo: isStudent && d.student_id !== me && !d.hidden,
+            hide: canModerate(d),
+          } } })
+      }
+
+      if (action === 'doubts.create') {
+        if (!isStudent) throw new ApiFault('FORBIDDEN', 'Only students can post doubts.')
+        if (!sCtx!.active) throw new ApiFault('FORBIDDEN', 'Only active students can post doubts.')
+        const subjectId = requireText(payload.subjectId, 'Subject', 60, true)
+        if (!sCtx!.subjects.has(subjectId)) throw new ApiFault('BAD_REQUEST', 'Choose one of your own subjects.')
+        if (!sCtx!.cls) throw new ApiFault('BAD_REQUEST', 'Your class is not set. Ask the office to update your profile.')
+        const title = requireText(payload.title, 'Question title', 200, true)
+        if (title.length < 3) throw new ApiFault('BAD_REQUEST', 'Write a short title for your doubt.')
+        const body = requireText(payload.body, 'Details', 4000)
+        const chapter = requireText(payload.chapter, 'Chapter', 120)
+        const limit = await settingNumber('DOUBT_DAILY_LIMIT', 5)
+        const { count, error: countError } = await admin.from('doubts').select('id', { count: 'exact', head: true })
+          .eq('student_id', me).gte('created_at', `${todayDate()}T00:00:00+05:30`)
+        if (countError) throw countError
+        if ((count || 0) >= limit) throw new ApiFault('LIMIT', `You can post up to ${limit} doubts a day. Try again tomorrow.`)
+        const { data: year } = await admin.from('settings').select('value').eq('setting_key', 'ACADEMIC_YEAR').maybeSingle()
+        const id = await newId(admin, 'doubts', 'DBT-', 6)
+        const { error } = await admin.from('doubts').insert({ id, student_id: me, subject_id: subjectId, class_name: sCtx!.cls,
+          chapter, title, body, academic_year: year?.value || '' })
+        if (error) throw error
+        return response({ ok: true, data: { DoubtID: id } })
+      }
+
+      if (action === 'doubts.answer') {
+        const d = await loadDoubt(payload.doubtId)
+        const body = requireText(payload.body, 'Answer', 6000)
+        if (!body && payload.hasPhotos !== true) throw new ApiFault('BAD_REQUEST', 'Write an answer or add a photo.')
+        if (d.hidden) throw new ApiFault('BAD_REQUEST', 'This doubt has been hidden.')
+        const id = await newId(admin, 'doubt_answers', 'ANS-', 7)
+        const now = new Date().toISOString()
+        if (isTeacher) {
+          if (!teachesIt(d)) throw new ApiFault('FORBIDDEN', 'Only teachers of this subject can answer it.')
+          const { error } = await admin.from('doubt_answers').insert({ id, doubt_id: d.id, author_type: 'TEACHER', author_id: me, body, status: 'APPROVED' })
+          if (error) throw error
+          const changes: Record<string, unknown> = {}
+          if (d.status !== 'RESOLVED') changes.status = 'ANSWERED'
+          if (!d.first_teacher_answer_at) { changes.first_teacher_answer_at = now; changes.first_answered_by = me }
+          await touch(d.id, changes)
+          return response({ ok: true, data: { AnswerID: id, status: 'APPROVED' } })
+        }
+        if (!isStudent) throw new ApiFault('FORBIDDEN', 'Only students and subject teachers can answer doubts.')
+        if (d.student_id === me) {
+          // The asker's follow-up ("still confused…") reopens the doubt.
+          const { error } = await admin.from('doubt_answers').insert({ id, doubt_id: d.id, author_type: 'STUDENT', author_id: me, body, status: 'APPROVED', is_follow_up: true })
+          if (error) throw error
+          if (d.status === 'ANSWERED' || d.status === 'RESOLVED') await touch(d.id, { status: 'OPEN', resolved_at: null })
+          else await touch(d.id, {})
+          return response({ ok: true, data: { AnswerID: id, status: 'APPROVED', followUp: true } })
+        }
+        if (d.status === 'RESOLVED') throw new ApiFault('BAD_REQUEST', 'This doubt is already resolved.')
+        const { count } = await admin.from('doubt_answers').select('id', { count: 'exact', head: true })
+          .eq('doubt_id', d.id).eq('author_type', 'STUDENT').eq('author_id', me).eq('status', 'PENDING')
+        if ((count || 0) > 0) throw new ApiFault('BAD_REQUEST', 'Your earlier answer is still waiting for teacher approval.')
+        const { error } = await admin.from('doubt_answers').insert({ id, doubt_id: d.id, author_type: 'STUDENT', author_id: me, body, status: 'PENDING' })
+        if (error) throw error
+        return response({ ok: true, data: { AnswerID: id, status: 'PENDING' } })
+      }
+
+      if (action === 'doubts.claim') {
+        const d = await loadDoubt(payload.doubtId)
+        if (!teachesIt(d)) throw new ApiFault('FORBIDDEN', 'Only teachers of this subject can take this doubt.')
+        if (payload.release === true) {
+          if (d.claimed_by !== me) throw new ApiFault('BAD_REQUEST', 'You have not taken this doubt.')
+          const { error } = await touch(d.id, { claimed_by: null, claimed_at: null, ...(d.status === 'CLAIMED' ? { status: 'OPEN' } : {}) })
+          if (error) throw error
+          return response({ ok: true, data: { released: true } })
+        }
+        if (d.status !== 'OPEN') throw new ApiFault('BAD_REQUEST', d.status === 'CLAIMED' ? 'Another teacher is already solving this doubt.' : 'This doubt is not open.')
+        const { data: updated, error } = await admin.from('doubts').update({ status: 'CLAIMED', claimed_by: me, claimed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .eq('id', d.id).eq('status', 'OPEN').select('id')
+        if (error) throw error
+        if (!updated?.length) throw new ApiFault('BAD_REQUEST', 'Another teacher just took this doubt.')
+        return response({ ok: true, data: { claimed: true } })
+      }
+
+      if (action === 'doubts.review') {
+        const answerId = requireText(payload.answerId, 'Answer', 60, true)
+        const { data: a, error: aError } = await admin.from('doubt_answers').select('*').eq('id', answerId).maybeSingle()
+        if (aError) throw aError
+        if (!a) throw new ApiFault('NOT_FOUND', 'Answer not found.')
+        const d = await loadDoubt(a.doubt_id)
+        if (!teachesIt(d)) throw new ApiFault('FORBIDDEN', 'Only teachers of this subject can review answers.')
+        if (a.status !== 'PENDING') throw new ApiFault('BAD_REQUEST', 'This answer has already been reviewed.')
+        const approve = payload.approve === true
+        const note = requireText(payload.note, 'Note', 500)
+        if (!approve && !note) throw new ApiFault('BAD_REQUEST', 'Tell the student why the answer is not correct.')
+        const points = approve ? await settingNumber('DOUBT_APPROVAL_POINTS', 10) : 0
+        const { data: changed, error } = await admin.from('doubt_answers').update({ status: approve ? 'APPROVED' : 'REJECTED', review_note: note,
+          reviewed_by: me, reviewed_at: new Date().toISOString(), points_awarded: points }).eq('id', a.id).eq('status', 'PENDING').select('id')
+        if (error) throw error
+        if (!changed?.length) throw new ApiFault('BAD_REQUEST', 'This answer has already been reviewed.')
+        if (approve && d.status !== 'RESOLVED') await touch(d.id, { status: 'ANSWERED' })
+        return response({ ok: true, data: { approved: approve, points } })
+      }
+
+      if (action === 'doubts.resolve') {
+        const d = await loadDoubt(payload.doubtId)
+        if (!isStudent || d.student_id !== me) throw new ApiFault('FORBIDDEN', 'Only the student who asked can mark this doubt.')
+        const resolved = payload.resolved === true
+        const { error } = await touch(d.id, resolved ? { status: 'RESOLVED', resolved_at: new Date().toISOString() }
+          : { status: d.first_teacher_answer_at ? 'ANSWERED' : 'OPEN', resolved_at: null })
+        if (error) throw error
+        return response({ ok: true, data: { resolved } })
+      }
+
+      if (action === 'doubts.meToo') {
+        const d = await loadDoubt(payload.doubtId)
+        if (!isStudent || d.student_id === me) throw new ApiFault('BAD_REQUEST', 'You cannot add “me too” to this doubt.')
+        const { data, error } = await admin.rpc('toggle_doubt_me_too', { p_doubt_id: d.id, p_student_id: me })
+        if (error) throw error
+        return response({ ok: true, data })
+      }
+
+      if (action === 'doubts.hide') {
+        const hidden = payload.hidden === true
+        if (payload.answerId) {
+          const { data: a } = await admin.from('doubt_answers').select('*').eq('id', requireText(payload.answerId, 'Answer', 60, true)).maybeSingle()
+          if (!a) throw new ApiFault('NOT_FOUND', 'Answer not found.')
+          const d = await loadDoubt(a.doubt_id)
+          if (!canModerate(d)) throw new ApiFault('FORBIDDEN', 'Only subject teachers or the Super Admin can hide answers.')
+          const { error } = await admin.from('doubt_answers').update({ status: hidden ? 'HIDDEN' : 'APPROVED', points_awarded: hidden ? 0 : a.points_awarded }).eq('id', a.id)
+          if (error) throw error
+          await logAction(admin, user, hidden ? 'HIDE_DOUBT_ANSWER' : 'UNHIDE_DOUBT_ANSWER', 'DOUBT_ANSWER', a.id, { doubtId: d.id })
+          return response({ ok: true, data: { hidden } })
+        }
+        const d = await loadDoubt(payload.doubtId)
+        if (!canModerate(d)) throw new ApiFault('FORBIDDEN', 'Only subject teachers or the Super Admin can hide doubts.')
+        const { error } = await touch(d.id, { hidden })
+        if (error) throw error
+        await logAction(admin, user, hidden ? 'HIDE_DOUBT' : 'UNHIDE_DOUBT', 'DOUBT', d.id, {})
+        return response({ ok: true, data: { hidden } })
+      }
+
+      if (action === 'doubts.leaderboard') {
+        const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(payload.month || '')) ? String(payload.month) : todayDate().slice(0, 7)
+        const start = `${month}-01T00:00:00+05:30`
+        const next = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1)).toISOString().slice(0, 10)
+        const { data: rows, error } = await admin.from('doubt_answers').select('author_id,points_awarded')
+          .eq('author_type', 'STUDENT').eq('status', 'APPROVED').gt('points_awarded', 0)
+          .gte('reviewed_at', start).lt('reviewed_at', `${next}T00:00:00+05:30`)
+        if (error) throw error
+        const totals = new Map<string, { points: number, answers: number }>()
+        for (const r of rows || []) {
+          const t = totals.get(r.author_id) || { points: 0, answers: 0 }
+          t.points += Number(r.points_awarded) || 0; t.answers++; totals.set(r.author_id, t)
+        }
+        const ids = [...totals.keys()]
+        const { data: students } = await admin.from('students').select('id,name,current_class').in('id', ids.length ? ids : ['__none__'])
+        let list = (students || []).map((s) => ({ StudentID: s.id, Name: s.name, ClassName: s.current_class || '',
+          Points: totals.get(s.id)!.points, Answers: totals.get(s.id)!.answers, IsMe: isStudent && s.id === me }))
+        if (isStudent) list = list.filter((s) => s.ClassName === sCtx!.cls)
+        list.sort((a, b) => b.Points - a.Points || b.Answers - a.Answers || a.Name.localeCompare(b.Name))
+        const myPoints = isStudent ? totals.get(me)?.points || 0 : 0
+        return response({ ok: true, data: { month, monthLabel: monthLabel(month), rows: list.slice(0, 20).map((r, i) => ({ Rank: i + 1, ...r,
+          StudentID: isStudent ? undefined : r.StudentID })), myPoints, className: sCtx?.cls || '' } })
+      }
+
+      if (action === 'doubts.stats') {
+        if (!isAdmin) throw new ApiFault('FORBIDDEN', 'Only admins can view doubt statistics.')
+        const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(payload.month || '')) ? String(payload.month) : todayDate().slice(0, 7)
+        const start = `${month}-01T00:00:00+05:30`
+        const next = `${new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1)).toISOString().slice(0, 10)}T00:00:00+05:30`
+        const [{ data: doubts, error: dError }, { data: answers, error: aError }, { data: reviews, error: rError }] = await Promise.all([
+          admin.from('doubts').select('id,status,created_at,first_teacher_answer_at,first_answered_by').gte('created_at', start).lt('created_at', next),
+          admin.from('doubt_answers').select('author_id').eq('author_type', 'TEACHER').eq('status', 'APPROVED').gte('created_at', start).lt('created_at', next),
+          admin.from('doubt_answers').select('reviewed_by').eq('author_type', 'STUDENT').not('reviewed_by', 'is', null).gte('reviewed_at', start).lt('reviewed_at', next),
+        ])
+        if (dError || aError || rError) throw dError || aError || rError
+        const per = new Map<string, { answers: number, reviews: number, firstAnswers: number, hours: number }>()
+        const get = (id: string) => { const v = per.get(id) || { answers: 0, reviews: 0, firstAnswers: 0, hours: 0 }; per.set(id, v); return v }
+        for (const a of answers || []) get(a.author_id).answers++
+        for (const r of reviews || []) get(r.reviewed_by).reviews++
+        let answeredHours = 0, answeredCount = 0
+        for (const d of doubts || []) {
+          if (!d.first_teacher_answer_at) continue
+          const h = (new Date(d.first_teacher_answer_at).getTime() - new Date(d.created_at).getTime()) / 3600000
+          answeredHours += h; answeredCount++
+          if (d.first_answered_by) { const v = get(d.first_answered_by); v.firstAnswers++; v.hours += h }
+        }
+        const names = await nameMaps([], [...per.keys()], [])
+        const by = (s: string) => (doubts || []).filter((d) => d.status === s).length
+        return response({ ok: true, data: { month, monthLabel: monthLabel(month),
+          totals: { posted: (doubts || []).length, open: by('OPEN') + by('CLAIMED'), answered: by('ANSWERED'), resolved: by('RESOLVED'),
+            avgResponseHours: answeredCount ? Math.round(answeredHours / answeredCount * 10) / 10 : null },
+          teachers: [...per].map(([id, v]) => ({ TeacherID: id, Name: names.teachers.get(id) || id, Answers: v.answers, Reviews: v.reviews,
+            AvgFirstResponseHours: v.firstAnswers ? Math.round(v.hours / v.firstAnswers * 10) / 10 : null }))
+            .sort((a, b) => b.Answers - a.Answers || b.Reviews - a.Reviews) } })
+      }
     }
 
     if (action === 'settings.studentDelete.get' || action === 'settings.studentDelete.set' || action === 'students.delete') {
