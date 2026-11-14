@@ -17,14 +17,33 @@
   }
 
   const report = error => ({ error: error && (error.message || error.error_description) || 'Passkey operation failed.' });
+  // "Keep me signed in" (students and teachers only): the sign-in renews itself, so keep the
+  // saved renewal token up to date or it would stop working.
+  client.auth.onAuthStateChange((_event, session) => {
+    try {
+      const raw = localStorage.getItem('cmz_keep');
+      if (!raw || !session || !session.refresh_token) return;
+      const keep = JSON.parse(raw);
+      if (keep.refresh !== session.refresh_token) localStorage.setItem('cmz_keep', JSON.stringify({ type: keep.type, refresh: session.refresh_token }));
+    } catch (e) { /* storage blocked: the person just signs in again */ }
+  });
   window.CMZPasskey = {
+    async refresh(refreshToken) {
+      try {
+        const { data, error } = await client.auth.refreshSession({ refresh_token: refreshToken });
+        return error || !data.session ? { error: report(error).error } : { session: data.session };
+      } catch (error) { return { error: report(error).error }; }
+    },
     async signIn() {
       const { data, error } = await client.auth.signInWithPasskey();
       return error ? { error: report(error).error } : { session: data && data.session };
     },
     async setSession(accessToken, refreshToken) {
-      const { data, error } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-      return error ? { error: report(error).error } : { session: data.session };
+      // A damaged saved token must not leave the page blank: report it, never throw.
+      try {
+        const { data, error } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+        return error ? { error: report(error).error } : { session: data.session };
+      } catch (error) { return { error: report(error).error }; }
     },
     async register() {
       const { data, error } = await client.auth.registerPasskey();

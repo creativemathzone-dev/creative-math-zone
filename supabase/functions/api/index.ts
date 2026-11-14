@@ -103,6 +103,18 @@ function verifiedTokenIssuedAt(token: string): number | null {
   }
 }
 
+// The sign-in session ID inside an already-verified token (same for refreshed tokens).
+function tokenSessionId(token: string): string | null {
+  try {
+    const payload = token.split('.')[1]
+    const base64 = payload.replaceAll('-', '+').replaceAll('_', '/')
+    const id = String(JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='))).session_id || '')
+    return /^[0-9a-f-]{36}$/i.test(id) ? id : null
+  } catch {
+    return null
+  }
+}
+
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -765,9 +777,38 @@ Deno.serve(async (request) => {
         RejectReason: reg.status === 'REJECTED' ? reg.reject_reason : '' } })
     }
 
+    // "Forgot password?" from the login screen. Always answers the same way, so it cannot be
+    // used to find out which IDs exist. Students/teachers must give their registered mobile.
+    if (action === 'public.forgotPassword') {
+      const username = String(payload.username || '').trim().slice(0, 60)
+      const mobile = String(payload.mobile || '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '').replace(/^0(?=\d{10}$)/, '')
+      const note = String(payload.note || '').replace(/\s+/g, ' ').trim().slice(0, 200)
+      const done = response({ ok: true, data: { sent: true } })
+      if (!username) throw new ApiFault('BAD_REQUEST', 'Enter your ID or username.')
+      if (!await consumeRegistrationLimit(admin, `forgot-ip:${requestIp(request)}`, 86400, 10)) throw new ApiFault('RATE_LIMIT', 'Too many requests. Please contact the centre.')
+      if (!await consumeRegistrationLimit(admin, `forgot-user:${username.toLowerCase()}`, 86400, 3)) return done
+      const { data: target } = await admin.from('app_users').select('id,username,user_type,linked_id,status').ilike('username', username).maybeSingle()
+      if (!target || String(target.status).toUpperCase() !== 'ACTIVE') return done
+      if (target.user_type === 'STUDENT' || target.user_type === 'TEACHER') {
+        if (!/^[6-9]\d{9}$/.test(mobile)) return done
+        const { data: rec } = target.user_type === 'STUDENT'
+          ? await admin.from('students').select('mobile,parent_mobile,parent_whatsapp').eq('id', target.linked_id).maybeSingle()
+          : await admin.from('teachers').select('mobile').eq('id', target.linked_id).maybeSingle()
+        const known = Object.values(rec || {}).map((v) => String(v || '').replace(/\D/g, '').slice(-10))
+        if (!known.includes(mobile)) return done
+      }
+      const { data: open } = await admin.from('password_reset_requests').select('id').eq('app_user_id', target.id).eq('status', 'PENDING').maybeSingle()
+      if (!open) {
+        await admin.from('password_reset_requests').insert({ id: `PWR-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, app_user_id: target.id,
+          username: target.username, user_type: target.user_type, linked_id: target.linked_id, note })
+      }
+      return done
+    }
+
     if (action === 'auth.login') {
       const username = String(payload.username || '').trim()
       const password = String(payload.password || '')
+      // 'ANY' = the single login screen: the account decides which portal opens.
       const portal = String(payload.portal || '').toUpperCase()
       if (!username || !password || username.length > 60 || password.length > 200) return response(fail('BAD_LOGIN', 'Username or password is incorrect.'))
       const { data: loginSettings, error: loginSettingsError } = await admin.from('settings').select('setting_key,value')
@@ -792,14 +833,14 @@ Deno.serve(async (request) => {
         await auth.auth.signOut({ scope: 'local' })
         return response(fail('DISABLED', 'This account is disabled. Please contact the centre.'))
       }
-      if (portal !== user.user_type) {
+      if (portal !== 'ANY' && portal !== user.user_type) {
         await auth.auth.signOut({ scope: 'local' })
         return response(fail('WRONG_PORTAL', `This account belongs to the ${String(user.user_type).toLowerCase()} portal.`))
       }
       await admin.from('app_users').update({ last_login: new Date().toISOString() }).eq('id', user.id)
       return response({ ok: true, data: {
         token: session.session.access_token, refreshToken: session.session.refresh_token,
-        sessionTimeoutMinutes: 30,
+        sessionTimeoutMinutes: 30, pinRequired: user.user_type === 'ADMIN' && !!user.admin_pin_hash,
         user: { userId: user.id, username: user.username, userType: user.user_type, role: user.role,
           linkedId: user.linked_id, displayName: user.username,
           mustChangePassword: user.must_change_password, permissions: permissionsFor(user) },
@@ -839,8 +880,50 @@ Deno.serve(async (request) => {
         return response(fail('SESSION_REVOKED', 'Your password or account recovery details changed. Sign in again with your current password.'))
       }
     }
-    if (user.must_change_password && action !== 'auth.me' && action !== 'auth.changePassword' && action !== 'auth.logout') {
+    // Admin PIN lock: an admin with a PIN must have entered it for this sign-in session.
+    const sessionId = tokenSessionId(token)
+    let pinOk = true
+    if (user.user_type === 'ADMIN' && user.admin_pin_hash) {
+      const { data: unlocked } = await admin.from('admin_pin_sessions').select('session_id').eq('session_id', sessionId || '00000000-0000-0000-0000-000000000000').eq('app_user_id', user.id).maybeSingle()
+      pinOk = !!unlocked
+    }
+    if (!pinOk && !['auth.me', 'auth.logout', 'auth.pinVerify', 'auth.ping'].includes(action)) {
+      return response(fail('PIN_REQUIRED', 'Enter your admin PIN to continue.'))
+    }
+    if (user.must_change_password && action !== 'auth.me' && action !== 'auth.changePassword' && action !== 'auth.logout' && action !== 'auth.pinVerify') {
       return response(fail('PASSWORD_CHANGE_REQUIRED', 'Please change your temporary password first.'))
+    }
+
+    if (action === 'auth.pinVerify') {
+      if (user.user_type !== 'ADMIN' || !user.admin_pin_hash) return response({ ok: true, data: { unlocked: true } })
+      if (!sessionId) throw new ApiFault('BAD_REQUEST', 'Sign in again.')
+      const pin = String(payload.pin || '')
+      const rateKey = `admin-pin:${user.id}`
+      if (!await consumeLoginLimit(admin, rateKey, 15 * 60, 5)) return response(fail('LOCKED', 'Too many wrong PINs. Try again in 15 minutes.'))
+      const { data: good, error } = await admin.rpc('check_admin_pin', { p_user: user.id, p_pin: pin })
+      if (error) throw error
+      if (!good) return response(fail('BAD_PIN', 'Wrong PIN.'))
+      await clearLoginLimit(admin, rateKey)
+      await admin.from('admin_pin_sessions').upsert({ session_id: sessionId, app_user_id: user.id }, { onConflict: 'session_id' })
+      if (Math.random() < 0.1) await admin.from('admin_pin_sessions').delete().lt('created_at', new Date(Date.now() - 45 * 86400000).toISOString())
+      await logAction(admin, user, 'ADMIN_PIN_UNLOCK', 'USER', user.id, {})
+      return response({ ok: true, data: { unlocked: true } })
+    }
+
+    if (action === 'auth.pinSet') {
+      if (user.user_type !== 'ADMIN') throw new ApiFault('FORBIDDEN', 'Only admin accounts use a PIN.')
+      const pin = String(payload.pin ?? '')
+      if (pin && !/^\d{4,6}$/.test(pin)) throw new ApiFault('BAD_REQUEST', 'The PIN must be 4 to 6 digits.')
+      const { data: authUser } = await admin.auth.admin.getUserById(authData.user.id)
+      const { error: verifyError } = await auth.auth.signInWithPassword({ email: authUser.user?.email || '', password: String(payload.password || '') })
+      if (verifyError) throw new ApiFault('BAD_PASSWORD', 'Your password is not correct.')
+      await auth.auth.signOut({ scope: 'local' })
+      const { error } = await admin.rpc('set_admin_pin', { p_user: user.id, p_pin: pin })
+      if (error) throw error
+      // This device stays unlocked; every other device must enter the new PIN.
+      if (pin && sessionId) await admin.from('admin_pin_sessions').upsert({ session_id: sessionId, app_user_id: user.id }, { onConflict: 'session_id' })
+      await logAction(admin, user, pin ? 'ADMIN_PIN_SET' : 'ADMIN_PIN_REMOVED', 'USER', user.id, {})
+      return response({ ok: true, data: { pinSet: !!pin } })
     }
 
     if (action === 'auth.me') {
@@ -855,6 +938,7 @@ Deno.serve(async (request) => {
       }
       return response({ ok: true, data: { userId: user.id, username: user.username, userType: user.user_type,
         role: user.role, linkedId: user.linked_id, mustChangePassword: user.must_change_password,
+        pinSet: user.user_type === 'ADMIN' && !!user.admin_pin_hash, pinRequired: !pinOk,
         permissions: permissionsFor(user), profile } })
     }
 
@@ -884,6 +968,9 @@ Deno.serve(async (request) => {
       // tokens on other devices) will no longer pass the API's iat check.
       const { data: refreshed, error: signInError } = await auth.auth.signInWithPassword({ email, password: newPassword })
       if (signInError || !refreshed.session) throw new ApiFault('PASSWORD_UPDATED_SIGN_IN_FAILED', 'Password changed. Sign in again with your new password.')
+      // The admin already entered the PIN for this sign-in; keep the new session unlocked.
+      const newSession = tokenSessionId(refreshed.session.access_token)
+      if (user.user_type === 'ADMIN' && user.admin_pin_hash && newSession) await admin.from('admin_pin_sessions').upsert({ session_id: newSession, app_user_id: user.id }, { onConflict: 'session_id' })
       return response({ ok: true, data: { token: refreshed.session.access_token, refreshToken: refreshed.session.refresh_token, mustChangePassword: false } })
     }
 
@@ -893,7 +980,8 @@ Deno.serve(async (request) => {
       'settings.get': 'SETTINGS_VIEW', 'subjects.list': 'MASTER_VIEW', 'batches.list': 'MASTER_VIEW',
       'rooms.list': 'MASTER_VIEW', 'teachers.list': 'TEACHER_VIEW', 'users.list': 'USER_MANAGE',
       'users.createAdmin': 'USER_MANAGE', 'users.setStatus': 'USER_MANAGE', 'users.resetPassword': 'USER_MANAGE',
-      'users.setPermissions': 'USER_MANAGE', 'logs.list': 'LOG_VIEW',
+      'users.setPermissions': 'USER_MANAGE', 'logs.list': 'LOG_VIEW', 'users.clearPin': 'USER_MANAGE',
+      'passwordRequests.list': 'SELF_VIEW', 'passwordRequests.resolve': 'SELF_VIEW',
       'subjects.add': 'MASTER_EDIT', 'subjects.update': 'MASTER_EDIT',
       'batches.add': 'MASTER_EDIT', 'batches.update': 'MASTER_EDIT',
       'rooms.add': 'MASTER_EDIT', 'rooms.update': 'MASTER_EDIT',
@@ -1581,10 +1669,10 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'users.list') {
-      const { data, error } = await admin.from('app_users').select('id,username,user_type,role,linked_id,status,must_change_password,extra_permissions,last_login,last_logout,created_at').order('username')
+      const { data, error } = await admin.from('app_users').select('*').order('username')
       if (error) throw error
       return response({ ok: true, data: (data || []).map((r) => ({ UserID: r.id, Username: r.username,
-        UserType: r.user_type, Role: r.role, LinkedID: r.linked_id, Status: r.status,
+        UserType: r.user_type, Role: r.role, LinkedID: r.linked_id, Status: r.status, PinSet: !!r.admin_pin_hash,
         MustChangePassword: r.must_change_password, ExtraPermissions: r.extra_permissions,
         LastLogin: r.last_login, LastLogout: r.last_logout, CreatedDate: r.created_at })) })
     }
@@ -1642,6 +1730,44 @@ Deno.serve(async (request) => {
       const sessionsRevoked = await revokeUserSessions(auth, admin, email, tempPassword)
       await logAction(admin, user, 'RESET_PASSWORD', 'USER', id, { username: target.username })
       return response({ ok: true, data: { username: target.username, tempPassword, sessionsRevoked } })
+    }
+
+    if (action === 'users.clearPin') {
+      const id = requireText(payload.userId, 'User ID', 60, true)
+      const { data: target } = await admin.from('app_users').select('id,username,user_type').eq('id', id).maybeSingle()
+      if (!target || target.user_type !== 'ADMIN') throw new ApiFault('NOT_FOUND', 'Admin account not found.')
+      const { error } = await admin.rpc('set_admin_pin', { p_user: id, p_pin: '' })
+      if (error) throw error
+      await logAction(admin, user, 'ADMIN_PIN_CLEARED', 'USER', id, { username: target.username })
+      return response({ ok: true, data: { cleared: true } })
+    }
+
+    // "Forgot password?" requests: each admin sees only the accounts they are allowed to reset.
+    if (action === 'passwordRequests.list' || action === 'passwordRequests.resolve') {
+      if (user.user_type !== 'ADMIN') throw new ApiFault('FORBIDDEN', 'Admin access is required.')
+      const granted = permissionsFor(user), may = (p: string) => granted.includes('*') || granted.includes(p)
+      const types = [may('STUDENT_EDIT') && 'STUDENT', may('TEACHER_EDIT') && 'TEACHER', may('USER_MANAGE') && 'ADMIN'].filter(Boolean) as string[]
+      if (action === 'passwordRequests.resolve') {
+        const id = requireText(payload.id, 'Request ID', 40, true), status = requireText(payload.status, 'Status', 10, true)
+        if (!['DONE', 'DISMISSED'].includes(status)) throw new ApiFault('BAD_REQUEST', 'Invalid status.')
+        const { data: req } = await admin.from('password_reset_requests').select('id,user_type').eq('id', id).maybeSingle()
+        if (!req || !types.includes(req.user_type)) throw new ApiFault('NOT_FOUND', 'Request not found.')
+        const { error } = await admin.from('password_reset_requests').update({ status, handled_by: user.id, handled_at: new Date().toISOString() }).eq('id', id)
+        if (error) throw error
+        return response({ ok: true, data: { ok: true } })
+      }
+      if (!types.length) return response({ ok: true, data: { rows: [] } })
+      const { data, error } = await admin.from('password_reset_requests').select('*').eq('status', 'PENDING').in('user_type', types).order('created_at', { ascending: false }).limit(100)
+      if (error) throw error
+      const studentIds = (data || []).filter((r) => r.user_type === 'STUDENT').map((r) => r.linked_id)
+      const teacherIds = (data || []).filter((r) => r.user_type === 'TEACHER').map((r) => r.linked_id)
+      const [st, te] = await Promise.all([
+        studentIds.length ? admin.from('students').select('id,name,current_class').in('id', studentIds) : { data: [] },
+        teacherIds.length ? admin.from('teachers').select('id,name').in('id', teacherIds) : { data: [] },
+      ])
+      const nm = new Map([...(st.data || []), ...(te.data || [])].map((x: any) => [x.id, x.name + (x.current_class ? ` (Class ${x.current_class})` : '')]))
+      return response({ ok: true, data: { rows: (data || []).map((r) => ({ RequestID: r.id, UserID: r.app_user_id, Username: r.username, UserType: r.user_type,
+        LinkedID: r.linked_id, Name: nm.get(r.linked_id) || r.username, Note: r.note, CreatedAt: r.created_at })) } })
     }
 
     if (action === 'users.setPermissions') {

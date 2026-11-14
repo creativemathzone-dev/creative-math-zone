@@ -71,9 +71,20 @@ async function authorizedUser(req:Request,admin:any,auth:any){
   if(!authUser)throw new Response(JSON.stringify({error:'Sign-in expired.'}),{status:401})
   const {data:user}=await admin.from('app_users').select('id,user_type,role,linked_id,status').eq('auth_user_id',authUser.id).maybeSingle()
   if(!user||String(user.status).toUpperCase()!=='ACTIVE')throw new Response(JSON.stringify({error:'Account is not active.'}),{status:403})
+  if(user.user_type==='ADMIN'&&!await adminUnlocked(admin,authUser.id,token))throw new Response(JSON.stringify({error:'Enter your admin PIN first (sign in again).'}),{status:401})
   return user
 }
 function json(data:unknown,status=200){return new Response(JSON.stringify(data),{status,headers:{...cors,'Content-Type':'application/json'}})}
+
+// Admin PIN lock (same rule as the main API): an admin who set a PIN must have entered it
+// for this sign-in session. If the SQL is not installed yet, no PINs exist, so allow.
+async function adminUnlocked(admin: any, authUserId: string, token: string) {
+  let sid = ''
+  try { const b = token.split('.')[1].replaceAll('-', '+').replaceAll('_', '/'); sid = String(JSON.parse(atob(b.padEnd(Math.ceil(b.length / 4) * 4, '='))).session_id || '') } catch { /* no session id */ }
+  const { data, error } = await admin.rpc('admin_session_ok', { p_auth_user: authUserId, p_session: sid })
+  if (error) return /admin_session_ok|does not exist|schema cache/i.test(String(error.message || ''))
+  return data !== false
+}
 
 Deno.serve(async req=>{
   if(req.method==='OPTIONS')return new Response('ok',{headers:cors})

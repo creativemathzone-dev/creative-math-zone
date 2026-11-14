@@ -232,6 +232,39 @@ test('AI copy checking stores no photos; quiz and notice writer use their own li
   assert.match(sql, /'AI_LIMIT_NOTICES', '3'/);
 });
 
+test('one login: account decides the portal; admin PIN enforced on every server function; forgot password reveals nothing', async () => {
+  // single login screen asks for any portal and routes by account type
+  const student = await readFile(new URL('../web/student.html', import.meta.url), 'utf8');
+  assert.match(student, /api\('auth\.login', \{ username:u, password:p, portal:'ANY' \}\)/);
+  assert.match(student, /const PORTALS = \{ TEACHER: \['teacher\.html', 'cmz_tt', 'cmz_trt'\], ADMIN: \['admin\.html', 'cmz_t', 'cmz_tr'\] \}/);
+  assert.match(student, /if \(type === 'ADMIN' \|\| !refresh\) localStorage\.removeItem\('cmz_keep'\)/); // never keep admins signed in
+  for (const page of ['teacher', 'admin']) {
+    const html = await readFile(new URL(`../web/${page}.html`, import.meta.url), 'utf8');
+    assert.match(html, /function toLogin\(msg, out\)/);
+    assert.match(html, /toLogin\('', false\);\r?\n\}\)\(\);/);
+  }
+  const login = await readFile(new URL('../web/login.html', import.meta.url), 'utf8');
+  assert.match(login, /location\.replace\('\.\/student\.html'/);
+  // API: PIN lock checked before any action except the few needed to unlock
+  assert.match(api, /if \(!pinOk && !\['auth\.me', 'auth\.logout', 'auth\.pinVerify', 'auth\.ping'\]\.includes\(action\)\)/);
+  assert.match(api, /if \(portal !== 'ANY' && portal !== user\.user_type\)/);
+  const pin = actionBlock("if (action === 'auth.pinVerify')", "if (action === 'auth.pinSet')");
+  assert.match(pin, /consumeLoginLimit\(admin, rateKey, 15 \* 60, 5\)/); // 5 tries per 15 minutes
+  // every other function that admins can use checks the same lock
+  for (const fn of ['worksheets', 'doubt-files', 'backup-drive', 'homework-drive', 'google-drive-oauth', 'ai-search']) {
+    const code = await readFile(new URL(`../supabase/functions/${fn}/index.ts`, import.meta.url), 'utf8');
+    assert.match(code, /admin\.rpc\('admin_session_ok'/, fn);
+    assert.match(code, /adminUnlocked\(admin, ?authUser\.id, ?token\)/, fn);
+  }
+  // forgot password: same answer whether or not the account exists; students/teachers need their mobile
+  const forgot = actionBlock("if (action === 'public.forgotPassword')", "if (action === 'auth.login')");
+  assert.ok(forgot.length > 200);
+  assert.doesNotMatch(forgot, /fail\('NOT_FOUND'|No account/);
+  assert.match(forgot, /if \(!known\.includes\(mobile\)\) return done/);
+  const sql = await readFile(new URL('../supabase/migrations/20261114080000_one_login_admin_pin_password_help.sql', import.meta.url), 'utf8');
+  assert.match(sql, /crypt\(p_pin, gen_salt\('bf', 8\)\)/); // PIN stored only as a hash
+});
+
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {
   assert.match(api, /'teacherIncome\.generate':\s*'TEACHER_INCOME_MANAGE'/);
   const block = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");

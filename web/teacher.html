@@ -393,7 +393,7 @@ document.addEventListener('DOMContentLoaded', function () {
 </section>
 
 <div id="app" class="hidden">
-  <div class="topbar"><button id="menu-btn" aria-label="Open menu">Menu</button><b id="tb-centre">Creative Math Zone</b></div>
+  <div class="topbar"><button id="menu-btn" aria-label="Open menu">Menu</button><b id="tb-centre">Creative Math Zone</b><span id="tb-who" class="tb-who" style="margin-left:auto;font-size:.8rem;padding:.15rem .6rem;border-radius:999px;background:rgba(255,255,255,.16);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%"></span></div>
   <nav class="side" id="side" aria-label="Main">
         <div class="brand"><div class="logo-badge" id="nav-logo-badge"><img id="nav-logo" alt=""></div><span id="nav-centre">Creative Math Zone</span><small>Teacher</small></div>
     <div id="nav-items"></div>
@@ -478,7 +478,9 @@ document.addEventListener('click', ev => {
 });
 
 /* ---- auth ---- */
-function signedOut(msg) { S.token=null; S.refreshToken=null; S.user=null; S.perms=[]; try { sessionStorage.removeItem('cmz_tt');sessionStorage.removeItem('cmz_trt'); } catch(e){} if(window.CMZPasskey)window.CMZPasskey.signOut(); show('login'); $('#lg-msg').innerHTML = msg ? '<div class="alert warn">'+esc(msg)+'</div>' : ''; }
+// One login screen for everyone (student.html). out=1 also forgets "keep me signed in".
+function toLogin(msg, out) { try { if (msg) sessionStorage.setItem('cmz_login_msg', msg); } catch (e) {} location.replace('student.html' + (out ? '?out=1' : '')); }
+function signedOut(msg) { S.token=null; S.refreshToken=null; S.user=null; S.perms=[]; try { sessionStorage.removeItem('cmz_tt');sessionStorage.removeItem('cmz_trt'); } catch(e){} const done = () => toLogin(msg, true); if(window.CMZPasskey) window.CMZPasskey.signOut().then(done, done); else done(); }
 function afterAuth(user, token) {
   S.token=token; S.user=user; S.perms=user.permissions||[];
   try { sessionStorage.setItem('cmz_tt', token); if(S.refreshToken)sessionStorage.setItem('cmz_trt',S.refreshToken); } catch(e){}
@@ -488,6 +490,7 @@ function afterAuth(user, token) {
 function startApp() {
   $('#who-name').textContent = S.user.displayName;
   $('#who-role').textContent = 'Teacher';
+  $('#tb-who').textContent = 'Teacher · ' + S.user.displayName;
   buildNav(); if (window.CMZSearch) CMZSearch.mountNavBox($('#nav-items'), q => go('search', q));
   show('app'); go('dashboard');
 }
@@ -967,9 +970,9 @@ VIEWS.profile = async main => {
       S.perms = me.permissions;
       if (me.mustChangePassword) show('forcepw'); else startApp();
       return;
-    } catch (e) { S.token=null; try { sessionStorage.removeItem('cmz_tt');sessionStorage.removeItem('cmz_trt'); } catch(x){} }
+    } catch (e) { S.token=null; try { sessionStorage.removeItem('cmz_tt');sessionStorage.removeItem('cmz_trt'); } catch(x){} toLogin('Please sign in again.', true); return; }
   }
-  show('login');
+  toLogin('', false);
 })();
 </script>
 </body>

@@ -13,6 +13,16 @@ async function encryptToken(token:string){
   return `${b64(iv)}.${b64(new Uint8Array(cipher))}`
 }
 
+// Admin PIN lock (same rule as the main API): an admin who set a PIN must have entered it
+// for this sign-in session. If the SQL is not installed yet, no PINs exist, so allow.
+async function adminUnlocked(admin: any, authUserId: string, token: string) {
+  let sid = ''
+  try { const b = token.split('.')[1].replaceAll('-', '+').replaceAll('_', '/'); sid = String(JSON.parse(atob(b.padEnd(Math.ceil(b.length / 4) * 4, '='))).session_id || '') } catch { /* no session id */ }
+  const { data, error } = await admin.rpc('admin_session_ok', { p_auth_user: authUserId, p_session: sid })
+  if (error) return /admin_session_ok|does not exist|schema cache/i.test(String(error.message || ''))
+  return data !== false
+}
+
 Deno.serve(async req=>{
   if(req.method==='OPTIONS')return new Response('ok',{headers:cors})
   const url=Deno.env.get('SUPABASE_URL')||''
@@ -31,6 +41,7 @@ Deno.serve(async req=>{
       const admin=createClient(url,secret,{auth:{persistSession:false,autoRefreshToken:false}})
       const {data:appUser}=await admin.from('app_users').select('id,user_type,role,status').eq('auth_user_id',authUser.id).maybeSingle()
       if(!appUser||appUser.user_type!=='ADMIN'||appUser.role!=='SUPER_ADMIN'||String(appUser.status).toUpperCase()!=='ACTIVE')return json({error:'Only the active Super Admin can connect Google Drive.'},403)
+      if(!await adminUnlocked(admin,authUser.id,token))return json({error:'Enter your admin PIN first (sign in again).'},401)
       const body=await req.json().catch(()=>({}))
       const {data:state,error}=await admin.from('google_drive_oauth_states').select('state').eq('state',String(body.state||'')).eq('app_user_id',appUser.id).gt('created_at',new Date(Date.now()-10*60*1000).toISOString()).maybeSingle()
       if(error||!state)return json({error:'The Google connection request expired. Start again from Settings.'},400)

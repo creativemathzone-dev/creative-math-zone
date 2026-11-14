@@ -8,6 +8,10 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <script>
+    // The installed Creative Math Zone app opens straight to the login screen.
+    if (/[?&]source=installed-app\b/.test(location.search)) location.replace('./login.html');
+  </script>
   <script src="./config.js"></script>
   <script src="./pwa.js" defer></script>
   <title>Creative Math Zone | Learn · Explore · Grow</title>
@@ -115,7 +119,7 @@
       <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="main-navigation">Menu</button>
       <nav class="main-nav" id="main-navigation" aria-label="Main navigation">
         <a href="#boards">Boards</a><a href="#subjects">Subjects</a><a href="#achievements">Achievements</a><a href="#about">Why CMZ</a><a href="#faq">FAQs</a><a href="#contact">Enquiry</a><a href="#apps-title">Apps</a>
-        <a class="nav-portal" href="admin.html">Admin</a><a class="nav-portal" href="teacher.html">Teacher</a><a class="nav-portal" href="student.html">Student</a>
+        <a class="nav-portal" href="login.html">Login</a>
       </nav>
     </div>
   </header>
@@ -258,10 +262,10 @@
         <h2 class="section-title" id="apps-title">Use Creative Math Zone on your phone</h2>
         <p class="lead" style="color:#dce6ff">Choose an Android app, install the web app, or add the site to your iPhone Home Screen.</p>
         <div class="install-panel">
-          <article class="install-card"><h3>Android apps</h3><p>Get the Student, Teacher, Admin, or all-portals Android app from the official download page.</p><a class="btn" id="android-apk-link" href="download.html">Choose an Android app</a><p id="android-app-installed" role="status" aria-live="polite" hidden>Your APK download has started. Open it from Downloads to install. The web app is still available here.</p></article>
+          <article class="install-card"><h3>Android apps</h3><p>One app for students, parents, teachers and staff. Sign in with your ID and the right portal opens.</p><a class="btn" id="android-apk-link" href="download.html">Get the Android app</a><p id="android-app-installed" role="status" aria-live="polite" hidden>Your APK download has started. Open it from Downloads to install. The web app is still available here.</p></article>
           <article class="install-card"><h3>Install the web app</h3><p>On supported browsers, install Creative Math Zone from the browser menu for quick access.</p><button class="btn" id="install-app" type="button" hidden>Install Creative Math Zone</button></article>
           <article class="install-card"><h3>iPhone or iPad</h3><p>Open this website in Safari, tap <strong>Share</strong>, then choose <strong>Add to Home Screen</strong>.</p></article>
-          <article class="install-card"><h3>Use in your browser</h3><p>Open the student, teacher, or admin portal from the buttons at the top of this page.</p><a class="btn ghost" href="#top">Back to the top</a></article>
+          <article class="install-card"><h3>Use in your browser</h3><p>Students, teachers and staff all sign in from one place.</p><a class="btn ghost" href="login.html">Login</a></article>
         </div>
       </div>
     </section>

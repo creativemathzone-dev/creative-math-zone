@@ -434,7 +434,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 <!-- ============ APP ============ -->
 <div id="app" class="hidden">
-  <div class="topbar"><button id="menu-btn" aria-label="Open menu">Menu</button><b id="tb-centre">Creative Math Zone</b></div>
+  <div class="topbar"><button id="menu-btn" aria-label="Open menu">Menu</button><b id="tb-centre">Creative Math Zone</b><span id="tb-who" class="tb-who" style="margin-left:auto;font-size:.8rem;padding:.15rem .6rem;border-radius:999px;background:rgba(255,255,255,.16);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%"></span></div>
   <nav class="side" id="side" aria-label="Main">
             <div class="brand"><div class="logo-badge" id="nav-logo-badge"><img id="nav-logo" alt=""></div><span id="nav-centre">Creative Math Zone</span><small>Admin</small></div>
     <div id="nav-items"></div>
@@ -488,7 +488,7 @@ function api(action, payload) {
     return r.data;
   }).catch(e => { if (e && e.code) throw e; throw { code:'NETWORK', error:'Could not reach Supabase. Check your internet and project settings.' }; });
 }
-const SESSION_CODES = ['SESSION_EXPIRED', 'SESSION_REVOKED', 'AUTH_REQUIRED'];
+const SESSION_CODES = ['SESSION_EXPIRED', 'SESSION_REVOKED', 'AUTH_REQUIRED', 'PIN_REQUIRED'];
 function fail(e) {
   if (e && SESSION_CODES.indexOf(e.code) >= 0) { signedOut(e.error); return; }
   if (e && e.code === 'PASSWORD_CHANGE_REQUIRED') { show('forcepw'); return; }
@@ -597,12 +597,15 @@ function signedOut(msg) {
   try { sessionStorage.removeItem('cmz_tr'); } catch(e) {}
   if (window.CMZPasskey) window.CMZPasskey.signOut();
   stopLive(); S.token = null; S.refreshToken=null; S.user = null; S.perms = []; S.L = {};
-  closeDlg(); show('login');
-  $('#lg-msg').innerHTML = msg ? '<div class="alert warn">' + esc(msg) + '</div>' : '';
+  closeDlg(); toLogin(msg, true);
 }
+// One login screen for everyone (student.html). out=1 also forgets "keep me signed in".
+function toLogin(msg, out) { try { if (msg) sessionStorage.setItem('cmz_login_msg', msg); } catch (e) {} location.replace('student.html' + (out ? '?out=1' : '')); }
+
 function startApp() {
   $('#who-name').textContent = S.user.displayName;
   $('#who-role').textContent = S.user.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Accounts Admin';
+  $('#tb-who').textContent = (S.user.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Accounts Admin') + ' · ' + S.user.displayName;
   buildNav(); if (window.CMZSearch) CMZSearch.mountNavBox($('#nav-items'), q => go('search', q));
   show('app'); go(new URLSearchParams(location.search).has('drive_code')?'settings':'dashboard'); refreshRegBadge(); startLive();
 }
@@ -672,6 +675,7 @@ const NAV = [
   ['students', 'Students', 'STUDENT_VIEW'],
   ['promotions', 'Promotions', 'STUDENT_EDIT'],
   ['registrations', 'Registrations', 'STUDENT_VIEW'],
+  ['pwrequests', 'Password requests', null],
   ['teachers', 'Teachers', 'TEACHER_VIEW'],
   ['academic', 'Subjects, batches, rooms', 'MASTER_VIEW'],
   ['timetable', 'Timetable', 'MASTER_VIEW'],
@@ -2767,6 +2771,9 @@ VIEWS.settings = async main => {
   const delState = superAdmin ? await api('settings.studentDelete.get').catch(() => null) : null;
   const delOn = !!(delState && delState.enabled);
   main.innerHTML = '<div class="head"><div><h1>Settings</h1><p>Changes apply straight away. Nothing else needs editing in the code.</p></div>' + (edit ? '<button class="btn primary" id="set-save">Save changes</button>' : '') + '</div>' +
+    '<section class="section"><h2>Admin PIN (extra lock)</h2><div class="card"><p>' + (S.user.pinSet ? '<span class="pill ok">PIN is on</span> After every sign-in on any device, your PIN is asked before the admin portal opens.' : '<span class="pill warn">No PIN yet</span> Set a 4–6 digit PIN. After every sign-in it is asked before the admin portal opens, so a leaked password alone is not enough.') + '</p>' +
+      '<form id="pin-set-f" class="grid2"><label class="f"><span>Your password</span><input name="password" type="password" autocomplete="current-password"></label><label class="f"><span>' + (S.user.pinSet ? 'New PIN' : 'PIN') + ' (4–6 digits)</span><input name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label></form>' +
+      '<div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn primary" type="button" id="pin-save">' + (S.user.pinSet ? 'Change PIN' : 'Set PIN') + '</button>' + (S.user.pinSet ? '<button class="btn" type="button" id="pin-remove">Remove PIN</button>' : '') + '</div></div></section>' +
     '<section class="section"><h2>Passkey sign-in</h2><div class="card"><p>Use this device’s passkey (fingerprint, face, device PIN, or security key) for future sign-ins.</p><div id="passkey-list"><span class="muted">Loading passkeys…</span></div><button class="btn primary" id="passkey-add" type="button">Add a passkey on this device</button></div></section>' +
     '<div class="card"><form id="set-f">' + rows.map(r => '<label class="f"><span>' + esc(r.description || r.key) + '</span><input name="' + esc(r.key) + '" value="' + esc(r.value) + '"' + (edit ? '' : ' readonly') + '><small>' + esc(r.key) +
       (r.key === 'SUBJECT_BLOCKED_PAIRS' ? ' — subject IDs: ' + L('subjects').map(s => s.SubjectID + ' = ' + s.SubjectName).join(', ') : '') + '</small></label>').join('') + '</form></div>' +
@@ -2840,6 +2847,15 @@ VIEWS.settings = async main => {
     const r = await api('settings.studentDelete.set', { enabled: !delOn, password: password });
     toast('Permanent student delete is now ' + (r.enabled ? 'ON' : 'OFF') + '.'); go('settings');
   }); });
+  const pinCall = (btn, pin) => busy(btn, async () => {
+    const password = $('#pin-set-f [name=password]').value;
+    if (!password) { toast('Enter your password.', true); return; }
+    if (pin !== '' && !/^\d{4,6}$/.test(pin)) { toast('The PIN must be 4 to 6 digits.', true); return; }
+    const r = await api('auth.pinSet', { password, pin });
+    S.user.pinSet = r.pinSet; toast(r.pinSet ? 'PIN saved. Other devices must enter it at next use.' : 'PIN removed.'); go('settings');
+  });
+  $('#pin-save').addEventListener('click', ev => pinCall(ev.target, $('#pin-set-f [name=pin]').value.trim()));
+  if ($('#pin-remove')) $('#pin-remove').addEventListener('click', ev => { if (confirm('Remove your admin PIN?')) pinCall(ev.target, ''); });
   if (window.CMZPasskey) window.CMZPasskey.renderManager($('#passkey-list'), $('#passkey-add'), esc, toast);
   if(superAdmin){
     $('#drive-connect').addEventListener('click',ev=>busy(ev.target,async()=>{const result=await api('drive.oauthStart');location.href=result.url;}));
@@ -2854,14 +2870,35 @@ VIEWS.settings = async main => {
   }));
 };
 
+/* ---------- "Forgot password?" requests from the login screen ---------- */
+VIEWS.pwrequests = async main => {
+  const r = await api('passwordRequests.list');
+  const typeLabel = t => t === 'STUDENT' ? 'Student' : t === 'TEACHER' ? 'Teacher' : 'Admin';
+  main.innerHTML = '<div class="head"><div><h1>Password requests</h1><p>People who tapped “Forgot password?” on the login screen. Students and teachers had to give their registered mobile number. Reset only if you are sure it is really them.</p></div></div>' +
+    (r.rows.length ? '<div class="tablewrap"><table class="stack"><thead><tr><th>Who</th><th>Type</th><th>ID</th><th>Asked</th><th>Message</th><th></th></tr></thead><tbody>' +
+      r.rows.map(x => '<tr><td data-l="Who"><b>' + esc(x.Name) + '</b></td><td data-l="Type">' + typeLabel(x.UserType) + '</td><td data-l="ID">' + esc(x.Username) + '</td><td data-l="Asked">' + esc(new Date(x.CreatedAt).toLocaleString('en-IN')) + '</td><td data-l="Message">' + esc(x.Note || '—') + '</td>' +
+        '<td class="row"><button class="btn small primary" data-pwr-reset="' + esc(x.RequestID) + '">Reset password</button><button class="btn small" data-pwr-dismiss="' + esc(x.RequestID) + '">Dismiss</button></td></tr>').join('') +
+      '</tbody></table></div>' : '<div class="card empty"><b>No requests</b>Nobody is waiting for a new password.</div>');
+  $('[data-pwr-reset]', main).forEach(b => b.addEventListener('click', () => { const x = r.rows.find(y => y.RequestID === b.dataset.pwrReset);
+    if (!confirm('Make a new temporary password for ' + x.Name + ' (' + x.Username + ')?')) return;
+    busy(b, async () => {
+      const out = x.UserType === 'STUDENT' ? await api('students.resetPassword', { studentId: x.LinkedID }) : x.UserType === 'TEACHER' ? await api('teachers.resetPassword', { teacherId: x.LinkedID }) : await api('users.resetPassword', { userId: x.UserID });
+      await api('passwordRequests.resolve', { id: x.RequestID, status: 'DONE' });
+      credentials('New temporary password', out.username, out.tempPassword, 'Give this to ' + x.Name + ' in person or on their registered number. They must choose a new password after signing in.');
+      go('pwrequests');
+    }); }));
+  $('[data-pwr-dismiss]', main).forEach(b => b.addEventListener('click', () => busy(b, async () => { await api('passwordRequests.resolve', { id: b.dataset.pwrDismiss, status: 'DISMISSED' }); toast('Dismissed.'); go('pwrequests'); })));
+};
+
 /* ---------- admin users ---------- */
 VIEWS.users = async main => {
   const U = await api('users.list'), admins = U.filter(u => u.UserType === 'ADMIN'), others = U.length - admins.length;
   main.innerHTML = '<div class="head"><div><h1>Admin users</h1><p>' + others + ' student and teacher accounts are managed from their own pages.</p></div><button class="btn primary" id="u-add">Add Accounts Admin</button></div>' +
-    '<div class="tablewrap"><table class="stack"><thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Last sign-in</th><th>Extra access</th><th></th></tr></thead><tbody>' +
-    admins.map(u => { const me = u.UserID === S.user.userId, sup = u.Role === 'SUPER_ADMIN', extras = userExtraPermissions(u.ExtraPermissions); return '<tr><td data-l="Username"><b>' + esc(u.Username) + '</b>' + (me ? ' <span class="muted">(you)</span>' : '') + '</td><td data-l="Role">' + (sup ? 'Super Admin' : 'Accounts Admin') + '</td><td>' + pill(u.Status) + '</td><td data-l="Last sign-in">' + esc(u.LastLogin ? fmtTime(u.LastLogin) : 'Never') + '</td><td data-l="Extra access">' + esc(extras.length ? extras.map(p => PERM_LABELS[p] || p).join(', ') : '—') + '</td><td class="row">' +
+    '<div class="tablewrap"><table class="stack"><thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Last sign-in</th><th>PIN</th><th>Extra access</th><th></th></tr></thead><tbody>' +
+    admins.map(u => { const me = u.UserID === S.user.userId, sup = u.Role === 'SUPER_ADMIN', extras = userExtraPermissions(u.ExtraPermissions); return '<tr><td data-l="Username"><b>' + esc(u.Username) + '</b>' + (me ? ' <span class="muted">(you)</span>' : '') + '</td><td data-l="Role">' + (sup ? 'Super Admin' : 'Accounts Admin') + '</td><td>' + pill(u.Status) + '</td><td data-l="Last sign-in">' + esc(u.LastLogin ? fmtTime(u.LastLogin) : 'Never') + '</td><td data-l="PIN">' + (u.PinSet ? '<span class="pill ok">On</span>' : '<span class="muted">Not set</span>') + '</td><td data-l="Extra access">' + esc(extras.length ? extras.map(p => PERM_LABELS[p] || p).join(', ') : '—') + '</td><td class="row">' +
       '<button class="btn small" data-rp="' + esc(u.UserID) + '">Reset password</button>' +
       (sup ? '' : '<button class="btn small" data-pm="' + esc(u.UserID) + '">Access</button>') +
+      (u.PinSet && !me ? '<button class="btn small" data-clearpin="' + esc(u.UserID) + '">Clear PIN</button>' : '') +
       (me ? '' : '<button class="btn small ' + (u.Status === 'Active' ? 'danger' : '') + '" data-st="' + esc(u.UserID) + '">' + (u.Status === 'Active' ? 'Disable' : 'Enable') + '</button>') + '</td></tr>'; }).join('') + '</tbody></table></div>';
   $('#u-add').addEventListener('click', () => openDlg('Add Accounts Admin', '<p class="muted">Accounts Admins handle fees and payments. You can give them more access afterwards.</p><form><label class="f"><span>Username <em>*</em></span><input name="username" required autocomplete="off"></label></form>',
     '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="ua-save">Create</button>',
@@ -2869,7 +2906,9 @@ VIEWS.users = async main => {
       const r = await api('users.createAdmin', { username: $('[name=username]', d).value.trim() }); closeDlg(); credentials('Accounts Admin login', r.username, r.tempPassword); go('users'); }))));
   $$('[data-rp]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.rp);
     if (confirm('Make a new temporary password for ' + u.Username + '? They will be signed out.')) busy(b, async () => { const r = await api('users.resetPassword', { userId: u.UserID }); credentials('New temporary password', r.username, r.tempPassword, (r.sessionsRevoked === false ? 'Password reset completed, but Supabase could not confirm that every old session was revoked. ' : '') + 'Registered passkeys were removed. Give this temporary password to the user; they must set a new password, then add a passkey on their replacement device.'); }); }));
-  $$('[data-st]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.st), to = u.Status === 'Active' ? 'Inactive' : 'Active';
+  $('[data-clearpin]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.clearpin);
+    if (confirm('Clear the admin PIN of ' + u.Username + '? Use this when they forgot it. They can set a new one in Settings.')) busy(b, async () => { await api('users.clearPin', { userId: u.UserID }); toast('PIN cleared.'); go('users'); }); }));
+  $('[data-st]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.st), to = u.Status === 'Active' ? 'Inactive' : 'Active';
     if (confirm((to === 'Inactive' ? 'Disable ' : 'Enable ') + u.Username + '?' + (to === 'Inactive' ? ' They will be signed out immediately.' : ''))) busy(b, async () => { await api('users.setStatus', { userId: u.UserID, status: to }); toast(u.Username + (to === 'Inactive' ? ' disabled.' : ' enabled.')); go('users'); }); }));
   $$('[data-pm]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.pm), have = userExtraPermissions(u.ExtraPermissions);
     const base = ['STUDENT_VIEW', 'TEACHER_VIEW', 'MASTER_VIEW', 'SETTINGS_VIEW', 'FINANCE_VIEW', 'FINANCE_EDIT', 'TEACHER_INCOME_MANAGE', 'REPORT_VIEW'];
@@ -2973,11 +3012,12 @@ $('#live-btn').addEventListener('click', () => busy($('#live-btn'), () => liveRe
     S.token = saved;
     if(window.CMZPasskey&&S.refreshToken){const restored=await window.CMZPasskey.setSession(saved,S.refreshToken);if(restored.session){S.token=restored.session.access_token;S.refreshToken=restored.session.refresh_token;}}
     try { const me = await api('auth.me'); S.user = { userId: me.userId, username: me.username, role: me.role, userType: me.userType, displayName: (me.profile && me.profile.Name) || me.username, mustChangePassword: me.mustChangePassword };
-      if (me.userType !== 'ADMIN') throw { code: 'SESSION_EXPIRED' };
+      if (me.userType !== 'ADMIN' || me.pinRequired) throw { code: 'SESSION_EXPIRED' };
+      S.user.pinSet = !!me.pinSet;
       S.perms = me.permissions; if (me.mustChangePassword) { show('forcepw'); } else startApp(); return; }
-    catch (e) { S.token = null; try { sessionStorage.removeItem('cmz_t');sessionStorage.removeItem('cmz_tr'); } catch (x) {} }
+    catch (e) { S.token = null; try { sessionStorage.removeItem('cmz_t');sessionStorage.removeItem('cmz_tr'); } catch (x) {} toLogin('Please sign in again.', true); return; }
   }
-  show('login');
+  toLogin('', false);
 })();
 </script>
 </body>

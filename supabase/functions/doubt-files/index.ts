@@ -73,6 +73,7 @@ async function signedInUser(req: Request, admin: any, auth: any) {
   if (!authUser) throw json({ error: 'Sign-in expired. Sign in again.' }, 401)
   const { data: user } = await admin.from('app_users').select('id,user_type,role,linked_id,status').eq('auth_user_id', authUser.id).maybeSingle()
   if (!user || String(user.status).toUpperCase() !== 'ACTIVE') throw json({ error: 'Account is not active.' }, 403)
+  if (user.user_type === 'ADMIN' && !await adminUnlocked(admin, authUser.id, token)) throw json({ error: 'Enter your admin PIN first (sign in again).' }, 401)
   return user
 }
 // Same visibility as the API: teachers/admins see all; students see their own doubts and
@@ -255,6 +256,16 @@ async function aiDraft(admin: any, user: any, doubtId: string) {
     const message = e instanceof Error ? e.message : 'AI draft failed.'
     return json({ error: message }, 502)
   }
+}
+
+// Admin PIN lock (same rule as the main API): an admin who set a PIN must have entered it
+// for this sign-in session. If the SQL is not installed yet, no PINs exist, so allow.
+async function adminUnlocked(admin: any, authUserId: string, token: string) {
+  let sid = ''
+  try { const b = token.split('.')[1].replaceAll('-', '+').replaceAll('_', '/'); sid = String(JSON.parse(atob(b.padEnd(Math.ceil(b.length / 4) * 4, '='))).session_id || '') } catch { /* no session id */ }
+  const { data, error } = await admin.rpc('admin_session_ok', { p_auth_user: authUserId, p_session: sid })
+  if (error) return /admin_session_ok|does not exist|schema cache/i.test(String(error.message || ''))
+  return data !== false
 }
 
 Deno.serve(async (req) => {

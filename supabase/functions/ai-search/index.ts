@@ -53,6 +53,7 @@ async function signedInUser(req: Request, admin: any, auth: any) {
     if (iat === null || iat < cutoff) throw new Fault('Your password changed. Sign in again.', 401)
   }
   if (user.must_change_password) throw new Fault('Please change your temporary password first.', 403)
+  if (user.user_type === 'ADMIN' && !await adminUnlocked(admin, authUser.id, token)) throw new Fault('Enter your admin PIN first (sign in again).', 401)
   return user
 }
 async function setting(admin: any, key: string, fallback: string) {
@@ -696,6 +697,16 @@ async function sha(text: string) {
 }
 
 /* ---------------- request handling ---------------- */
+// Admin PIN lock (same rule as the main API): an admin who set a PIN must have entered it
+// for this sign-in session. If the SQL is not installed yet, no PINs exist, so allow.
+async function adminUnlocked(admin: any, authUserId: string, token: string) {
+  let sid = ''
+  try { const b = token.split('.')[1].replaceAll('-', '+').replaceAll('_', '/'); sid = String(JSON.parse(atob(b.padEnd(Math.ceil(b.length / 4) * 4, '='))).session_id || '') } catch { /* no session id */ }
+  const { data, error } = await admin.rpc('admin_session_ok', { p_auth_user: authUserId, p_session: sid })
+  if (error) return /admin_session_ok|does not exist|schema cache/i.test(String(error.message || ''))
+  return data !== false
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   try {

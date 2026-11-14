@@ -396,17 +396,19 @@ document.addEventListener('DOMContentLoaded', function () {
   <div class="signin">
     <form id="login-form" autocomplete="on" novalidate>
       <img id="lg-logo" alt="" style="width:96px;height:96px;object-fit:contain;margin:0 auto .75rem;display:block">
-      <h1>Student sign in</h1>
-      <p id="lg-sub">Use the Student ID and password given to you by the centre.</p>
+      <h1>Sign in</h1>
+      <p id="lg-sub">Students, teachers and staff: use the ID and password given by the centre.</p>
       <div id="lg-msg"></div>
-      <label class="f"><span>Student ID</span><input name="username" autocomplete="username" required autocapitalize="characters" spellcheck="false" placeholder="CMZ-2026-001" style="text-transform:uppercase"></label>
+      <label class="f"><span>ID / Username</span><input name="username" autocomplete="username" required autocapitalize="none" spellcheck="false" placeholder="e.g. CMZ-2026-001"></label>
       <label class="f"><span>Password</span>
         <div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" class="btn small" data-show="password">Show</button></div>
       </label>
+      <label style="display:flex;gap:.5rem;align-items:center;margin:-.2rem 0 .8rem;font-size:.92rem"><input type="checkbox" id="lg-keep" style="width:auto;min-height:0;margin:0"> Keep me signed in on this device <span class="muted" style="font-size:.8rem">(not for admin)</span></label>
       <button class="btn primary" style="width:100%" id="lg-btn">Sign in</button>
-      <button class="btn" style="width:100%;margin-top:.65rem" id="passkey-login" type="button">Sign in with passkey</button>
-      <p style="text-align:center;margin-top:1rem" class="muted" id="lg-foot"></p>
-      <p style="text-align:center;margin:.25rem 0 0" class="muted"><span id="lg-reg-wrap" class="hidden">New student? <button type="button" class="link" id="go-register">Register here</button> · </span><button type="button" class="link" id="go-status">Check request status</button></p>
+      <button class="btn" style="width:100%;margin-top:.65rem" id="passkey-login" type="button">Sign in with fingerprint / passkey</button>
+      <p style="text-align:center;margin:.8rem 0 0"><button type="button" class="link" id="go-forgot">Forgot password?</button></p>
+      <p style="text-align:center;margin-top:.6rem" class="muted" id="lg-foot"></p>
+      <p style="text-align:center;margin:.25rem 0 0" class="muted"><span id="lg-reg-wrap" class="hidden">New student? <button type="button" class="link" id="go-register">Register</button> · </span><button type="button" class="link" id="go-status">Check registration status</button></p>
     </form>
   </div>
 </section>
@@ -432,7 +434,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 <!-- ===== APP ===== -->
 <div id="app" class="hidden">
-  <div class="topbar"><button id="menu-btn" aria-label="Open menu">Menu</button><b id="tb-centre">Creative Math Zone</b></div>
+  <div class="topbar"><button id="menu-btn" aria-label="Open menu">Menu</button><b id="tb-centre">Creative Math Zone</b><span id="tb-who" class="tb-who" style="margin-left:auto;font-size:.8rem;padding:.15rem .6rem;border-radius:999px;background:rgba(255,255,255,.16);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%"></span></div>
   <nav class="side" id="side" aria-label="Main">
     <div class="brand"><img id="nav-logo" alt="" style="display:none;width:42px;height:42px;object-fit:contain;margin-bottom:.4rem;border-radius:6px"><span id="nav-centre">Creative Math Zone</span><small>Student</small></div>
     <div><span class="sid" id="nav-sid">—</span></div>
@@ -532,9 +534,55 @@ document.addEventListener('click', ev => {
   if (ev.target.closest('[data-close]')) closeDlg();
 });
 
+/* ---- one login for everyone: the account decides which portal opens ---- */
+const PORTALS = { TEACHER: ['teacher.html', 'cmz_tt', 'cmz_trt'], ADMIN: ['admin.html', 'cmz_t', 'cmz_tr'] };
+function clearKeep() { try { localStorage.removeItem('cmz_keep'); } catch (e) {} }
+function saveKeep(type, refresh) { try { if (type === 'ADMIN' || !refresh) localStorage.removeItem('cmz_keep'); else localStorage.setItem('cmz_keep', JSON.stringify({ type, refresh })); } catch (e) {} }
+// Admin accounts with a PIN must enter it once per sign-in. Resolves true when unlocked.
+function askAdminPin() {
+  return new Promise(resolve => {
+    let done = false;
+    const d = openDlg('Admin PIN', '<form id="pin-f"><p class="muted" style="margin-top:0">Enter your admin PIN to open the admin portal.</p>' +
+      '<label class="f"><span>PIN</span><input name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="6" pattern="[0-9]*" required style="font-size:1.4rem;letter-spacing:.4em;text-align:center"></label><div id="pin-msg"></div></form>',
+      '<button class="btn" type="button" id="pin-cancel">Cancel</button><button class="btn primary" type="button" id="pin-go">Unlock</button>', dlg => {
+        const input = dlg.querySelector('[name=pin]'), go = dlg.querySelector('#pin-go');
+        const submit = async () => {
+          go.disabled = true; dlg.querySelector('#pin-msg').innerHTML = '';
+          try { await api('auth.pinVerify', { pin: input.value.trim() }); done = true; closeDlg(); resolve(true); }
+          catch (e) { dlg.querySelector('#pin-msg').innerHTML = '<div class="alert bad">' + esc(e.error || 'Could not check the PIN.') + '</div>'; input.value = ''; input.focus(); }
+          finally { go.disabled = false; }
+        };
+        go.addEventListener('click', submit);
+        dlg.querySelector('#pin-f').addEventListener('submit', ev => { ev.preventDefault(); submit(); });
+        dlg.querySelector('#pin-cancel').addEventListener('click', () => closeDlg());
+        input.focus();
+      });
+    d.addEventListener('close', () => { if (!done) resolve(false); }, { once: true });
+  });
+}
+async function routeSignedIn(user, token, refresh, keep) {
+  if (keep) saveKeep(user.userType, refresh); else clearKeep();
+  if (user.userType === 'STUDENT') { afterAuth(user, token); return; }
+  const target = PORTALS[user.userType];
+  if (!target) throw { error: 'This account type cannot sign in here.' };
+  if (user.userType === 'ADMIN' && user.pinRequired && !await askAdminPin()) {
+    try { await api('auth.logout'); } catch (e) {}
+    signedOut('Admin sign-in cancelled.'); return;
+  }
+  try {
+    sessionStorage.removeItem('cmz_st'); sessionStorage.removeItem('cmz_sr');
+    sessionStorage.setItem(target[1], token); if (refresh) sessionStorage.setItem(target[2], refresh);
+  } catch (e) {}
+  location.replace(target[0]);
+}
+const meToUser = me => ({ userId: me.userId, username: me.username, userType: me.userType, role: me.role, linkedId: me.linkedId,
+  displayName: (me.profile && me.profile.Name) || me.username, mustChangePassword: me.mustChangePassword, permissions: me.permissions,
+  profile: me.profile, pinRequired: !!me.pinRequired });
+
 /* ---- sign in/out ---- */
 function signedOut(msg) {
   if(classChangeWatcher){clearInterval(classChangeWatcher);classChangeWatcher=null;}
+  clearKeep();
   S.token=null; S.refreshToken=null; S.user=null; try { sessionStorage.removeItem('cmz_st');sessionStorage.removeItem('cmz_sr'); } catch(e){}
   if(window.CMZPasskey)window.CMZPasskey.signOut();
   closeDlg(); show('login');
@@ -550,6 +598,8 @@ function startApp() {
   $('#who-name').textContent = S.user.displayName;
   $('#who-class').textContent = (S.user.profile && S.user.profile.CurrentClass ? 'Class '+S.user.profile.CurrentClass : '');
   $('#nav-sid').textContent = S.user.linkedId;
+  $('#tb-who').textContent = 'Student · ' + S.user.displayName;
+  document.title = ((S.cfg && S.cfg.centreName) || 'Creative Math Zone') + ' · Student';
   buildNav(); show('app'); go('dashboard'); startClassChangeWatcher();
   if (window.CMZPush) window.CMZPush.refresh(api);
 }
@@ -557,31 +607,30 @@ $('#login-form').addEventListener('submit', async ev => {
   ev.preventDefault();
   const f=ev.target, btn=$('#lg-btn');
   const u=f.elements.username.value.trim(), p=f.elements.password.value;
-  if (!u || !p) { $('#lg-msg').innerHTML='<div class="alert bad">Enter your Student ID and password.</div>'; return; }
+  if (!u || !p) { $('#lg-msg').innerHTML='<div class="alert bad">Enter your ID and password.</div>'; return; }
   btn.disabled=true; btn.textContent='Signing in…'; $('#lg-msg').innerHTML='';
   try {
-    const r = await api('auth.login', { username:u, password:p, portal:'STUDENT' });
+    const r = await api('auth.login', { username:u, password:p, portal:'ANY' });
     f.elements.password.value='';
-    S.refreshToken = r.refreshToken || null;
+    S.token = r.token; S.refreshToken = r.refreshToken || null;
     if (window.CMZPasskey && r.refreshToken) await window.CMZPasskey.setSession(r.token, r.refreshToken);
-    if (window.cmzSplash && !r.user.mustChangePassword) cmzSplash(r.user.displayName, S.cfg.logoUrl); afterAuth(r.user, r.token);
+    const user = Object.assign({}, r.user, { pinRequired: !!r.pinRequired });
+    if (user.userType === 'STUDENT' && window.cmzSplash && !user.mustChangePassword) cmzSplash(user.displayName, S.cfg.logoUrl);
+    await routeSignedIn(user, r.token, r.refreshToken, $('#lg-keep').checked);
   } catch (e) { $('#lg-msg').innerHTML='<div class="alert bad">'+esc(e.error||'Could not sign in.')+'</div>'; }
   finally { btn.disabled=false; btn.textContent='Sign in'; }
 });
 $('#passkey-login').addEventListener('click', async ev => {
   const button=ev.currentTarget; button.disabled=true; button.textContent='Waiting for passkey…'; $('#lg-msg').innerHTML='';
   try {
-    if (!window.CMZPasskey) throw { error:'Passkey sign-in is unavailable. Use your Student ID and password.' };
+    if (!window.CMZPasskey) throw { error:'Passkey sign-in is unavailable. Use your ID and password.' };
     const result=await window.CMZPasskey.signIn(); if(result.error)throw result;
-    if(!result.session)throw {error:'No passkey session was returned. Use your Student ID and password.'};
+    if(!result.session)throw {error:'No passkey session was returned. Use your ID and password.'};
     const session=result.session; S.token=session.access_token; S.refreshToken=session.refresh_token;
     const me=await api('auth.me');
-    if(me.userType!=='STUDENT'){await window.CMZPasskey.signOut();throw {error:'This passkey belongs to a different portal.'};}
-    const user={userId:me.userId,username:me.username,userType:me.userType,role:me.role,linkedId:me.linkedId,
-      displayName:(me.profile&&me.profile.Name)||me.username,mustChangePassword:me.mustChangePassword,permissions:me.permissions,profile:me.profile};
-    afterAuth(user,session.access_token);
-  } catch(e){if(window.CMZPasskey)await window.CMZPasskey.signOut();S.token=null;S.refreshToken=null;try{sessionStorage.removeItem('cmz_st');sessionStorage.removeItem('cmz_sr')}catch(x){}$('#lg-msg').innerHTML='<div class="alert bad">'+esc(e.error||e.message||'Passkey sign-in failed. Use your Student ID and password.')+'</div>';}
-  finally{button.disabled=false;button.textContent='Sign in with passkey';}
+    await routeSignedIn(meToUser(me), S.token, S.refreshToken, $('#lg-keep').checked);
+  } catch(e){if(window.CMZPasskey)await window.CMZPasskey.signOut();S.token=null;S.refreshToken=null;try{sessionStorage.removeItem('cmz_st');sessionStorage.removeItem('cmz_sr')}catch(x){}$('#lg-msg').innerHTML='<div class="alert bad">'+esc(e.error||e.message||'Passkey sign-in failed. Use your ID and password.')+'</div>';}
+  finally{button.disabled=false;button.textContent='Sign in with fingerprint / passkey';}
 });
 $('#pw-form').addEventListener('submit', async ev => {
   ev.preventDefault(); const f=ev.target.elements, btn=$('#pw-btn');
@@ -1257,6 +1306,24 @@ function openStatus(prefill) {
 }
 $('#go-register').addEventListener('click', () => openRegister());
 $('#go-status').addEventListener('click', () => openStatus());
+// "Forgot password?": sends a request to the centre's admin, who gives a new password.
+$('#go-forgot').addEventListener('click', () => {
+  const typed = $('#login-form').elements.username.value.trim();
+  openDlg('Forgot password?', '<form id="fp-f"><p class="muted" style="margin-top:0">The centre will reset your password and give you a new one.</p>' +
+    '<label class="f"><span>Your ID / Username</span><input name="username" autocapitalize="none" spellcheck="false" maxlength="60" required value="' + esc(typed) + '"></label>' +
+    '<label class="f"><span>Registered mobile number</span><input name="mobile" type="tel" inputmode="numeric" maxlength="14" placeholder="Student/parent or teacher mobile"><small>Students and teachers: the number the centre has for you.</small></label>' +
+    '<label class="f"><span>Message (optional)</span><input name="note" maxlength="200" placeholder="e.g. I changed my phone"></label><div id="fp-msg"></div></form>',
+    '<button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="button" id="fp-go">Send request</button>', d => {
+      $('#fp-go', d).addEventListener('click', ev => {
+        const f = $('#fp-f', d).elements, btn = ev.target;
+        if (!f.username.value.trim()) { f.username.focus(); return; }
+        btn.disabled = true;
+        api('public.forgotPassword', { username: f.username.value.trim(), mobile: f.mobile.value, note: f.note.value })
+          .then(() => { $('.dlg-b', d).innerHTML = '<div class="alert ok">Request sent. If the details match, the centre will reset your password and tell you the new one. You can also contact the centre directly.</div>'; btn.remove(); })
+          .catch(e => { $('#fp-msg', d).innerHTML = '<div class="alert bad">' + esc(e.error || 'Could not send the request.') + '</div>'; btn.disabled = false; });
+      });
+    });
+});
 
 /* ---- boot ---- */
 (async function init() {
@@ -1271,25 +1338,40 @@ $('#go-status').addEventListener('click', () => openStatus());
       const navLogo = $('#nav-logo'); if (navLogo) { cmzSetLogo(navLogo, ''); navLogo.style.display = 'inline-block'; }
     }
     if (c.tagline) $('#lg-tagline').textContent = c.tagline;
-    document.title = c.centreName + ' · Student';
+    document.title = c.centreName + ' · Sign in';
     $('#lg-foot').textContent = 'Academic year ' + (c.academicYear||'');
     if (c.registrationEnabled) $('#lg-reg-wrap').classList.remove('hidden');
   } catch (e) {}
+  // Arrived from Sign out (or an expired sign-in) in any portal: forget "keep me signed in".
+  if (new URLSearchParams(location.search).has('out')) clearKeep();
+  let loginMsg = ''; try { loginMsg = sessionStorage.getItem('cmz_login_msg') || ''; sessionStorage.removeItem('cmz_login_msg'); } catch (e) {}
   let saved = null; try { saved = sessionStorage.getItem('cmz_st'); S.refreshToken=sessionStorage.getItem('cmz_sr'); } catch(e){}
   if (saved) {
     S.token = saved;
     if(window.CMZPasskey&&S.refreshToken){const restored=await window.CMZPasskey.setSession(saved,S.refreshToken);if(restored.session){S.token=restored.session.access_token;S.refreshToken=restored.session.refresh_token;}}
     try {
       const me = await api('auth.me');
-      if (me.userType !== 'STUDENT') throw { code:'SESSION_EXPIRED' };
-      S.user = { userId: me.userId, username: me.username, role: me.role, userType: me.userType, linkedId: me.linkedId,
-                 displayName: (me.profile && me.profile.Name) || me.username, mustChangePassword: me.mustChangePassword,
-                 profile: me.profile };
+      if (me.userType !== 'STUDENT') { await routeSignedIn(meToUser(me), S.token, S.refreshToken, false); return; }
+      S.user = meToUser(me);
       if (me.mustChangePassword) show('forcepw'); else startApp();
       return;
     } catch (e) { S.token=null; try { sessionStorage.removeItem('cmz_st');sessionStorage.removeItem('cmz_sr'); } catch(x){} }
   }
+  // "Keep me signed in": renew the saved sign-in and open the right portal.
+  let keep = null; try { keep = JSON.parse(localStorage.getItem('cmz_keep') || 'null'); } catch (e) {}
+  if (keep && keep.refresh && window.CMZPasskey) {
+    try {
+      const renewed = await window.CMZPasskey.refresh(keep.refresh);
+      if (renewed.error || !renewed.session) throw renewed;
+      S.token = renewed.session.access_token; S.refreshToken = renewed.session.refresh_token;
+      const me = await api('auth.me');
+      if (me.mustChangePassword || me.pinRequired) throw { error: 'Sign in again.' };
+      await routeSignedIn(meToUser(me), S.token, S.refreshToken, true);
+      return;
+    } catch (e) { clearKeep(); S.token = null; S.refreshToken = null; }
+  }
   show('login');
+  if (loginMsg) $('#lg-msg').innerHTML = '<div class="alert warn">' + esc(loginMsg) + '</div>';
 })();
 </script>
 </body>
