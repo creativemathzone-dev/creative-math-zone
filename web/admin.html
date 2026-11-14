@@ -11,6 +11,7 @@
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
 <script src="passkeys.js"></script>
+<script src="show-password.js" defer></script>
 <script src="doubts.js"></script>
 <script src="worksheets.js"></script>
 <script src="ai-search.js"></script>
@@ -424,7 +425,7 @@ document.addEventListener('DOMContentLoaded', function () {
       <p class="muted" style="margin:0 0 1.25rem">You are using a temporary password. Set your own before continuing.</p>
       <div id="pw-msg"></div>
       <label class="f"><span>Temporary password</span><input name="oldPassword" type="password" autocomplete="current-password" required></label>
-      <label class="f"><span>New password</span><input name="newPassword" type="password" autocomplete="new-password" required><small>At least 6 characters.</small></label>
+      <label class="f"><span>New password</span><input name="newPassword" type="password" autocomplete="new-password" required><small>At least 8 characters.</small></label>
       <label class="f"><span>Type the new password again</span><input name="again" type="password" autocomplete="new-password" required></label>
       <button class="btn primary" style="width:100%" id="pw-btn">Save and continue</button>
       <p style="text-align:center"><button type="button" class="link" id="pw-out">Sign out</button></p>

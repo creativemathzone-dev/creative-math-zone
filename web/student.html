@@ -11,6 +11,7 @@
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
 <script src="passkeys.js"></script>
+<script src="show-password.js" defer></script>
 <script src="doubts.js"></script>
 <script src="push.js"></script>
 <script src="worksheets.js"></script>
@@ -970,7 +971,7 @@ VIEWS.profile = async main => {
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Change your password</h2>' +
     '<form id="pw2-f"><div class="grid2">' +
       '<label class="f full"><span>Current password</span><input name="old" type="password" required></label>' +
-      '<label class="f"><span>New password</span><input name="n1" type="password" required><small>At least 6 characters.</small></label>' +
+      '<label class="f"><span>New password</span><input name="n1" type="password" required><small>At least 8 characters.</small></label>' +
       '<label class="f"><span>Confirm new password</span><input name="n2" type="password" required></label>' +
     '</div><button class="btn" id="pw2-btn">Update password</button></form></div>' +
     '<div class="card"><h2 style="font-size:1.15rem;margin-bottom:.6rem">Passkey sign-in</h2><p class="muted">Use your device passkey: fingerprint, face, device PIN, or a security key.</p><div id="passkey-list"></div><button class="btn primary" id="passkey-add" type="button">Add a passkey on this device</button></div>';
