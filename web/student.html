@@ -9,8 +9,9 @@
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <script src="./pwa.js" defer></script>
 <script src="config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
+<script src="vendor/supabase-js-2.105.0.js"></script>
 <script src="accounts.js"></script>
+<script src="offline-store.js"></script>
 <script src="passkeys.js"></script>
 <script src="show-password.js" defer></script>
 <script src="bottom-nav.js"></script>
@@ -462,9 +463,24 @@ try{setTextSize(localStorage.getItem('cmz_text_size')||16)}catch(e){setTextSize(
 $('#text-sm').addEventListener('click',()=>setTextSize(parseInt(getComputedStyle(document.documentElement).fontSize,10)-2));
 $('#text-lg').addEventListener('click',()=>setTextSize(parseInt(getComputedStyle(document.documentElement).fontSize,10)+2));
 
+/* Offline mode: these read-only pages are saved on the phone each time they load, and shown
+   from the phone when there is no internet. Writes (pay, submit, mark attendance) always need internet. */
+const OFFLINE_READS = new Set(['public.config', 'auth.me', 'student.dashboard', 'student.timetable', 'student.subjects', 'student.attendance',
+  'student.invoices', 'student.invoiceDoc', 'student.receipt', 'student.homework.list', 'student.classMaterials.list', 'notices.list',
+  'student.classChanges', 'doubts.list', 'doubts.get', 'doubts.stats', 'doubts.leaderboard']);
+const offlineOwner = action => action === 'public.config' ? 'public' : (S.offlineOwner || (window.CMZAccounts && S.token ? CMZAccounts.subOf(S.token) : ''));
 function api(action, payload) {
   const cfg = window.CMZ_CONFIG || {};
   if (!cfg.supabaseUrl || !cfg.supabasePublishableKey || cfg.supabasePublishableKey.includes('PASTE_YOUR_')) return Promise.reject({ code:'SETUP', error:'Open web/config.js and paste the Supabase publishable key from your project settings.' });
+  const saveable = OFFLINE_READS.has(action) && window.CMZOffline, owner = saveable ? offlineOwner(action) : '';
+  const key = owner ? CMZOffline.key(owner, action, payload) : '';
+  const fromPhone = async e => {
+    const hit = key ? await CMZOffline.get(key) : null;
+    if (hit) { CMZOffline.offline(hit.at); S.isOffline = true; return hit.data; }
+    throw e;
+  };
+  // Opened offline from a remembered account: nothing can be sent, use the phone's copy.
+  if (S.offlineOnly) return fromPhone({ code:'NETWORK', error:'You are offline. This needs internet.' });
   const headers = { 'Content-Type':'application/json', apikey:cfg.supabasePublishableKey };
   if (S.token) headers.Authorization = 'Bearer ' + S.token;
   return fetch(cfg.supabaseUrl.replace(/\/$/, '') + '/functions/v1/api', {
@@ -473,8 +489,14 @@ function api(action, payload) {
   }).then(async res => {
     const r = await res.json();
     if (!res.ok || !r || !r.ok) throw r || { code:'HTTP', error:'The server could not complete this request.' };
+    if (key) CMZOffline.put(key, r.data);
+    if (S.isOffline && window.CMZOffline) { S.isOffline = false; CMZOffline.online(); }
     return r.data;
-  }).catch(e => { if (e && e.code) throw e; throw { code:'NETWORK', error:'Could not reach Supabase. Check your internet and project settings.' }; });
+  }).catch(e => {
+    if (e && e.code) throw e;
+    const net = { code:'NETWORK', error: navigator.onLine ? 'Could not reach the server. Check your internet and try again.' : 'You are offline. This needs internet.' };
+    return key ? fromPhone(net) : Promise.reject(net);
+  });
 }
 async function uploadHomeworkFiles(homeworkId, files) {
   for(const file of Array.from(files||[])){
@@ -584,18 +606,39 @@ const meToUser = me => ({ userId: me.userId, username: me.username, userType: me
   displayName: (me.profile && me.profile.Name) || me.username, mustChangePassword: me.mustChangePassword, permissions: me.permissions,
   profile: me.profile, pinRequired: !!me.pinRequired });
 // Opens a remembered account. Returns false (and forgets it) if it no longer works.
+// No internet: open a remembered student account from the copy saved on this phone
+// (read-only). The account is kept; when the internet returns the app reloads and signs in.
+async function openSavedOffline(acc) {
+  if (!acc || acc.type !== 'STUDENT' || !acc.authId || acc.authId === 'legacy' || !window.CMZOffline) return false;
+  S.offlineOwner = acc.authId; S.offlineOnly = true;
+  try {
+    const me = await api('auth.me');
+    S.user = meToUser(me);
+    startApp();
+    window.addEventListener('online', () => location.reload(), { once: true });
+    return true;
+  } catch (e) { S.offlineOwner = ''; S.offlineOnly = false; return false; }
+}
 async function openSavedAccount(acc) {
-  if (!window.CMZPasskey || !acc || !acc.refresh) return false;
+  if (!acc || !acc.refresh) return false;
+  if (!window.CMZPasskey) return openSavedOffline(acc);
   try {
     const renewed = await window.CMZPasskey.refresh(acc.refresh);
-    if (renewed.error || !renewed.session) throw renewed;
+    if (renewed.error || !renewed.session) {
+      if (window.CMZOffline && CMZOffline.isNetworkError({ error: renewed.error })) { S.token = null; return openSavedOffline(acc); }
+      throw renewed;
+    }
     S.token = renewed.session.access_token; S.refreshToken = renewed.session.refresh_token;
     const me = await api('auth.me');
     if (me.mustChangePassword || me.pinRequired || me.userType === 'ADMIN') throw { error: 'Sign in again.' };
     if (acc.authId === 'legacy') ACC.remove('legacy');
     await routeSignedIn(meToUser(me), S.token, S.refreshToken, true);
     return true;
-  } catch (e) { if (ACC) ACC.remove(acc.authId); S.token = null; S.refreshToken = null; return false; }
+  } catch (e) {
+    S.token = null; S.refreshToken = null;
+    if (window.CMZOffline && CMZOffline.isNetworkError(e)) return openSavedOffline(acc); // keep the account
+    if (ACC) ACC.remove(acc.authId); return false;
+  }
 }
 // One-tap sign-in buttons for accounts remembered on this phone.
 function renderSavedAccounts() {
@@ -607,7 +650,12 @@ function renderSavedAccounts() {
   $$('[data-saved]', box).forEach(b => b.addEventListener('click', async () => {
     const acc = ACC.all().find(a => a.authId === b.dataset.saved); b.disabled = true; b.textContent = 'Opening…';
     ACC.setActive(acc.authId);
-    if (!await openSavedAccount(acc)) { renderSavedAccounts(); $('#lg-msg').innerHTML = '<div class="alert warn">That saved sign-in has expired. Please sign in with the password.</div>'; $('#login-form').elements.username.value = acc.username || ''; }
+    if (!await openSavedAccount(acc)) {
+      renderSavedAccounts();
+      $('#lg-msg').innerHTML = '<div class="alert warn">' + (navigator.onLine ? 'That saved sign-in has expired. Please sign in with the password.'
+        : 'You are offline and nothing is saved on this phone for this account yet. Open it once with internet.') + '</div>';
+      $('#login-form').elements.username.value = acc.username || '';
+    }
   }));
   $$('[data-saved-del]', box).forEach(b => b.addEventListener('click', () => { ACC.remove(b.dataset.savedDel); renderSavedAccounts(); }));
 }
@@ -615,6 +663,9 @@ function renderSavedAccounts() {
 /* ---- sign in/out ---- */
 function signedOut(msg) {
   if(classChangeWatcher){clearInterval(classChangeWatcher);classChangeWatcher=null;}
+  // Sign out deletes this person's saved offline copy from the phone (shared family phones).
+  if (window.CMZOffline) { const owner = offlineOwner('auth.me'); if (owner) CMZOffline.clearOwner(owner); CMZOffline.online(); }
+  S.offlineOwner = ''; S.offlineOnly = false; S.isOffline = false;
   if (ACC) ACC.forgetActive();
   S.token=null; S.refreshToken=null; S.user=null; try { sessionStorage.removeItem('cmz_st');sessionStorage.removeItem('cmz_sr'); } catch(e){}
   if(window.CMZPasskey)window.CMZPasskey.signOut();
@@ -1407,6 +1458,7 @@ $('#go-forgot').addEventListener('click', () => {
   // Remembered account: renew its sign-in and open the right portal (not when adding another).
   const current = ACC && !qs.has('add') && !cardId ? ACC.active() : null;
   if (current && await openSavedAccount(current)) return;
+  if (!navigator.onLine && !loginMsg) loginMsg = 'You are offline. Accounts saved on this phone open with their saved data; signing in with a password needs internet.';
   show('login');
   renderSavedAccounts();
   if (loginMsg) $('#lg-msg').innerHTML = '<div class="alert warn">' + esc(loginMsg) + '</div>';

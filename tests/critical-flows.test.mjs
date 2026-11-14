@@ -272,6 +272,26 @@ test('one login: account decides the portal; admin PIN enforced on every server 
   assert.match(sql, /crypt\(p_pin, gen_salt\('bf', 8\)\)/); // PIN stored only as a hash
 });
 
+test('offline mode: only read-only pages are saved, sign out wipes them, saved accounts survive no internet', async () => {
+  const student = await readFile(new URL('../web/student.html', import.meta.url), 'utf8');
+  const reads = student.match(/const OFFLINE_READS = new Set\(\[([\s\S]*?)\]\)/)[1];
+  for (const write of ['submit', 'paymentSubmit', 'enterCode', 'updateProfile', 'changePassword', 'login', 'create', 'answer', 'upload']) {
+    assert.doesNotMatch(reads, new RegExp(write), `${write} must never be served from the phone`);
+  }
+  assert.match(student, /if \(S\.offlineOnly\) return fromPhone\(/); // opened offline: nothing is sent
+  assert.match(student, /if \(owner\) CMZOffline\.clearOwner\(owner\)/); // sign out deletes the phone copy
+  assert.match(student, /if \(window\.CMZOffline && CMZOffline\.isNetworkError\(e\)\) return openSavedOffline\(acc\); \/\/ keep the account/);
+  assert.match(student, /if \(!acc \|\| acc\.type !== 'STUDENT'/); // only student accounts open offline for now
+  // sign-in library is served from our own site so the app can start without internet
+  for (const page of ['student', 'teacher', 'admin']) {
+    const html = await readFile(new URL(`../web/${page}.html`, import.meta.url), 'utf8');
+    assert.match(html, /<script src="vendor\/supabase-js-2\.105\.0\.js"><\/script>/, page);
+  }
+  const sw = await readFile(new URL('../web/service-worker.js', import.meta.url), 'utf8');
+  assert.match(sw, /'\.\/vendor\/supabase-js-2\.105\.0\.js'/);
+  assert.match(sw, /'\.\/offline-store\.js'/);
+});
+
 test('portals: list helpers are never called on a single-element selector ($ vs $$)', async () => {
   // $() returns one element; calling .forEach/.map on it breaks the whole page.
   for (const page of ['admin', 'teacher', 'student']) {

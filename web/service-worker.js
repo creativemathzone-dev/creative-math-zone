@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cmz-pwa-v23';
+const CACHE_NAME = 'cmz-pwa-v24';
 const SHELL_FILES = [
   './',
   './index.html',
@@ -14,6 +14,8 @@ const SHELL_FILES = [
   './passkeys.js',
   './show-password.js',
   './accounts.js',
+  './offline-store.js',
+  './vendor/supabase-js-2.105.0.js',
   './bottom-nav.js',
   './doubts.js',
   './push.js',
