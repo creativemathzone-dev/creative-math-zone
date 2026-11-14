@@ -77,7 +77,7 @@
       (ctx.role === 'TEACHER' ? '<label style="display:flex;gap:.4rem;align-items:center;flex:0 0 auto"><input type="checkbox" id="ws-f-mine" style="width:auto"' + (st.mine ? ' checked' : '') + '> Only mine</label>' : '') + '</div>' +
       (out.rows.length ? out.rows.map(function (w) {
         return '<button type="button" class="card ws-item" data-ws="' + esc(w.WorksheetID) + '"><div style="display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap"><b>' + esc(w.Title) + '</b>' +
-          '<span class="pill">' + esc(w.TotalMarks) + ' marks' + (w.Set === 'B' ? ' · Set B' : '') + '</span></div>' +
+          '<span class="pill">' + esc(w.TotalMarks) + ' marks' + (w.Set === 'B' ? ' · Set B' : w.Set === 'Q' ? ' · Quiz' : '') + '</span></div>' +
           '<div class="ws-meta">' + esc(w.SubjectName) + ' · Class ' + esc(w.ClassName) + ' · ' + esc(w.Board) + (w.Chapter ? ' · ' + esc(w.Chapter) : '') + ' · ' + esc(w.Difficulty.toLowerCase()) +
           (w.TeacherName ? ' · ' + esc(w.TeacherName) : '') + ' · ' + esc(when(w.CreatedAt)) + (w.Archived ? ' · 📁 in Drive' : '') + '</div></button>';
       }).join('') : '<div class="card empty"><b>No worksheets yet</b>Tap “New worksheet” to make the first one.</div>');
@@ -142,10 +142,12 @@
     var canEdit = !!w.CanEdit, ro = canEdit ? '' : ' readonly';
     main.innerHTML = '<p><button type="button" class="link" id="ws-back">← Worksheets</button></p>' +
       '<div class="card"><label class="f"><span>Title</span><input id="ws-title" maxlength="150" value="' + esc(w.Title) + '"' + ro + '></label>' +
-      '<div class="ws-meta">' + esc(w.SubjectName) + ' · Class ' + esc(w.ClassName) + ' · ' + esc(w.Board) + (w.Chapter ? ' · ' + esc(w.Chapter) : '') + ' · ' + esc(w.TotalMarks) + ' marks · ' + esc(w.DurationMin) + ' min' + (w.Set === 'B' ? ' · Set B' : '') + (w.TeacherName ? ' · by ' + esc(w.TeacherName) : '') + '</div>' +
+      '<div class="ws-meta">' + esc(w.SubjectName) + ' · Class ' + esc(w.ClassName) + ' · ' + esc(w.Board) + (w.Chapter ? ' · ' + esc(w.Chapter) : '') + ' · ' + esc(w.TotalMarks) + ' marks · ' + esc(w.DurationMin) + ' min' + (w.Set === 'B' ? ' · Set B' : w.Set === 'Q' ? ' · Quick quiz' : '') + (w.TeacherName ? ' · by ' + esc(w.TeacherName) : '') + '</div>' +
       '<div class="ws-actions">' + (canEdit ? '<button class="btn primary" type="button" id="ws-save">Save changes</button>' : '') +
       '<button class="btn" type="button" id="ws-print">Print questions</button><button class="btn" type="button" id="ws-print-key">Print with answer key</button>' +
-      (w.Set !== 'B' ? '<button class="btn" type="button" id="ws-setb">Make Set B</button>' : '') +
+      (w.Set === 'A' ? '<button class="btn" type="button" id="ws-setb">Make Set B</button>' : '') +
+      (w.Set !== 'Q' ? '<button class="btn" type="button" id="ws-quiz">Quick quiz (MCQ)</button>' : '') +
+      '<button class="btn" type="button" id="ws-check">✔ Check a copy with AI</button>' +
       (ctx.role === 'TEACHER' ? '<button class="btn" type="button" id="ws-assign">Send as homework</button>' : '') +
       (canEdit ? '<button class="btn danger" type="button" id="ws-del">Delete</button>' : '') + '</div>' +
       (w.Homework && w.Homework.length ? '<p class="ws-meta" style="opacity:1">Sent as homework: ' + w.Homework.map(function (h) { return esc(h.BatchName) + ' (due ' + esc(when(h.DueAt)) + ')'; }).join(', ') + '</p>' : '') +
@@ -164,6 +166,16 @@
       finally { stop('Make Set B'); }
       ctx.toast('Set B ready.'); detail(main, ctx, out.worksheet.WorksheetID, info, out.worksheet);
     });
+    on('#ws-quiz', async function () {
+      var b = main.querySelector('#ws-quiz');
+      var n = prompt('How many MCQs? (10, 15 or 20)', '10'); if (n === null) return;
+      n = [10, 15, 20].indexOf(Number(n)) >= 0 ? Number(n) : 10;
+      var stop = ticking(b, 'AI is writing the quiz');
+      try { var out = await call(ctx, 'quiz', { id: w.WorksheetID, count: n }); } finally { stop('Quick quiz (MCQ)'); }
+      ctx.toast('Quiz ready. Check it before using.'); detail(main, ctx, out.worksheet.WorksheetID, info, out.worksheet);
+    });
+    var check = main.querySelector('#ws-check');
+    if (check) check.addEventListener('click', function () { checkCopy(ctx, w); });
     on('#ws-del', async function () { if (!confirm('Delete this worksheet? Homework already sent will show “worksheet deleted”.')) return; await call(ctx, 'delete', { id: w.WorksheetID }); ctx.toast('Deleted.'); view(main, ctx); });
     var assign = main.querySelector('#ws-assign');
     if (assign) assign.addEventListener('click', async function () {
@@ -186,6 +198,70 @@
           });
         });
     });
+  }
+
+  /* ---------- T3: check a student's copy with AI (photos are never stored) ---------- */
+  // Shrinks a photo to at most 1600 px and optionally whites out the top strip of the
+  // first page, where the student's name and roll number are usually written.
+  function shrinkPhoto(file, coverTop) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, 1600 / Math.max(img.width, img.height)), cv = document.createElement('canvas');
+        cv.width = Math.round(img.width * scale); cv.height = Math.round(img.height * scale);
+        var g = cv.getContext('2d'); g.drawImage(img, 0, 0, cv.width, cv.height);
+        if (coverTop) { g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, Math.round(cv.height * 0.12)); }
+        URL.revokeObjectURL(url);
+        resolve({ mime: 'image/jpeg', data: cv.toDataURL('image/jpeg', 0.72).split(',')[1], preview: cv.toDataURL('image/jpeg', 0.4) });
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject({ error: 'Could not read “' + file.name + '”. Use JPG or PNG photos.' }); };
+      img.src = url;
+    });
+  }
+  function checkCopy(ctx, w) {
+    var esc = ctx.esc;
+    ctx.openDlg('Check a copy with AI',
+      '<form class="ws-form" id="cc-form"><p class="muted" style="margin-top:0">Photograph the student’s answer sheet for <b>' + esc(w.Title) + '</b>. The AI suggests marks for each question using the answer key — <b>you decide the final marks</b>.</p>' +
+      '<label><span>Photos of the answer sheet (up to 6 pages)</span><input type="file" name="photos" accept="image/*" multiple></label>' +
+      '<label style="display:flex;gap:.5rem;align-items:flex-start"><input type="checkbox" name="cover" checked style="width:auto;margin-top:.25rem"><span style="font-weight:400">Hide the top of the first page (where the name and roll number are written) before sending</span></label>' +
+      '<div id="cc-prev" style="display:flex;gap:.4rem;flex-wrap:wrap"></div>' +
+      '<label><span>Or type the answers (optional)</span><textarea name="typed" rows="3" maxlength="8000" placeholder="1(a) 25&#10;1(b) x = 3"></textarea></label>' +
+      '<p class="muted" style="font-size:.84rem;margin:0">🔒 Photos go to the free AI once and are not saved anywhere. Don’t include pages with the student’s name or other details.</p></form>' +
+      '<div id="cc-out"></div>',
+      '<button class="btn" type="button" data-close>Close</button><button class="btn primary" type="button" id="cc-go">Check with AI</button>', function (d) {
+        var f = d.querySelector('#cc-form'), out = d.querySelector('#cc-out'), go = d.querySelector('#cc-go'), shots = [];
+        var prep = async function () {
+          var files = Array.prototype.slice.call(f.elements.photos.files || [], 0, 6);
+          shots = [];
+          for (var i = 0; i < files.length; i++) shots.push(await shrinkPhoto(files[i], i === 0 && f.elements.cover.checked));
+          d.querySelector('#cc-prev').innerHTML = shots.map(function (s, i) { return '<img alt="Page ' + (i + 1) + '" src="' + s.preview + '" style="height:90px;border:1px solid var(--line,#ccd);border-radius:6px">'; }).join('');
+        };
+        f.elements.photos.addEventListener('change', function () { prep().catch(function (e) { ctx.toast(e.error || 'Could not read the photos.', true); }); });
+        f.elements.cover.addEventListener('change', function () { prep().catch(function () {}); });
+        go.addEventListener('click', function () {
+          ctx.busy(go, async function () {
+            var typed = f.elements.typed.value.trim();
+            if (!shots.length && !typed) throw { error: 'Add photos of the answer sheet, or type the answers.' };
+            var stop = ticking(go, 'AI is checking');
+            try { var r = (await call(ctx, 'checkCopy', { id: w.WorksheetID, typed: typed, photos: shots.map(function (s) { return { mime: s.mime, data: s.data }; }) })).check; }
+            finally { stop('Check again'); }
+            var total = function () { return Array.prototype.reduce.call(out.querySelectorAll('[data-mark]'), function (v, i) { return v + (Number(i.value) || 0); }, 0); };
+            out.innerHTML = '<h3 style="margin:1rem 0 .4rem">Suggested marks: <span id="cc-total">' + r.Total + '</span> / ' + esc(r.OutOf) + '</h3>' +
+              '<div class="tablewrap"><table class="stack"><thead><tr><th>Q</th><th>Marks</th><th>Out of</th><th>Why</th></tr></thead><tbody>' +
+              r.Rows.map(function (x) { return '<tr><td data-l="Q"><b>' + esc(x.Q) + '</b></td><td data-l="Marks"><input data-mark type="number" min="0" max="' + esc(x.Max) + '" step="0.5" value="' + esc(x.Awarded) + '" style="width:5rem"></td><td data-l="Out of">' + esc(x.Max) + '</td><td data-l="Why">' + esc(x.Comment) + '</td></tr>'; }).join('') +
+              '</tbody></table></div>' + (r.Feedback ? '<p><b>Feedback:</b> ' + esc(r.Feedback) + '</p>' : '') + (r.Unclear ? '<p class="muted"><b>Could not read clearly:</b> ' + esc(r.Unclear) + '</p>' : '') +
+              '<button class="btn small" type="button" id="cc-copy">Copy marks as text</button>' +
+              '<p class="muted" style="font-size:.84rem">These are suggestions. Change any mark above; the total updates. AI can misread handwriting — check before telling the student.</p>';
+            Array.prototype.forEach.call(out.querySelectorAll('[data-mark]'), function (i) { i.addEventListener('input', function () { out.querySelector('#cc-total').textContent = total(); }); });
+            out.querySelector('#cc-copy').addEventListener('click', function () {
+              var marks = out.querySelectorAll('[data-mark]');
+              var text = w.Title + '\nMarks: ' + total() + ' / ' + r.OutOf + '\n' + r.Rows.map(function (x, i) { return x.Q + ': ' + marks[i].value + '/' + x.Max + (x.Comment ? ' — ' + x.Comment : ''); }).join('\n') + (r.Feedback ? '\n\n' + r.Feedback : '');
+              (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () { ctx.toast('Copied.'); }, function () { ctx.toast('Copy did not work.', true); });
+            });
+            out.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        });
+      });
   }
 
   /* ---------- students ---------- */

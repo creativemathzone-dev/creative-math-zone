@@ -3095,12 +3095,12 @@ Deno.serve(async (request) => {
       const [{ data: stored }, { data: usage }, { data: settingRows }, featureUsage] = await Promise.all([
         admin.from('app_secrets').select('key,created_at').eq('key', 'GEMINI_API_KEY').maybeSingle(),
         admin.from('ai_usage').select('calls').eq('day', todayDate()).maybeSingle(),
-        admin.from('settings').select('setting_key,value').in('setting_key', ['AI_DOUBT_DRAFTS_ENABLED', 'AI_DAILY_LIMIT', 'AI_MODEL', 'AI_SEARCH_ENABLED', 'AI_LIMIT_SEARCH', 'AI_LIMIT_WORKSHEETS', 'AI_LIMIT_DOUBTS']),
+        admin.from('settings').select('setting_key,value').in('setting_key', ['AI_DOUBT_DRAFTS_ENABLED', 'AI_DAILY_LIMIT', 'AI_MODEL', 'AI_SEARCH_ENABLED', 'AI_LIMIT_SEARCH', 'AI_LIMIT_WORKSHEETS', 'AI_LIMIT_DOUBTS', 'AI_LIMIT_COPYCHECK', 'AI_LIMIT_NOTICES']),
         admin.from('ai_feature_usage').select('feature,calls').eq('day', todayDate()),
       ])
       const s = Object.fromEntries((settingRows || []).map((r) => [r.setting_key, r.value]))
       const used = new Map(((featureUsage.error ? [] : featureUsage.data) || []).map((r: any) => [r.feature, r.calls]))
-      const features = featureUsage.error ? [] : [['SEARCH', 'Search bar'], ['WORKSHEETS', 'Worksheets'], ['DOUBTS', 'Doubt drafts']]
+      const features = featureUsage.error ? [] : [['SEARCH', 'Search bar'], ['WORKSHEETS', 'Worksheets & quizzes'], ['DOUBTS', 'Doubt drafts'], ['COPYCHECK', 'Copy checking'], ['NOTICES', 'Notice writer']]
         .filter(([k]) => s[`AI_LIMIT_${k}`] != null).map(([k, label]) => ({ key: k, label, used: used.get(k) || 0, limit: Number(s[`AI_LIMIT_${k}`]) || 0 }))
       return response({ ok: true, data: { configured: !!(Deno.env.get('GEMINI_API_KEY') || stored), fromServerSecret: !!Deno.env.get('GEMINI_API_KEY'),
         enabled: String(s.AI_DOUBT_DRAFTS_ENABLED || 'TRUE').toUpperCase() === 'TRUE', limit: Number(s.AI_DAILY_LIMIT || 40),

@@ -209,6 +209,29 @@ test('AI search: names hidden before the AI, read-only, own permissions, own dai
   assert.match(cfg, /\[functions\.ai-search\]\s*\n#[^\n]*\nverify_jwt = false/);
 });
 
+test('AI copy checking stores no photos; quiz and notice writer use their own limits; notice hides names', async () => {
+  const fn = await readFile(new URL('../supabase/functions/worksheets/index.ts', import.meta.url), 'utf8');
+  const block = fn.slice(fn.indexOf("if (action === 'checkCopy')"), fn.indexOf("if (action === 'quiz')"));
+  assert.ok(block.length > 100);
+  assert.doesNotMatch(block, /\.insert\(|\.upsert\(|\.update\(|drive|upload/i); // photos are never saved
+  assert.match(block, /takeAi\(admin, 'COPYCHECK'\)/);
+  assert.match(block, /refundAi\(admin, 'COPYCHECK'\)/);
+  assert.match(fn, /Never write or repeat the student\\'s name/);
+  const quiz = fn.slice(fn.indexOf("if (action === 'quiz')"), fn.indexOf("if (action === 'list')"));
+  assert.match(quiz, /const w = await load\(body\.id\)/); // same subject permission as other worksheet actions
+  assert.match(quiz, /set_label: 'Q'/);
+  const js = await readFile(new URL('../web/worksheets.js', import.meta.url), 'utf8');
+  assert.match(js, /if \(coverTop\) \{ g\.fillStyle = '#fff'; g\.fillRect\(0, 0, cv\.width, Math\.round\(cv\.height \* 0\.12\)\); \}/);
+  const search = await readFile(new URL('../supabase/functions/ai-search/index.ts', import.meta.url), 'utf8');
+  const notice = search.slice(search.indexOf("if (action === 'notice')"), search.indexOf("if (action === 'run')"));
+  assert.match(notice, /if \(!has\(c, 'NOTICE_EDIT'\)\)/);
+  assert.match(notice, /const m = maskQuestion\(points, dict\)/);
+  assert.match(notice, /What the notice must say:\\n\$\{m\.text\}/);
+  assert.match(notice, /p_feature: 'NOTICES'/);
+  const sql = await readFile(new URL('../supabase/migrations/20261114070000_ai_copycheck_and_notice_limits.sql', import.meta.url), 'utf8');
+  assert.match(sql, /'AI_LIMIT_NOTICES', '3'/);
+});
+
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {
   assert.match(api, /'teacherIncome\.generate':\s*'TEACHER_INCOME_MANAGE'/);
   const block = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");

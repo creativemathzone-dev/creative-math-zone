@@ -13,6 +13,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2'
 //    use no AI at all. The same question on the same day is answered from a cache.
 //
 // POST {action:'suggest'} | {action:'search', q} | {action:'run', plan:{intent, params}}
+//      {action:'notice', points, langs, tone, audience}  (AI notice writer, admins with NOTICE_EDIT)
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' }
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
@@ -628,19 +629,21 @@ const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
 function thinkingVariants(m: string): Array<Record<string, unknown> | null> {
   return /2\.5/.test(m) ? [{ thinkingBudget: 0 }, null] : [{ thinkingLevel: 'low' }, { thinkingBudget: 0 }, null]
 }
-async function askGemini(key: string, system: string, text: string) {
-  const started = Date.now(), left = () => 35000 - (Date.now() - started)
+async function askGemini(key: string, system: string, text: string, maxOutputTokens = 600) {
+  // Short search plans: fast "lite" model first. Longer writing (notices): the better model first.
+  const long = maxOutputTokens > 600, perCall = long ? 30000 : 15000
+  const started = Date.now(), left = () => (long ? 70000 : 35000) - (Date.now() - started)
   let busy = false, last = 'The AI did not answer.'
-  for (const m of SEARCH_MODELS) {
+  for (const m of long ? [SEARCH_MODELS[2], SEARCH_MODELS[3], SEARCH_MODELS[0], SEARCH_MODELS[1]] : SEARCH_MODELS) {
     const variants = thinkingVariants(m); let v = 0
     for (let attempt = 0; attempt < 2; attempt++) {
       if (left() < 4000) break
       let res: Response, out: any
       try {
-        const generationConfig: Record<string, unknown> = { temperature: 0, maxOutputTokens: 600, responseMimeType: 'application/json' }
+        const generationConfig: Record<string, unknown> = { temperature: maxOutputTokens > 600 ? 0.4 : 0, maxOutputTokens, responseMimeType: 'application/json' }
         if (variants[v]) generationConfig.thinkingConfig = variants[v]
         res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, signal: AbortSignal.timeout(Math.min(15000, left() - 2000)),
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, signal: AbortSignal.timeout(Math.min(perCall, left() - 2000)),
           body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text }] }], generationConfig }) })
         out = await res.json().catch(() => ({}))
       } catch (e) {
@@ -717,6 +720,50 @@ Deno.serve(async (req) => {
       if (!spec.who(c)) return json({ understood: spec.label, via, result: null, message: 'You do not have permission for this search.' })
       const result = await spec.run(c, plan.params || {}, m)
       return json({ understood: spec.label, via, result })
+    }
+
+    /* ----- A1: notice writer (admin with NOTICE_EDIT). Names/phones are hidden from the AI and put back after. ----- */
+    if (action === 'notice') {
+      if (!has(c, 'NOTICE_EDIT')) return fail('You do not have permission to post notices.', 403)
+      if (!aiOn) return fail('AI is switched off in Settings (AI_SEARCH_ENABLED).', 403)
+      const points = String(body.points || '').replace(/\s+\n/g, '\n').trim().slice(0, 800)
+      if (points.length < 5) return fail('Write a few words about what the notice should say.')
+      const langs = (Array.isArray(body.langs) ? body.langs : ['en']).filter((l: unknown) => ['en', 'bn', 'hi'].includes(String(l))).slice(0, 3)
+      if (!langs.length) langs.push('en')
+      const tone = body.tone === 'friendly' ? 'warm and friendly' : 'polite and formal'
+      const audience = ({ STUDENTS: 'students and parents', TEACHERS: 'teachers', BATCH: 'students of one batch and their parents', ALL: 'everyone (students, parents and teachers)' } as Record<string, string>)[String(body.audience)] || 'students and parents'
+      const key = await geminiKey(admin)
+      if (!key) return fail('The AI assistant is not set up yet. Super Admin: add the free Gemini key in Settings → AI assistant.')
+      const dict = await nameDict(admin, lk)
+      const m = maskQuestion(points, dict)
+      const total = Number.parseInt(await setting(admin, 'AI_DAILY_LIMIT', '40'), 10) || 0
+      const own = Number.parseInt(await setting(admin, 'AI_LIMIT_NOTICES', '3'), 10) || 0
+      const took = await admin.rpc('ai_take_feature', { p_feature: 'NOTICES', p_feature_limit: own, p_total_limit: total })
+      if (took.error) return fail('Run the latest SQL update in Supabase first.', 500)
+      if (!took.data) return fail(`Today's notice-writer limit (${own}) is used up. It resets at midnight.`, 429)
+      const centre = await setting(admin, 'CENTRE_NAME', 'Creative Math Zone')
+      const names: Record<string, string> = { en: 'English', bn: 'Bengali (বাংলা script)', hi: 'Hindi (देवनागरी script)' }
+      const system = [`You write short, clear notices for "${centre}", a coaching centre in West Bengal, India.`,
+        'Reply with JSON only: {"versions":[{"lang":"en","title":"...","body":"..."}]} with one version per requested language, same meaning in each.',
+        'Title: at most 10 words. Body: 40–120 words, plain text, short paragraphs or simple lines; include every date, time, fee amount and instruction given; do not invent facts, dates or amounts.',
+        'Placeholders like PERSON_1, NUMBER_1, REF_1 stand for hidden names, phone numbers and IDs: copy them exactly where they belong.',
+        `Tone: ${tone}. Readers: ${audience}. End the body with "— ${centre}".`].join('\n')
+      const text = `Languages: ${langs.map((l: string) => `${l} = ${names[l]}`).join(', ')}\nWhat the notice must say:\n${m.text}`
+      let j: any
+      try { j = await askGemini(key, system, text, 1500) }
+      catch (e) { await admin.rpc('ai_refund_feature', { p_feature: 'NOTICES' }); throw e }
+      const restore = (s: string) => s.replace(/\b(PERSON|NUMBER|REF)_(\d+)\b/g, (all, kind, n) => {
+        const k = `${kind}_${n}`
+        if (kind === 'PERSON' && m.people[k]) return m.people[k].map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
+        if (kind === 'NUMBER' && m.numbers[k]) return m.numbers[k]
+        if (kind === 'REF' && m.refs[k]) return m.refs[k]
+        return all
+      })
+      const versions = (Array.isArray(j?.versions) ? j.versions : []).filter((v: any) => v && langs.includes(String(v.lang)))
+        .map((v: any) => ({ lang: String(v.lang), title: restore(String(v.title || '')).slice(0, 150), body: restore(String(v.body || '')).slice(0, 3000) }))
+        .filter((v: any) => v.title && v.body)
+      if (!versions.length) { await admin.rpc('ai_refund_feature', { p_feature: 'NOTICES' }); return fail('The AI reply was unclear. Please try again.', 502) }
+      return json({ versions })
     }
 
     if (action === 'run') {

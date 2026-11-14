@@ -142,7 +142,8 @@ const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
 function thinkingVariants(m: string): Array<Record<string, unknown> | null> {
   return /2\.5/.test(m) ? [{ thinkingBudget: 0 }, null] : [{ thinkingLevel: 'low' }, { thinkingBudget: 0 }, null]
 }
-async function callGemini(key: string, model: string, system: string, text: string) {
+type GeminiExtra = { images?: Array<{ mime: string, data: string }>, json?: boolean, temperature?: number, maxOutputTokens?: number }
+async function callGemini(key: string, model: string, system: string, text: string, extra: GeminiExtra = {}) {
   const started = Date.now()
   const left = () => AI_DEADLINE_MS - (Date.now() - started)
   let last = 'AI did not answer.', busy = false, slow = false
@@ -153,12 +154,14 @@ async function callGemini(key: string, model: string, system: string, text: stri
       if (left() < 8000) break
       let res: Response, out: any
       try {
-        const generationConfig: Record<string, unknown> = { temperature: 0.5, maxOutputTokens: 16384 }
+        const generationConfig: Record<string, unknown> = { temperature: extra.temperature ?? 0.5, maxOutputTokens: extra.maxOutputTokens ?? 16384 }
+        if (extra.json) generationConfig.responseMimeType = 'application/json'
         if (variants[v]) generationConfig.thinkingConfig = variants[v]
+        const parts: unknown[] = [{ text }, ...(extra.images || []).map((i) => ({ inline_data: { mime_type: i.mime, data: i.data } }))]
         res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
           signal: AbortSignal.timeout(Math.min(AI_CALL_MAX_MS, left() - 3000)),
-          body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text }] }], generationConfig }) })
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts }], generationConfig }) })
         out = await res.json().catch(() => ({}))
       } catch (e) {
         if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) { slow = true; last = `Model ${m} was too slow.`; break } // next, lighter model
@@ -186,18 +189,19 @@ async function callGemini(key: string, model: string, system: string, text: stri
 }
 // Each AI feature has its own daily limit (AI_LIMIT_WORKSHEETS) inside the overall AI_DAILY_LIMIT.
 // Falls back to the single overall counter if the per-feature SQL has not been run yet.
-async function takeAi(admin: any): Promise<string> {
+async function takeAi(admin: any, feature = 'WORKSHEETS'): Promise<string> {
   const total = Number.parseInt(await setting(admin, 'AI_DAILY_LIMIT', '40'), 10) || 0
-  const own = Number.parseInt(await setting(admin, 'AI_LIMIT_WORKSHEETS', String(total)), 10) || 0
-  const { data, error } = await admin.rpc('ai_take_feature', { p_feature: 'WORKSHEETS', p_feature_limit: own, p_total_limit: total })
-  if (!error) return data ? '' : `Today's AI limit for worksheets (${own}) or for all AI (${total}) is reached. It resets at midnight.`
+  const own = Number.parseInt(await setting(admin, `AI_LIMIT_${feature}`, String(total)), 10) || 0
+  const { data, error } = await admin.rpc('ai_take_feature', { p_feature: feature, p_feature_limit: own, p_total_limit: total })
+  const label = feature === 'COPYCHECK' ? 'copy checking' : 'worksheets'
+  if (!error) return data ? '' : `Today's AI limit for ${label} (${own}) or for all AI (${total}) is reached. It resets at midnight.`
   const { data: allowed, error: capError } = await admin.rpc('ai_take', { p_limit: total })
   if (capError) throw capError
   return allowed ? '' : `Today's AI limit (${total}) is reached. It resets at midnight.`
 }
 // A failed AI call should not use up one of today's allowed drafts.
-async function refundAi(admin: any) {
-  const { error } = await admin.rpc('ai_refund_feature', { p_feature: 'WORKSHEETS' })
+async function refundAi(admin: any, feature = 'WORKSHEETS') {
+  const { error } = await admin.rpc('ai_refund_feature', { p_feature: feature })
   if (!error) return
   const day = istToday()
   const { data } = await admin.from('ai_usage').select('calls').eq('day', day).maybeSingle()
@@ -215,6 +219,17 @@ const SYSTEM = [
   '- Plain text only: no Markdown, no LaTeX. Use Unicode maths symbols (√ ² ³ π θ ≤ ≥ ≠ ± × ÷ ∫ Σ →) and fractions like (a+b)/2.',
   '- Questions must be correct, solvable, at the requested difficulty, and only from the given chapter/topic and class level.',
   'Rules for the answer key: same numbering; MCQ answers with the correct option; short worked solutions for other questions; final answers clearly marked.',
+].join('\n')
+const CHECK_SYSTEM = [
+  'You are a fair, experienced Indian board examiner checking one student\'s answer sheet against the question paper and answer key.',
+  'Reply with JSON only: {"questions":[{"q":"1(a)","max":2,"awarded":1.5,"comment":"short reason"}],"feedback":"2-3 sentences for the teacher","unreadable":"anything you could not read, or empty"}.',
+  'Rules:',
+  '- One entry per question or sub-part that carries marks, in paper order, using the paper\'s numbering. max = marks shown in the paper.',
+  '- Give step marks like a board examiner: correct method with a small slip gets partial marks; correct final answer without working may lose method marks where the paper expects working.',
+  '- Award in steps of 0.5. Never exceed max. Not attempted = 0 with comment "Not attempted". For OR choices, mark only the option the student attempted.',
+  '- Accept any correct alternative method or wording, not only the answer key\'s.',
+  '- If handwriting is unclear, give your best reading, say so in the comment, and list it in "unreadable".',
+  '- Never write or repeat the student\'s name, roll number or any personal detail, even if it appears on the page.',
 ].join('\n')
 function parse(out: string) {
   const grab = (a: string, b?: string) => {
@@ -402,6 +417,73 @@ Deno.serve(async (req) => {
       const rec = { id: String(idData), created_by: user.id, teacher_id: isTeacher ? user.linked_id : null, subject_id: subjectId, batch_id: batchId,
         class_name: className, board, chapter, difficulty, total_marks: totalMarks, duration_min: duration, title: title.slice(0, 150),
         set_label: parent ? 'B' : 'A', parent_id: parent ? parent.id : null, questions: p.questions.slice(0, 60000), answer_key: p.answerKey.slice(0, 60000), model: out.model }
+      const { error } = await admin.from('worksheets').insert(rec)
+      if (error) throw error
+      const n = await names(admin, [rec])
+      return json({ worksheet: row({ ...rec, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), archived_at: null }, n, { Questions: rec.questions, AnswerKey: rec.answer_key, CanEdit: true }) })
+    }
+
+    /* ----- T3: AI copy checking. Photos are sent to the AI once and never stored anywhere. ----- */
+    if (action === 'checkCopy') {
+      if ((await setting(admin, 'AI_DOUBT_DRAFTS_ENABLED', 'TRUE')).toUpperCase() !== 'TRUE') return fail('The AI assistant is switched off in Settings (AI_DOUBT_DRAFTS_ENABLED).', 403)
+      const w = await load(body.id)
+      const photos = (Array.isArray(body.photos) ? body.photos : []).slice(0, 6)
+        .filter((p: any) => p && /^image\/(jpeg|png|webp)$/.test(String(p.mime)) && typeof p.data === 'string' && /^[A-Za-z0-9+/=]+$/.test(p.data) && p.data.length <= 2_000_000)
+        .map((p: any) => ({ mime: String(p.mime), data: String(p.data) }))
+      const typed = String(body.typed || '').slice(0, 8000).trim()
+      if (!photos.length && !typed) return fail('Add photos of the answer sheet, or type the student’s answers.')
+      const content = await readContent(admin, w)
+      if (!content.answerKey.trim()) return fail('This worksheet has no answer key to check against.')
+      const key = await geminiKey(admin)
+      if (!key) return fail('The AI assistant is not set up yet. Super Admin: add the free Gemini key in Settings → AI assistant.')
+      const capped = await takeAi(admin, 'COPYCHECK')
+      if (capped) return fail(capped, 429)
+      const prompt = [`Board: ${w.board}. Class: ${w.class_name}. Full marks: ${w.total_marks}.`,
+        '--- QUESTION PAPER ---', content.questions.slice(0, 15000), '--- ANSWER KEY ---', content.answerKey.slice(0, 15000),
+        '--- STUDENT ANSWERS ---', photos.length ? `The student's answer sheet is in the ${photos.length} attached photo(s).` : '', typed ? `Typed answers:\n${typed}` : ''].filter(Boolean).join('\n')
+      let out: { text: string, model: string }
+      try { out = await callGemini(key, await setting(admin, 'AI_MODEL', 'gemini-flash-latest'), CHECK_SYSTEM, prompt, { images: photos, json: true, temperature: 0.2, maxOutputTokens: 8192 }) }
+      catch (e) { await refundAi(admin, 'COPYCHECK'); return fail(e instanceof Error ? e.message : 'AI failed.', 502) }
+      let j: any
+      try { j = JSON.parse(out.text.replace(/^```(?:json)?|```$/g, '').trim()) } catch { await refundAi(admin, 'COPYCHECK'); return fail('The AI reply was unclear. Please try again.', 502) }
+      const rows = (Array.isArray(j?.questions) ? j.questions : []).slice(0, 80).map((q: any) => {
+        const max = Math.max(0, Number(q?.max) || 0), got = Math.min(max || 999, Math.max(0, Number(q?.awarded) || 0))
+        return { Q: String(q?.q ?? '').slice(0, 20), Max: max, Awarded: Math.round(got * 2) / 2, Comment: String(q?.comment ?? '').slice(0, 300) }
+      })
+      if (!rows.length) { await refundAi(admin, 'COPYCHECK'); return fail('The AI could not read the answers. Try clearer photos (good light, whole page, not tilted).', 502) }
+      const total = rows.reduce((v: number, r: any) => v + r.Awarded, 0)
+      return json({ check: { Rows: rows, Total: Math.round(total * 2) / 2, OutOf: w.total_marks, Feedback: String(j?.feedback ?? '').slice(0, 800),
+        Unclear: String(j?.unreadable ?? '').slice(0, 400), Model: out.model } })
+    }
+
+    /* ----- T4: quick MCQ quiz from a worksheet (saved in the library like any worksheet) ----- */
+    if (action === 'quiz') {
+      if ((await setting(admin, 'AI_DOUBT_DRAFTS_ENABLED', 'TRUE')).toUpperCase() !== 'TRUE') return fail('The AI assistant is switched off in Settings (AI_DOUBT_DRAFTS_ENABLED).', 403)
+      const w = await load(body.id)
+      const count = [10, 15, 20].includes(Number(body.count)) ? Number(body.count) : 10
+      const key = await geminiKey(admin)
+      if (!key) return fail('The AI assistant is not set up yet. Super Admin: add the free Gemini key in Settings → AI assistant.')
+      const capped = await takeAi(admin)
+      if (capped) return fail(capped, 429)
+      const content = await readContent(admin, w)
+      const { data: subject } = await admin.from('subjects').select('name').eq('id', w.subject_id).maybeSingle()
+      const duration = Math.max(5, Math.round(count * 1.5))
+      const prompt = [`Make a quick revision quiz: exactly ${count} single-correct multiple-choice questions, 1 mark each, four options (a)–(d).`,
+        `Class: ${w.class_name}. Board: ${w.board}. Subject: ${subject?.name || ''}. Chapter / topic: ${w.chapter}. Difficulty: ${String(w.difficulty).toLowerCase()}.`,
+        `Full marks: ${count}. Time: ${duration} minutes. No sections needed. Cover the same topic as the paper below, with NEW questions (do not copy them). Mix recall, concept and short numerical questions.`,
+        'The answer key lists only the correct option for each question with a one-line reason.',
+        '--- PAPER FOR REFERENCE ---', content.questions.slice(0, 8000)].join('\n')
+      let out: { text: string, model: string }
+      try { out = await callGemini(key, await setting(admin, 'AI_MODEL', 'gemini-flash-latest'), SYSTEM, prompt) }
+      catch (e) { await refundAi(admin); return fail(e instanceof Error ? e.message : 'AI failed.', 502) }
+      const p = parse(out.text)
+      if (!p.questions || !p.answerKey) { await refundAi(admin); return fail('The AI reply was incomplete. Please try again.', 502) }
+      const { data: idData, error: idError } = await admin.rpc('next_id', { p_counter_name: 'worksheets', p_prefix: 'WS-', p_width: 5 })
+      if (idError) throw idError
+      const rec = { id: String(idData), created_by: user.id, teacher_id: isTeacher ? user.linked_id : null, subject_id: w.subject_id, batch_id: w.batch_id,
+        class_name: w.class_name, board: w.board, chapter: w.chapter, difficulty: w.difficulty, total_marks: count, duration_min: duration,
+        title: `${(p.title || w.title).slice(0, 120)} — Quick quiz`.slice(0, 150), set_label: 'Q', parent_id: w.id,
+        questions: p.questions.slice(0, 60000), answer_key: p.answerKey.slice(0, 60000), model: out.model }
       const { error } = await admin.from('worksheets').insert(rec)
       if (error) throw error
       const n = await names(admin, [rec])

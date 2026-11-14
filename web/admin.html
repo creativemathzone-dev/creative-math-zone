@@ -2637,7 +2637,14 @@ VIEWS.notices = async main => {
     const V = (k, def) => esc(row && row[k] != null ? row[k] : (def || ''));
     const aud = String((row && row.Audience) || 'STUDENTS').toUpperCase();
     const stat = String((row && row.Status) || 'Active');
-    const formHtml = '<form>' +
+    const aiHtml = '<details class="card" id="nt-ai" style="margin:0 0 .8rem;padding:.7rem .9rem"' + (isEdit ? '' : ' open') + '><summary><b>✨ Write it with AI</b> <span class="muted" style="font-size:.85rem">(free · 3 per day)</span></summary>' +
+      '<label class="f full" style="margin-top:.6rem"><span>What should the notice say?</span><textarea name="aiPoints" rows="3" maxlength="800" placeholder="e.g. Holiday on 20 Nov for Diwali. Classes resume 23 Nov. Fees for November due by 25 Nov." style="width:100%;padding:.55rem .75rem;border:1px solid #c5d1e0;border-radius:8px;font:inherit"></textarea></label>' +
+      '<div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 .6rem">' +
+        [['en', 'English', true], ['bn', 'বাংলা', false], ['hi', 'हिन्दी', false]].map(l => '<label style="display:flex;gap:.35rem;align-items:center"><input type="checkbox" name="aiLang" value="' + l[0] + '"' + (l[2] ? ' checked' : '') + ' style="width:auto;min-height:0">' + l[1] + '</label>').join('') +
+        '<select name="aiTone" style="width:auto"><option value="formal">Formal</option><option value="friendly">Friendly</option></select>' +
+        '<button class="btn small primary" type="button" id="nt-ai-go">Write notice</button></div>' +
+      '<small class="muted">Names and phone numbers are hidden from the AI and put back afterwards. Check the dates and amounts before posting.</small></details>';
+    const formHtml = aiHtml + '<form>' +
       '<label class="f full"><span>Title <em style="color:var(--bad);font-style:normal">*</em></span>' +
         '<input name="Title" type="text" maxlength="150" required autocomplete="off" value="' + V('Title', '') + '">' +
       '</label>' +
@@ -2692,6 +2699,26 @@ VIEWS.notices = async main => {
         audSel.addEventListener('change', syncBatch);
         audSel.addEventListener('change', syncPublic);
         syncBatch(); syncPublic();
+
+        $('#nt-ai-go', d).addEventListener('click', ev => busy(ev.target, async () => {
+          const points = d.querySelector('[name=aiPoints]').value.trim();
+          const langs = $$('[name=aiLang]:checked', d).map(i => i.value);
+          if (points.length < 5) { toast('Write a few words about the notice first.', true); return; }
+          if (!langs.length) { toast('Choose at least one language.', true); return; }
+          const cfg = window.CMZ_CONFIG || {}, btn = ev.target; btn.textContent = 'Writing…';
+          try {
+            const res = await fetch(cfg.supabaseUrl.replace(/\/$/, '') + '/functions/v1/ai-search', { method: 'POST',
+              headers: { 'Content-Type': 'application/json', apikey: cfg.supabasePublishableKey, Authorization: 'Bearer ' + S.token },
+              body: JSON.stringify({ action: 'notice', points, langs, tone: d.querySelector('[name=aiTone]').value, audience: audSel.value }) }).catch(() => null);
+            const out = res ? await res.json().catch(() => ({})) : {};
+            if (!res || !res.ok) throw { error: out.error || 'The AI could not write the notice. Please try again.' };
+            const v = out.versions, first = v.find(x => x.lang === 'en') || v[0];
+            d.querySelector('[name=Title]').value = first.title;
+            d.querySelector('[name=Body]').value = [first.body].concat(v.filter(x => x !== first).map(x => x.title + '\n' + x.body)).join('\n\n— — —\n\n');
+            d.querySelector('#nt-ai').open = false;
+            toast('Draft ready. Check it, then post.');
+          } finally { btn.textContent = 'Write notice'; }
+        }));
 
         $('#nt-save', d).addEventListener('click', ev => busy(ev.target, async () => {
           if (!validForm(d)) return;
@@ -2749,7 +2776,7 @@ VIEWS.settings = async main => {
       '<details style="margin-top:.6rem"><summary><b>How to get the free key</b></summary><ol style="margin:.5rem 0 0 1.1rem;padding:0"><li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and sign in with the centre Google account.</li><li>Click <b>Create API key</b> and copy it.</li><li><b>Do not add billing or a card</b> — without billing Google cannot charge anything; the AI simply pauses when the free daily quota is used.</li><li>Paste it below and click Save.</li></ol></details>' +
       '<form id="ai-key-form" style="margin-top:.7rem"><label class="f"><span>Gemini API key</span><input name="key" type="password" autocomplete="off" placeholder="Paste the key here"></label>' +
       '<div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn primary" id="ai-key-save" type="button">Save key</button><button class="btn" id="ai-key-remove" type="button">Remove key</button></div></form>' +
-      '<p class="muted" style="margin-bottom:0;font-size:.86rem">Switch off with <b>AI_DOUBT_DRAFTS_ENABLED</b> / <b>AI_SEARCH_ENABLED</b>. Each feature has its own daily limit (<b>AI_LIMIT_SEARCH</b>, <b>AI_LIMIT_WORKSHEETS</b>, <b>AI_LIMIT_DOUBTS</b>) inside the overall <b>AI_DAILY_LIMIT</b>, all in the list above.</p></div></section>' : '') +
+      '<p class="muted" style="margin-bottom:0;font-size:.86rem">Switch off with <b>AI_DOUBT_DRAFTS_ENABLED</b> / <b>AI_SEARCH_ENABLED</b>. Each feature has its own daily limit (<b>AI_LIMIT_SEARCH</b>, <b>AI_LIMIT_WORKSHEETS</b>, <b>AI_LIMIT_DOUBTS</b>, <b>AI_LIMIT_COPYCHECK</b>, <b>AI_LIMIT_NOTICES</b>) inside the overall <b>AI_DAILY_LIMIT</b>, all in the list above.</p></div></section>' : '') +
     (superAdmin ? '<section class="section"><h2>Database backups</h2><div class="card"><p>Every Sunday at 2 AM the whole database is saved as one compressed file in the connected Google Drive (folder “Creative Math Zone Backups”). The newest 8 backups are kept. Turn it off with <b>AUTO_BACKUP_ENABLED</b> above. Invoices are also generated automatically on the 1st of each month at 6 AM (<b>AUTO_INVOICE_ENABLED</b>).</p>' +
       '<div id="backup-list"><span class="muted">Loading backups…</span></div><button class="btn primary" id="backup-now" type="button">Back up now</button></div></section>' : '') +
     (superAdmin ? '<section class="section"><h2>Danger zone</h2><div class="card"><p><b>Permanent student delete</b> is <span class="pill ' + (delOn ? 'bad' : 'ok') + '">' + (delOn ? 'ON' : 'OFF') + '</span></p>' +
