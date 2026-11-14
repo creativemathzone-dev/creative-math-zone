@@ -290,6 +290,9 @@ test('offline mode: only read-only pages are saved, sign out wipes them, saved a
   const sw = await readFile(new URL('../web/service-worker.js', import.meta.url), 'utf8');
   assert.match(sw, /'\.\/vendor\/supabase-js-2\.105\.0\.js'/);
   assert.match(sw, /'\.\/offline-store\.js'/);
+  // every folder the pages load from must be published (web/vendor once went missing)
+  const publish = await readFile(new URL('../.github/workflows/publish-pages.yml', import.meta.url), 'utf8');
+  assert.match(publish, /cp -R web\/vendor _site\/web\/vendor/);
 });
 
 test('portals: list helpers are never called on a single-element selector ($ vs $$)', async () => {
