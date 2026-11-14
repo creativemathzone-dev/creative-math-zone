@@ -406,9 +406,9 @@ document.addEventListener('DOMContentLoaded', function () {
       <label style="display:flex;gap:.5rem;align-items:center;margin:-.2rem 0 .8rem;font-size:.92rem"><input type="checkbox" id="lg-keep" style="width:auto;min-height:0;margin:0"> Keep me signed in on this device <span class="muted" style="font-size:.8rem">(not for admin)</span></label>
       <button class="btn primary" style="width:100%" id="lg-btn">Sign in</button>
       <button class="btn" style="width:100%;margin-top:.65rem" id="passkey-login" type="button">Sign in with fingerprint / passkey</button>
-      <p style="text-align:center;margin:.8rem 0 0"><button type="button" class="link" id="go-forgot">Forgot password?</button></p>
+      <div id="lg-reg-wrap" class="hidden"><button class="btn" style="width:100%;margin-top:.65rem;background:#fff7dd;border:2px solid #f3b11c;color:#142746;font-weight:700" id="go-register" type="button">📝 New student? Register here</button></div>
+      <p style="text-align:center;margin:.8rem 0 0"><button type="button" class="link" id="go-forgot">Forgot password?</button> · <button type="button" class="link" id="go-status">Check registration status</button></p>
       <p style="text-align:center;margin-top:.6rem" class="muted" id="lg-foot"></p>
-      <p style="text-align:center;margin:.25rem 0 0" class="muted"><span id="lg-reg-wrap" class="hidden">New student? <button type="button" class="link" id="go-register">Register</button> · </span><button type="button" class="link" id="go-status">Check registration status</button></p>
     </form>
   </div>
 </section>
