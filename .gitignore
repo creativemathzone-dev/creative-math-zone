@@ -7,3 +7,12 @@ dist/
 .supabase/
 # Android APKs are stored in the "apps" GitHub Release, not in the code.
 downloads/*.apk
+
+# CMZ Android app: generated during the GitHub build
+android-app/node_modules/
+android-app/android/
+android-app/assets/
+android-app/package-lock.json
+*.p12
+*.keystore
+*.jks

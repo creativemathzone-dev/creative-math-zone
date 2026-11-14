@@ -1,0 +1,85 @@
+name: Build CMZ Android app
+
+# Builds the CMZ native Android app (Capacitor) on GitHub's free servers, signs it with the
+# private key stored in the repository secrets, and puts CMZ.apk in the "apps" release.
+# Then run "Publish Creative Math Zone portal" so the website download link updates.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-app
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install Capacitor
+        run: npm install --no-audit --no-fund
+
+      - name: Create the Android project
+        run: |
+          npx cap add android
+          # our own small native code (printing / Save as PDF)
+          dest=android/app/src/main/java/in/creativemathzone/cmz
+          mkdir -p "$dest"
+          cp native/PrintPlugin.java native/MainActivity.java "$dest/"
+
+      - name: App icon and splash screen from the logo
+        run: |
+          mkdir -p assets
+          cp ../web/icons/creative-math-zone-logo.png assets/logo.png
+          npx capacitor-assets generate --android \
+            --iconBackgroundColor '#102447' --iconBackgroundColorDark '#102447' \
+            --splashBackgroundColor '#102447' --splashBackgroundColorDark '#102447' --logoSplashScale 0.35
+
+      - name: Sync web files and plugins
+        run: npx cap sync android
+
+      - name: Set the version (build number)
+        run: |
+          code=$(( ${{ github.run_number }} + 1 ))
+          sed -i -E "s/versionCode [0-9]+/versionCode $code/; s/versionName \"[^\"]*\"/versionName \"1.0.$code\"/" android/app/build.gradle
+          grep -E "versionCode|versionName" android/app/build.gradle
+
+      - name: Build the app
+        working-directory: android-app/android
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Sign the app
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          test -n "$KS_B64" || { echo "Signing key secret is missing"; exit 1; }
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/cmz-release.p12"
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          unsigned=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          "$bt/zipalign" -p -f 4 "$unsigned" "$RUNNER_TEMP/aligned.apk"
+          "$bt/apksigner" sign --ks "$RUNNER_TEMP/cmz-release.p12" --ks-type PKCS12 --ks-key-alias "$KS_ALIAS" \
+            --ks-pass env:KS_PASS --key-pass env:KS_PASS --out CMZ.apk "$RUNNER_TEMP/aligned.apk"
+          "$bt/apksigner" verify --print-certs CMZ.apk | grep -i "SHA-256"
+          rm -f "$RUNNER_TEMP/cmz-release.p12"
+          ls -l CMZ.apk
+
+      - name: Put CMZ.apk in the "apps" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload apps CMZ.apk --clobber --repo "$GITHUB_REPOSITORY"

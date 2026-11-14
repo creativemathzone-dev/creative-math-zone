@@ -28,6 +28,14 @@
       img.src = url;
     });
   }
+  // Full-size photo on top of everything (works in the browser and inside the CMZ app). Tap to close.
+  function showBig(src) {
+    var o = document.createElement('div');
+    o.style.cssText = 'position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:12px;cursor:zoom-out';
+    var img = document.createElement('img'); img.src = src; img.alt = 'Note photo'; img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain';
+    o.appendChild(img); o.addEventListener('click', function () { o.remove(); });
+    (document.querySelector('dialog[open]') || document.body).appendChild(o);
+  }
   var st = { subject: '', q: '' };
 
   async function view(main, ctx) {
@@ -85,7 +93,7 @@
         var drawPhotos = function () {
           d.querySelector('#nt-ph').innerHTML = n.photos.map(function (p, i) { return '<figure><img src="' + p + '" alt="Photo ' + (i + 1) + '" data-big="' + i + '"><button type="button" aria-label="Remove photo" data-rm="' + i + '">✕</button></figure>'; }).join('');
           Array.prototype.forEach.call(d.querySelectorAll('[data-rm]'), function (b) { b.addEventListener('click', function () { n.photos.splice(+b.getAttribute('data-rm'), 1); drawPhotos(); }); });
-          Array.prototype.forEach.call(d.querySelectorAll('[data-big]'), function (im) { im.addEventListener('click', function () { var w = window.open(); if (w) w.document.write('<img src="' + n.photos[+im.getAttribute('data-big')] + '" style="max-width:100%">'); }); });
+          Array.prototype.forEach.call(d.querySelectorAll('[data-big]'), function (im) { im.addEventListener('click', function () { showBig(n.photos[+im.getAttribute('data-big')]); }); });
         };
         drawPhotos();
         f.elements.photos.addEventListener('change', async function () {

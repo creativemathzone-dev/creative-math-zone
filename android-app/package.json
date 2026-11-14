@@ -1,0 +1,19 @@
+{
+  "name": "cmz-android",
+  "private": true,
+  "version": "1.0.0",
+  "description": "CMZ — Creative Math Zone native Android app (Capacitor). Built by .github/workflows/build-android.yml.",
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/browser": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/filesystem": "^7.0.0",
+    "@capacitor/share": "^7.0.0",
+    "@capacitor/splash-screen": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.0.0"
+  }
+}

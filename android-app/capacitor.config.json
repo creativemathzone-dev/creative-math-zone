@@ -1,0 +1,22 @@
+{
+  "appId": "in.creativemathzone.cmz",
+  "appName": "CMZ",
+  "webDir": "www",
+  "server": {
+    "url": "https://creativemathzone.in/web/student.html",
+    "errorPath": "offline.html",
+    "allowNavigation": []
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#102447"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "launchAutoHide": true,
+      "backgroundColor": "#102447",
+      "showSpinner": false
+    }
+  }
+}
