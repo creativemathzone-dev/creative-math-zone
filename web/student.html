@@ -687,6 +687,7 @@ function startApp() {
   document.title = ((S.cfg && S.cfg.centreName) || 'Creative Math Zone') + ' · Student';
   buildNav(); show('app'); go('dashboard'); startClassChangeWatcher();
   if (window.CMZPush) window.CMZPush.refresh(api);
+  setTimeout(() => { if (typeof flushOutbox === 'function') flushOutbox(); }, 2000);
 }
 $('#login-form').addEventListener('submit', async ev => {
   ev.preventDefault();
@@ -731,7 +732,14 @@ $('#pw-form').addEventListener('submit', async ev => {
     if (SESSION_CODES.indexOf(e.code)>=0) signedOut(e.error); else $('#pw-msg').innerHTML='<div class="alert bad">'+esc(e.error)+'</div>';
   } finally { btn.disabled=false; }
 });
-async function doLogout() { try { await api('auth.logout'); } catch(e){} signedOut('You have signed out.'); }
+async function doLogout() {
+  if (window.CMZOutbox) {
+    const owner = offlineOwner('auth.me'), waiting = owner ? await CMZOutbox.list(owner) : [];
+    if (waiting.length && !confirm(waiting.length + ' item(s) in your Outbox have not been sent yet. Signing out deletes them from this phone. Sign out anyway?')) return;
+    if (owner) await CMZOutbox.clearOwner(owner);
+  }
+  try { await api('auth.logout'); } catch(e){} signedOut('You have signed out.');
+}
 $('#logout').addEventListener('click', doLogout);
 // E1: switch between accounts remembered on this phone (siblings, parent who is also a teacher).
 $('#switch-acc').addEventListener('click', () => { if (!window.CMZAccounts || !S.user) return;
@@ -768,7 +776,8 @@ function go(view){ S.view=view; $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
   if (window.CMZBottomNav) CMZBottomNav.setActive(view);
   const main=$('#main'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
-  Promise.resolve().then(() => (VIEWS[view] || VIEWS.dashboard)(main)).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(e => viewFail(main, view, e)); window.scrollTo(0,0);
+  Promise.resolve().then(() => (VIEWS[view] || VIEWS.dashboard)(main)).then(() => { if (window.cmzAnimate) cmzAnimate(main); if (['dashboard','homework','doubts'].indexOf(view) >= 0 && S.view === view && typeof mountOutbox === 'function') mountOutbox(main); })
+    .catch(e => { viewFail(main, view, e); if (['dashboard','homework','doubts'].indexOf(view) >= 0 && S.view === view && typeof mountOutbox === 'function') mountOutbox(main); }); window.scrollTo(0,0);
 }
 $('#nav-items').addEventListener('click', ev => { const b=ev.target.closest('[data-go]'); if (b) go(b.dataset.go); });
 $('#menu-btn').addEventListener('click', () => $('#side').classList.toggle('open'));
@@ -987,6 +996,68 @@ VIEWS.notices = async main => {
     ).join('') + '</div>' : (classChanges.length ? '' : '<div class="card empty"><b>No notices yet</b>Announcements will appear here.</div>'));
 };
 
+/* ---- Outbox (offline step 2): homework and doubts written without internet are kept on this
+   phone with their photos/files and sent automatically when the internet returns. ---- */
+const outboxOwner = () => offlineOwner('auth.me');
+const offlineNote = () => '\n\n(Written offline on ' + new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) + '; sent when back online.)';
+async function sendHomework(rec, save) {
+  const p = rec.payload, files = rec.files || [];
+  if (!rec.progress.submitted) {
+    await api('student.homework.submit', { homeworkId: p.homeworkId, answer: p.answer, attachmentUrl: p.attachmentUrl, hasFiles: files.length > 0 });
+    rec.progress.submitted = true; await save();
+  }
+  for (let i = rec.progress.uploaded || 0; i < files.length; i++) {
+    const f = files[i];
+    await uploadHomeworkFiles(p.homeworkId, [f instanceof File ? f : new File([f], 'answer-' + (i + 1), { type: f.type })]);
+    rec.progress.uploaded = i + 1; await save();
+  }
+}
+const doubtCtx = { api, esc, toast, busy, openDlg, closeDlg, fmtTime, role: 'STUDENT', token: () => S.token,
+  queue: (label, payload, files, progress) => queueOutbox('doubt', label, payload, files, progress),
+  offline: () => !!S.offlineOnly || !navigator.onLine };
+// Saves a half-done or not-yet-sent item. Returns true when it was put in the Outbox.
+async function queueOutbox(kind, label, payload, files, progress) {
+  if (!window.CMZOutbox) return false;
+  const owner = outboxOwner(); if (!owner) return false;
+  const id = await CMZOutbox.add(owner, { kind, label, payload, files });
+  if (progress && Object.keys(progress).length) { const rows = await CMZOutbox.list(owner); const rec = rows.find(r => r.id === id); if (rec) { rec.progress = progress; await CMZOutbox.save(rec); } }
+  return true;
+}
+let outboxTimer = null;
+async function flushOutbox() {
+  if (!window.CMZOutbox || S.offlineOnly || !S.token || !navigator.onLine) return;
+  const sent = await CMZOutbox.flush(outboxOwner(), r => toast('📤 Sent from Outbox: ' + (r.kind === 'doubt' ? 'doubt' : 'homework') + ' “' + r.label + '”'));
+  if (sent && ['dashboard', 'homework', 'doubts'].indexOf(S.view) >= 0) go(S.view);
+}
+// The Outbox card at the top of Home, Homework and Doubts (only when something is waiting).
+async function mountOutbox(main) {
+  if (!window.CMZOutbox || !main) return;
+  const rows = (await CMZOutbox.list(outboxOwner())).sort((a, b) => a.createdAt - b.createdAt);
+  let box = main.querySelector('#outbox-box');
+  if (!rows.length) { if (box) box.remove(); return; }
+  if (!box) { box = document.createElement('div'); box.id = 'outbox-box'; main.insertBefore(box, main.firstChild); }
+  const when = t => new Date(t).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  box.innerHTML = '<section class="card" style="border:2px solid #f3b11c;background:#fffbea"><h2 style="font-size:1.1rem;margin:0 0 .3rem">📤 Outbox</h2>' +
+    '<p class="muted" style="margin:0 0 .6rem;font-size:.88rem">Saved on this phone. ' + (navigator.onLine && !S.offlineOnly ? 'Sending now…' : 'It will be sent automatically when you are back online.') + '</p>' +
+    rows.map(r => '<div style="padding:.55rem 0;border-top:1px solid var(--line)"><b>' + (r.kind === 'doubt' ? '❓ Doubt' : '📝 Homework') + ':</b> ' + esc(r.label) +
+      '<div class="muted" style="font-size:.82rem">Written ' + esc(when(r.createdAt)) + ((r.files || []).length ? ' · ' + r.files.length + ' file(s)' : '') + '</div>' +
+      (r.status === 'FAILED' ? '<div class="alert bad" style="margin:.4rem 0">Not accepted: ' + esc(r.error) + '</div>' : '<span class="pill warn">Waiting to send</span>') +
+      '<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem">' + (r.status === 'FAILED' ? '<button type="button" class="btn small" data-ob-retry="' + r.id + '">Try again</button>' : '') +
+      '<button type="button" class="btn small" data-ob-copy="' + r.id + '">Copy text</button><button type="button" class="btn small danger" data-ob-del="' + r.id + '">Delete</button></div></div>').join('') + '</section>';
+  const find = id => rows.find(r => String(r.id) === String(id));
+  $$('[data-ob-retry]', box).forEach(b => b.addEventListener('click', async () => { const r = find(b.dataset.obRetry); r.status = 'WAITING'; r.error = ''; await CMZOutbox.save(r); await flushOutbox(); mountOutbox(main); }));
+  $$('[data-ob-del]', box).forEach(b => b.addEventListener('click', async () => { if (!confirm('Delete this from the Outbox? It has not been sent.')) return; await CMZOutbox.remove(find(b.dataset.obDel).id, outboxOwner()); mountOutbox(main); }));
+  $$('[data-ob-copy]', box).forEach(b => b.addEventListener('click', () => { const r = find(b.dataset.obCopy), text = r.kind === 'doubt' ? r.payload.title + '\n' + (r.payload.body || '') : r.payload.answer || '';
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => toast('Copied.'), () => toast('Copy did not work.', true)); }));
+}
+if (window.CMZOutbox) {
+  CMZOutbox.register('homework', sendHomework);
+  CMZOutbox.register('doubt', (rec, save) => window.CMZDoubts.sendQueued(doubtCtx, rec, save));
+  CMZOutbox.onChange(() => { if (['dashboard', 'homework', 'doubts'].indexOf(S.view) >= 0) mountOutbox($('#main')); });
+  window.addEventListener('online', () => setTimeout(flushOutbox, 1500));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) flushOutbox(); });
+}
+
 /* ---- homework ---- */
 VIEWS.homework = async main => {
   const rows = await api('student.homework.list');
@@ -1011,7 +1082,15 @@ VIEWS.homework = async main => {
     if(draft){form.elements.answer.value=draft.answer||form.elements.answer.value;form.elements.attachmentUrl.value=draft.attachmentUrl||form.elements.attachmentUrl.value;}
     const saveDraft=()=>{try{localStorage.setItem(key,JSON.stringify({answer:form.elements.answer.value,attachmentUrl:form.elements.attachmentUrl.value,savedAt:Date.now()}));}catch(e){}};
     form.elements.answer.addEventListener('input',saveDraft);form.elements.attachmentUrl.addEventListener('input',saveDraft);
-    form.addEventListener('submit',ev=>{ev.preventDefault();const b=form.querySelector('button');busy(b,async()=>{if(form.elements.files.files.length>5)throw {error:'Choose up to five files.'};await api('student.homework.submit',{homeworkId:form.dataset.hwForm,answer:form.elements.answer.value.trim(),attachmentUrl:form.elements.attachmentUrl.value.trim(),hasFiles:form.elements.files.files.length>0});await uploadHomeworkFiles(form.dataset.hwForm,form.elements.files.files);try{localStorage.removeItem(key)}catch(e){}toast('Homework submitted.');go('homework');});});
+    form.addEventListener('submit',ev=>{ev.preventDefault();const b=form.querySelector('button');busy(b,async()=>{if(form.elements.files.files.length>5)throw {error:'Choose up to five files.'};
+      const title=(rows.find(x=>x.HomeworkID===form.dataset.hwForm)||{}).Title||'Homework';
+      const rec={payload:{homeworkId:form.dataset.hwForm,answer:form.elements.answer.value.trim(),attachmentUrl:form.elements.attachmentUrl.value.trim()},files:Array.from(form.elements.files.files),progress:{}};
+      try{if(S.offlineOnly||!navigator.onLine)throw {code:'NETWORK'};await sendHomework(rec,async()=>{});}
+      catch(e){if(!window.CMZOffline||!CMZOffline.isNetworkError(e))throw e;
+        if(!rec.progress.submitted)rec.payload.answer=(rec.payload.answer+offlineNote()).trim();
+        if(!await queueOutbox('homework',title,rec.payload,rec.files,rec.progress))throw e;
+        try{localStorage.removeItem(key)}catch(x){}toast('📤 No internet. Saved in the Outbox — it will be sent automatically when you are online.');go('homework');return;}
+      try{localStorage.removeItem(key)}catch(e){}toast('Homework submitted.');go('homework');});});
   });
   $$('[data-hw-file]',main).forEach(b=>b.addEventListener('click',()=>busy(b,()=>openHomeworkFile(b.dataset.hwFile))));
   const wsCtx={esc,toast,busy,openDlg,closeDlg,role:'STUDENT',token:()=>S.token,centreName:()=>(S.cfg&&S.cfg.centreName)||'Creative Math Zone'};
@@ -1021,7 +1100,7 @@ VIEWS.homework = async main => {
 };
 
 /* ---- doubts ---- */
-VIEWS.doubts = main => window.CMZDoubts.view(main, { api, esc, toast, busy, openDlg, closeDlg, fmtTime, role:'STUDENT', token:()=>S.token });
+VIEWS.doubts = main => window.CMZDoubts.view(main, doubtCtx);
 
 /* ---- class PDFs ---- */
 VIEWS.materials = async main => {

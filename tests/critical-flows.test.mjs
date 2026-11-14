@@ -295,6 +295,19 @@ test('offline mode: only read-only pages are saved, sign out wipes them, saved a
   assert.match(publish, /cp -R web\/vendor _site\/web\/vendor/);
 });
 
+test('Outbox: offline homework/doubts are kept with their files, resume without duplicates, and are deleted on sign out', async () => {
+  const store = await readFile(new URL('../web/offline-store.js', import.meta.url), 'utf8');
+  assert.match(store, /if \(window\.CMZOffline\.isNetworkError\(e\)\) break;/); // still offline: keep waiting
+  assert.match(store, /r\.status = 'FAILED'; r\.error = /); // server said no: show the reason, never retry silently
+  const student = await readFile(new URL('../web/student.html', import.meta.url), 'utf8');
+  assert.match(student, /if \(!rec\.progress\.submitted\) \{\s*await api\('student\.homework\.submit'/); // never submits twice
+  assert.match(student, /for \(let i = rec\.progress\.uploaded \|\| 0; i < files\.length; i\+\+\)/); // resumes at the next file
+  assert.match(student, /Signing out deletes them from this phone/);
+  assert.match(student, /if \(owner\) await CMZOutbox\.clearOwner\(owner\);/);
+  const doubts = await readFile(new URL('../web/doubts.js', import.meta.url), 'utf8');
+  assert.match(doubts, /if \(!rec\.progress\.doubtId\) \{\s*var r = await ctx\.api\('doubts\.create'/);
+});
+
 test('portals: list helpers are never called on a single-element selector ($ vs $$)', async () => {
   // $() returns one element; calling .forEach/.map on it breaks the whole page.
   for (const page of ['admin', 'teacher', 'student']) {

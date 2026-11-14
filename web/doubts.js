@@ -201,13 +201,24 @@
           ctx.busy(ev.target, async function () {
             if (!form.elements.subjectId.value) throw { error: 'Choose a subject.' };
             if (String(form.elements.title.value).trim().length < 3) throw { error: 'Write your question in one line.' };
-            var n = checkPhotos(form.elements.photos);
-            var r = await ctx.api('doubts.create', { subjectId: form.elements.subjectId.value, chapter: form.elements.chapter.value,
-              title: form.elements.title.value, body: form.elements.body.value });
-            var temp = 0;
-            if (n) { ev.target.textContent = 'Uploading photos…'; temp = await uploadPhotos(ctx, r.DoubtID, '', form.elements.photos.files); }
-            ctx.closeDlg(); ctx.toast('Doubt posted.' + (temp ? ' Photos will move to Google Drive shortly.' : ''));
-            state.tab = 'mine'; detail(main, ctx, r.DoubtID);
+            checkPhotos(form.elements.photos);
+            var rec = { payload: { subjectId: form.elements.subjectId.value, chapter: form.elements.chapter.value,
+              title: form.elements.title.value, body: form.elements.body.value }, files: Array.prototype.slice.call(form.elements.photos.files || []), progress: {} };
+            var doubtId;
+            try {
+              if (ctx.offline && ctx.offline()) throw { code: 'NETWORK' };
+              if (rec.files.length) ev.target.textContent = 'Posting…';
+              doubtId = await sendQueued(ctx, rec, async function () {});
+            } catch (e) {
+              // No internet: keep it (with its photos) in the Outbox and post it automatically later.
+              if (!ctx.queue || !window.CMZOffline || !window.CMZOffline.isNetworkError(e)) throw e;
+              if (!rec.progress.doubtId) rec.payload.body = (rec.payload.body + '\n\n(Written offline on ' + new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) + '; posted when back online.)').trim();
+              if (!await ctx.queue(String(rec.payload.title).trim().slice(0, 80), rec.payload, rec.files, rec.progress)) throw e;
+              ctx.closeDlg(); ctx.toast('📤 No internet. Your doubt is saved in the Outbox and will be posted automatically when you are online.');
+              state.tab = 'mine'; view(main, ctx); return;
+            }
+            ctx.closeDlg(); ctx.toast('Doubt posted.' + (rec.progress.temp ? ' Photos will move to Google Drive shortly.' : ''));
+            state.tab = 'mine'; detail(main, ctx, doubtId);
           });
         });
       });
@@ -380,5 +391,20 @@
     body.querySelector('#dz-month').addEventListener('change', function (e) { stats(body, ctx, e.target.value).catch(function (x) { ctx.toast(x.error || 'Could not load.', true); }); });
   }
 
-  window.CMZDoubts = { view: view };
+  // Posts a doubt and its photos. Remembers progress, so a doubt cut off halfway (posted, but a
+  // photo not uploaded) resumes from the right photo instead of posting twice. Used by the Outbox.
+  async function sendQueued(ctx, rec, save) {
+    rec.progress = rec.progress || {};
+    if (!rec.progress.doubtId) {
+      var r = await ctx.api('doubts.create', rec.payload);
+      rec.progress.doubtId = r.DoubtID; await save();
+    }
+    var files = rec.files || [];
+    for (var i = rec.progress.uploaded || 0; i < files.length; i++) {
+      rec.progress.temp = (rec.progress.temp || 0) + await uploadPhotos(ctx, rec.progress.doubtId, '', [files[i]]);
+      rec.progress.uploaded = i + 1; await save();
+    }
+    return rec.progress.doubtId;
+  }
+  window.CMZDoubts = { view: view, sendQueued: sendQueued };
 })();
