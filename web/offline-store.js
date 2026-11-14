@@ -3,18 +3,21 @@
    "Offline — saved on …" bar. Sign out deletes that person's copy. */
 (function () {
   'use strict';
-  var DB = 'cmz-offline', STORE = 'reads', OUT = 'outbox', dbp = null;
+  var DB = 'cmz-offline', STORE = 'reads', OUT = 'outbox', NOTES = 'notes', dbp = null;
   function open() {
     if (dbp) return dbp;
     dbp = new Promise(function (resolve, reject) {
       if (!window.indexedDB) { reject(new Error('no indexedDB')); return; }
-      var req = indexedDB.open(DB, 2);
+      var req = indexedDB.open(DB, 3);
       req.onupgradeneeded = function () {
         var db = req.result;
         if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
         if (!db.objectStoreNames.contains(OUT)) db.createObjectStore(OUT, { keyPath: 'id', autoIncrement: true }).createIndex('owner', 'owner');
+        if (!db.objectStoreNames.contains(NOTES)) db.createObjectStore(NOTES, { keyPath: 'id', autoIncrement: true }).createIndex('owner', 'owner');
       };
-      req.onsuccess = function () { resolve(req.result); };
+      // Another open tab still uses the older version: let it close so this one can upgrade.
+      req.onblocked = function () { reject(new Error('Close other Creative Math Zone tabs and try again.')); };
+      req.onsuccess = function () { var db = req.result; db.onversionchange = function () { db.close(); dbp = null; }; resolve(db); };
       req.onerror = function () { reject(req.error); };
     });
     dbp.catch(function () { dbp = null; });
@@ -35,11 +38,12 @@
       bar = document.createElement('div');
       bar.id = 'offline-bar'; bar.setAttribute('role', 'status');
       bar.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:60;background:#102447;color:#fff;border:1px solid #ffc629;' +
-        'border-radius:999px;padding:.35rem .9rem;font-size:.82rem;box-shadow:0 4px 14px rgba(0,0,0,.2);max-width:calc(100% - 24px);text-align:center';
+        'border-radius:999px;padding:.25rem .8rem;font-size:.78rem;box-shadow:0 4px 14px rgba(0,0,0,.2);max-width:calc(100% - 24px);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       document.body.appendChild(bar);
     }
     var when = at ? new Date(at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
-    bar.textContent = '📴 Offline — showing what was saved' + (when ? ' on ' + when : '');
+    bar.textContent = '📴 Offline' + (when ? ' · saved ' + when : ' · showing saved data');
+    bar.title = 'No internet — showing what was saved on this phone';
     bar.hidden = false;
   }
   function hideBar() { if (bar) bar.hidden = true; }
@@ -107,4 +111,16 @@
     },
   };
   window.CMZOutbox = O;
+
+  /* ---------- My Notes: personal notes kept only on this phone (never sent to the server) ---------- */
+  window.CMZNoteStore = {
+    list: function (owner) { return tx('readonly', function (s) { return s.index('owner').getAll(owner); }, NOTES).then(function (r) { return r || []; }); },
+    save: function (note) { return tx('readwrite', function (s) { return s.put(note); }, NOTES); },
+    remove: function (id) { return tx('readwrite', function (s) { s.delete(id); }, NOTES); },
+    clearOwner: function (owner) {
+      return window.CMZNoteStore.list(owner).then(function (rows) { return Promise.all(rows.map(function (r) { return window.CMZNoteStore.remove(r.id); })); });
+    },
+  };
+  // Ask the phone not to clear this app's storage when space runs low (best effort).
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
 })();

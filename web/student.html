@@ -16,6 +16,7 @@
 <script src="show-password.js" defer></script>
 <script src="bottom-nav.js"></script>
 <script src="doubts.js"></script>
+<script src="notes.js"></script>
 <script src="push.js"></script>
 <script src="worksheets.js"></script>
 <title>Creative Math Zone · Student</title>
@@ -747,7 +748,7 @@ $('#switch-acc').addEventListener('click', () => { if (!window.CMZAccounts || !S
 $('#pw-out').addEventListener('click', doLogout);
 
 /* ---- nav ---- */
-const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['subjects','Subjects'],['attendance','Attendance'],['fees','Fees'],['homework','Homework'],['doubts','Doubts'],['materials','Class PDFs'],['notices','Notices'],['profile','Profile']];
+const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['subjects','Subjects'],['attendance','Attendance'],['fees','Fees'],['homework','Homework'],['doubts','Doubts'],['notes','My notes'],['materials','Class PDFs'],['notices','Notices'],['profile','Profile']];
 let classChangeWatcher=null;
 function startClassChangeWatcher(){
   if(classChangeWatcher)clearInterval(classChangeWatcher);
@@ -1101,6 +1102,9 @@ VIEWS.homework = async main => {
 
 /* ---- doubts ---- */
 VIEWS.doubts = main => window.CMZDoubts.view(main, doubtCtx);
+// My Notes: personal notebook kept only on this phone (works offline).
+VIEWS.notes = main => window.CMZNotes.view(main, { esc, toast, openDlg, closeDlg, owner: () => offlineOwner('auth.me'),
+  subjects: async () => (await api('student.subjects')).filter(r => String(r.Status).toUpperCase() === 'ACTIVE').map(r => r.SubjectName).filter(Boolean) });
 
 /* ---- class PDFs ---- */
 VIEWS.materials = async main => {

@@ -308,6 +308,18 @@ test('Outbox: offline homework/doubts are kept with their files, resume without 
   assert.match(doubts, /if \(!rec\.progress\.doubtId\) \{\s*var r = await ctx\.api\('doubts\.create'/);
 });
 
+test('My Notes: kept only on the phone, per account, backup restore accepts only real photos', async () => {
+  const notes = await readFile(new URL('../web/notes.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(notes, /fetch\(|ctx\.api\(|functions\/v1/); // never sent to a server
+  assert.match(notes, /\/\^data:image\\\/\(jpeg\|png\|webp\);base64,\[A-Za-z0-9\+\/\]\+=\*\$\//); // no code hidden in a backup photo
+  const store = await readFile(new URL('../web/offline-store.js', import.meta.url), 'utf8');
+  assert.match(store, /createObjectStore\(NOTES, \{ keyPath: 'id', autoIncrement: true \}\)\.createIndex\('owner', 'owner'\)/);
+  const student = await readFile(new URL('../web/student.html', import.meta.url), 'utf8');
+  assert.match(student, /VIEWS\.notes = main => window\.CMZNotes\.view\(main, \{ esc, toast, openDlg, closeDlg, owner: \(\) => offlineOwner\('auth\.me'\)/);
+  const sw = await readFile(new URL('../web/service-worker.js', import.meta.url), 'utf8');
+  assert.match(sw, /'\.\/notes\.js'/);
+});
+
 test('portals: list helpers are never called on a single-element selector ($ vs $$)', async () => {
   // $() returns one element; calling .forEach/.map on it breaks the whole page.
   for (const page of ['admin', 'teacher', 'student']) {
