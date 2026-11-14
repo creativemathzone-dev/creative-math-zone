@@ -1,63 +1,23 @@
 (() => {
-  const downloadOptions = [
-    {
-      key: 'cmz-cmz-apk-download-started',
-      linkIds: ['cmz-apk-download'],
-      messageIds: ['cmz-apk-installed'],
-      sourceNoteIds: [],
-    },
-    {
-      key: 'cmz-main-apk-download-started-v2',
-      linkIds: ['apk-download'],
-      messageIds: ['apk-installed'],
-      sourceNoteIds: ['apk-source-note'],
-    },
-    {
-      key: 'cmz-student-apk-download-started',
-      linkIds: ['student-apk-download'],
-      messageIds: ['student-apk-installed'],
-      sourceNoteIds: ['student-apk-source-note'],
-    },
-    {
-      key: 'cmz-teacher-apk-download-started',
-      linkIds: ['teacher-apk-download'],
-      messageIds: ['teacher-apk-installed'],
-      sourceNoteIds: ['teacher-apk-source-note'],
-    },
-    {
-      key: 'cmz-admin-apk-download-started',
-      linkIds: ['admin-apk-download'],
-      messageIds: ['admin-apk-installed'],
-      sourceNoteIds: ['admin-apk-source-note'],
-    },
+  // Download buttons always stay visible (people must be able to download updates again).
+  // After a tap, a short "download started" note appears under the button.
+  const downloads = [
+    ['cmz-apk-download', 'cmz-apk-installed'],
+    ['apk-download', 'apk-installed'],
+    ['student-apk-download', 'student-apk-installed'],
+    ['teacher-apk-download', 'teacher-apk-installed'],
+    ['admin-apk-download', 'admin-apk-installed'],
   ];
-
-  const setVisible = (ids, hidden) => {
-    ids.forEach((id) => {
-      const element = document.getElementById(id);
-      if (element) element.hidden = hidden;
-    });
-  };
-
-  const markDownloadStarted = (option) => {
-    setVisible(option.linkIds, true);
-    setVisible(option.sourceNoteIds, true);
-    setVisible(option.messageIds, false);
-  };
-
-  downloadOptions.forEach((option) => {
-    try {
-      if (localStorage.getItem(option.key) === 'true') markDownloadStarted(option);
-    } catch {}
-
-    const downloadLink = document.getElementById(option.linkIds.at(-1));
-    if (!downloadLink) return;
-
-    downloadLink.addEventListener('click', () => {
-      try {
-        localStorage.setItem(option.key, 'true');
-        markDownloadStarted(option);
-      } catch {}
-    });
+  // Older versions of this page hid the buttons forever after one download; forget that.
+  try {
+    ['cmz-cmz-apk-download-started', 'cmz-main-apk-download-started-v2', 'cmz-main-apk-download-started', 'cmz-student-apk-download-started',
+      'cmz-teacher-apk-download-started', 'cmz-admin-apk-download-started'].forEach((key) => localStorage.removeItem(key));
+  } catch {}
+  downloads.forEach(([linkId, messageId]) => {
+    const link = document.getElementById(linkId), message = document.getElementById(messageId);
+    if (!link || !message) return;
+    link.hidden = false;
+    message.hidden = true;
+    link.addEventListener('click', () => { message.hidden = false; });
   });
 })();

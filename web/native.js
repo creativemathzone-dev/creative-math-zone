@@ -58,6 +58,42 @@
     printHtml('<!doctype html>' + copy.outerHTML);
   };
 
+  /* ---------- "New version of CMZ available" ----------
+     Website changes reach the app by themselves. Only a new app build (icon, native parts)
+     needs installing: the app compares its build number with /downloads/cmz-version.json. */
+  var lastCheck = 0;
+  function checkForUpdate() {
+    if (!App || !App.getInfo || Date.now() - lastCheck < 6 * 3600000) return;
+    lastCheck = Date.now();
+    Promise.all([App.getInfo(), fetch('/downloads/cmz-version.json?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; })])
+      .then(function (out) {
+        var info = out[0], latest = out[1];
+        if (!latest || !(Number(latest.versionCode) > Number(info.build))) return;
+        try { if (sessionStorage.getItem('cmz_update_later') === String(latest.versionCode)) return; } catch (e) {}
+        if (document.getElementById('cmz-update')) return;
+        var bar = document.createElement('div');
+        bar.id = 'cmz-update'; bar.setAttribute('role', 'alert');
+        bar.style.cssText = 'position:fixed;left:12px;right:12px;bottom:86px;z-index:70;background:#102447;color:#fff;border:2px solid #ffc629;border-radius:14px;' +
+          'padding:.8rem .9rem;box-shadow:0 8px 24px rgba(0,0,0,.3);display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;font-size:.92rem';
+        bar.innerHTML = '<span style="flex:1 1 180px">🎉 <b>New version of CMZ</b> (' + String(latest.versionName || '').replace(/[^\w.]/g, '') + ') is ready.</span>' +
+          '<button type="button" id="cmz-update-go" style="border:0;border-radius:10px;background:#ffc629;color:#142746;font:inherit;font-weight:800;padding:.5rem .9rem">Update</button>' +
+          '<button type="button" id="cmz-update-later" style="border:1px solid #ffffff55;border-radius:10px;background:none;color:#fff;font:inherit;padding:.5rem .8rem">Later</button>';
+        document.body.appendChild(bar);
+        bar.querySelector('#cmz-update-go').addEventListener('click', function () {
+          openOutside('https://creativemathzone.in/downloads/CMZ.apk');
+          bar.querySelector('span').innerHTML = '⬇ Downloading… When it finishes, open it and tap <b>Update</b>. You stay signed in.';
+        });
+        bar.querySelector('#cmz-update-later').addEventListener('click', function () {
+          try { sessionStorage.setItem('cmz_update_later', String(latest.versionCode)); } catch (e) {}
+          bar.remove();
+        });
+      })
+      .catch(function () { /* offline: check again later */ });
+  }
+  if (document.readyState === 'complete') setTimeout(checkForUpdate, 3000);
+  else window.addEventListener('load', function () { setTimeout(checkForUpdate, 3000); });
+  if (App) App.addListener('resume', function () { setTimeout(checkForUpdate, 1500); });
+
   /* ---------- Downloads -> share / save menu ---------- */
   function toBase64(blob) {
     return new Promise(function (resolve, reject) {

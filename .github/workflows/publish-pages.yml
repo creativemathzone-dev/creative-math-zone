@@ -33,7 +33,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p downloads
-          gh release download apps --repo "$GITHUB_REPOSITORY" --pattern '*.apk' --dir downloads --clobber
+          gh release download apps --repo "$GITHUB_REPOSITORY" --pattern '*.apk' --pattern 'cmz-version.json' --dir downloads --clobber
           ls -l downloads
 
       - name: Prepare the website files
@@ -57,6 +57,7 @@ jobs:
           cp downloads/CreativeMathZoneAdmin.apk _site/downloads/CreativeMathZoneAdmin.apk
           # the new CMZ native app (built by "Build CMZ Android app")
           if [ -f downloads/CMZ.apk ]; then cp downloads/CMZ.apk _site/downloads/CMZ.apk; fi
+          if [ -f downloads/cmz-version.json ]; then cp downloads/cmz-version.json _site/downloads/cmz-version.json; fi
           cp .well-known/assetlinks.json _site/.well-known/assetlinks.json
 
       - name: Configure Pages

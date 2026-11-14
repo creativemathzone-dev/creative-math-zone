@@ -86,7 +86,12 @@ jobs:
           rm -f "$RUNNER_TEMP/cmz-release.p12"
           ls -l CMZ.apk
 
-      - name: Put CMZ.apk in the "apps" release
+      - name: Put CMZ.apk and its version file in the "apps" release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload apps CMZ.apk --clobber --repo "$GITHUB_REPOSITORY"
+        run: |
+          code=$(( ${{ github.run_number }} + 1 ))
+          # The installed app reads this to offer "New version available — Update".
+          printf '{"versionCode":%s,"versionName":"1.0.%s","builtAt":"%s"}\n' "$code" "$code" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > cmz-version.json
+          cat cmz-version.json
+          gh release upload apps CMZ.apk cmz-version.json --clobber --repo "$GITHUB_REPOSITORY"
