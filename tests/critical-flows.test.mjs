@@ -320,6 +320,23 @@ test('My Notes: kept only on the phone, per account, backup restore accepts only
   assert.match(sw, /'\.\/notes\.js'/);
 });
 
+test('CMZ Android app: signed in CI from secrets, key never in the repo, published for download', async () => {
+  const cfg = JSON.parse(await readFile(new URL('../android-app/capacitor.config.json', import.meta.url), 'utf8'));
+  assert.equal(cfg.appId, 'in.creativemathzone.cmz');
+  assert.equal(cfg.appName, 'CMZ');
+  assert.match(cfg.server.url, /^https:\/\/creativemathzone\.in\/web\//);
+  const wf = await readFile(new URL('../.github/workflows/build-android.yml', import.meta.url), 'utf8');
+  assert.match(wf, /secrets\.ANDROID_KEYSTORE_B64/);
+  assert.match(wf, /--ks-pass env:KS_PASS/); // password never on the command line
+  assert.match(wf, /rm -f "\$RUNNER_TEMP\/cmz-release\.p12"/);
+  const ignore = await readFile(new URL('../.gitignore', import.meta.url), 'utf8');
+  for (const p of ['*.p12', '*.keystore', '*.jks']) assert.ok(ignore.includes(p), p);
+  const publish = await readFile(new URL('../.github/workflows/publish-pages.yml', import.meta.url), 'utf8');
+  assert.match(publish, /cp downloads\/CMZ\.apk _site\/downloads\/CMZ\.apk/);
+  const native = await readFile(new URL('../web/native.js', import.meta.url), 'utf8');
+  assert.match(native, /if \(!C \|\| !C\.isNativePlatform \|\| !C\.isNativePlatform\(\)\) return;/); // browsers unaffected
+});
+
 test('portals: list helpers are never called on a single-element selector ($ vs $$)', async () => {
   // $() returns one element; calling .forEach/.map on it breaks the whole page.
   for (const page of ['admin', 'teacher', 'student']) {
