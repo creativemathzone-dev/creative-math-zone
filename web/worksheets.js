@@ -16,11 +16,23 @@
   function fnUrl() { var c = window.CMZ_CONFIG || {}; return String(c.supabaseUrl || '').replace(/\/$/, '') + '/functions/v1/worksheets'; }
   async function call(ctx, action, payload) {
     var c = window.CMZ_CONFIG || {};
-    var res = await fetch(fnUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: c.supabasePublishableKey, Authorization: 'Bearer ' + ctx.token() },
-      body: JSON.stringify(Object.assign({ action: action }, payload || {})) });
+    var res;
+    try {
+      res = await fetch(fnUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: c.supabasePublishableKey, Authorization: 'Bearer ' + ctx.token() },
+        body: JSON.stringify(Object.assign({ action: action }, payload || {})) });
+    } catch (e) {
+      throw { error: action === 'generate' ? 'The connection dropped while the AI was writing (keep this page open and the screen on). Please try again.' : 'No internet connection. Please try again.' };
+    }
     var out = await res.json().catch(function () { return {}; });
-    if (!res.ok) throw { error: out.error || 'Something went wrong. Please try again.' };
+    if (!res.ok) throw { error: out.error || (action === 'generate' && (res.status === 504 || res.status === 546 || res.status >= 500)
+      ? 'The AI took too long this time. Please try again — fewer marks are faster.' : 'Something went wrong. Please try again.') };
     return out;
+  }
+  // Shows "AI is writing… 25s" so a long wait does not look stuck.
+  function ticking(btn, label) {
+    var t0 = Date.now(); btn.textContent = label + '…';
+    var id = setInterval(function () { btn.textContent = label + '… ' + Math.round((Date.now() - t0) / 1000) + 's'; }, 1000);
+    return function (restore) { clearInterval(id); btn.textContent = restore; };
   }
   var CLASSES = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
   var MARKS = [10, 20, 25, 30, 40, 50, 80];
@@ -113,8 +125,8 @@
         var p = { batchId: f.elements.batchId.value, subjectId: f.elements.subjectId.value, className: f.elements.className.value, board: f.elements.board.value,
           chapter: f.elements.chapter.value.trim(), difficulty: f.elements.difficulty.value, totalMarks: Number(f.elements.totalMarks.value) };
         if (!p.subjectId || !p.className || !p.board || !p.chapter) throw { error: 'Fill in subject, class, board and chapter.' };
-        btn.textContent = 'AI is writing the paper…';
-        try { var out = await call(ctx, 'generate', p); } finally { btn.textContent = 'Make worksheet with AI'; }
+        var stop = ticking(btn, 'AI is writing the paper');
+        try { var out = await call(ctx, 'generate', p); } finally { stop('Make worksheet with AI'); }
         ctx.toast('Worksheet ready. Check it before using.');
         detail(main, ctx, out.worksheet.WorksheetID, info, out.worksheet);
       });
@@ -147,9 +159,9 @@
     on('#ws-print', async function () { printSheet(ctx, current(), false); });
     on('#ws-print-key', async function () { printSheet(ctx, current(), true); });
     on('#ws-setb', async function () {
-      var b = main.querySelector('#ws-setb'); b.textContent = 'AI is writing Set B…';
+      var b = main.querySelector('#ws-setb'), stop = ticking(b, 'AI is writing Set B');
       try { var out = await call(ctx, 'generate', { setOf: w.WorksheetID, batchId: w.BatchID || '', subjectId: w.SubjectID, className: w.ClassName, board: w.Board, chapter: w.Chapter, difficulty: w.Difficulty, totalMarks: w.TotalMarks }); }
-      finally { b.textContent = 'Make Set B'; }
+      finally { stop('Make Set B'); }
       ctx.toast('Set B ready.'); detail(main, ctx, out.worksheet.WorksheetID, info, out.worksheet);
     });
     on('#ws-del', async function () { if (!confirm('Delete this worksheet? Homework already sent will show “worksheet deleted”.')) return; await call(ctx, 'delete', { id: w.WorksheetID }); ctx.toast('Deleted.'); view(main, ctx); });

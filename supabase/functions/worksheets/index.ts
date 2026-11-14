@@ -130,31 +130,49 @@ async function geminiKey(admin: any) {
   return data?.value ? String(data.value) : ''
 }
 // Free Gemini models are sometimes overloaded (503) or rate limited per model (429).
-// Retry once after a short wait, then fall back to other free models, within a time budget.
+// Retry once after a short wait, then fall back to other free models.
+// Speed: "thinking" is switched off/low (it made papers take minutes).
+// Time: Supabase stops a request after 150 s, so every call has a timeout and the whole job
+// finishes (success or a clear error) within AI_DEADLINE_MS.
 const MODEL_FALLBACKS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite']
+const AI_DEADLINE_MS = 120000, AI_CALL_MAX_MS = 70000
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+// Gemini 2.5 takes thinkingBudget; Gemini 3 / "latest" aliases take thinkingLevel. Try the fastest first,
+// and if a model rejects that setting (400 mentioning thinking), try the next form.
+function thinkingVariants(m: string): Array<Record<string, unknown> | null> {
+  return /2\.5/.test(m) ? [{ thinkingBudget: 0 }, null] : [{ thinkingLevel: 'low' }, { thinkingBudget: 0 }, null]
+}
 async function callGemini(key: string, model: string, system: string, text: string) {
-  const started = Date.now(), budgetMs = 110000
-  let last = 'AI did not answer.', busy = false
+  const started = Date.now()
+  const left = () => AI_DEADLINE_MS - (Date.now() - started)
+  let last = 'AI did not answer.', busy = false, slow = false
   for (const m of [...new Set([model, ...MODEL_FALLBACKS])].filter(Boolean)) {
+    const variants = thinkingVariants(m)
+    let v = 0
     for (let attempt = 0; attempt < 2; attempt++) {
-      if (Date.now() - started > budgetMs) break
+      if (left() < 8000) break
       let res: Response, out: any
       try {
+        const generationConfig: Record<string, unknown> = { temperature: 0.5, maxOutputTokens: 16384 }
+        if (variants[v]) generationConfig.thinkingConfig = variants[v]
         res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-          body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text }] }],
-            generationConfig: { temperature: 0.5, maxOutputTokens: 16384 } }) })
+          signal: AbortSignal.timeout(Math.min(AI_CALL_MAX_MS, left() - 3000)),
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text }] }], generationConfig }) })
         out = await res.json().catch(() => ({}))
-      } catch { last = 'Could not reach Google AI.'; await pause(1500); continue }
+      } catch (e) {
+        if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) { slow = true; last = `Model ${m} was too slow.`; break } // next, lighter model
+        last = 'Could not reach Google AI.'; await pause(1500); continue
+      }
       if (res.ok) {
-        const t = (out.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('').trim()
+        const t = (out.candidates?.[0]?.content?.parts || []).filter((p: any) => !p.thought).map((p: any) => p.text || '').join('').trim()
         if (t) return { text: t, model: m }
         last = 'The AI returned an empty answer.'; break
       }
       const msg = String(out.error?.message || '')
       if (res.status === 401 || res.status === 403 || /api key/i.test(msg)) throw new Error('The AI key was rejected. Check it in Admin → Settings → AI assistant.')
       if (res.status === 404) { last = `Model ${m} is not available.`; break }
+      if (res.status === 400 && /thinking/i.test(msg) && v < variants.length - 1) { v++; attempt--; continue } // same model, other setting
       if (res.status === 503 || res.status === 500 || res.status === 504 || res.status === 429) {
         busy = true; last = msg || `Google AI is busy (${res.status}).`
         if (attempt === 0) { await pause(res.status === 429 ? 2000 : 3000); continue }
@@ -163,7 +181,7 @@ async function callGemini(key: string, model: string, system: string, text: stri
       throw new Error('AI request failed' + (msg ? ': ' + msg.slice(0, 200) : ` (${res.status}).`))
     }
   }
-  if (busy) throw new Error('Google’s free AI is very busy right now. Please try again in a few minutes.')
+  if (busy || slow) throw new Error('Google’s free AI is very busy right now. Please try again in a few minutes (or try fewer marks).')
   throw new Error(last)
 }
 // A failed AI call should not use up one of today's allowed drafts.

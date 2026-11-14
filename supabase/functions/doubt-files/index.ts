@@ -144,29 +144,45 @@ async function geminiKey(admin: any) {
 const toB64 = (bytes: Uint8Array) => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s) }
 
 // Free Gemini models are sometimes overloaded (503) or rate limited per model (429).
-// Retry once after a short wait, then fall back to other free models, within a time budget.
+// Retry once after a short wait, then fall back to other free models.
+// Thinking is kept low (much faster), and every call has a timeout so the whole job ends
+// before Supabase's 150-second request limit.
 const MODEL_FALLBACKS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite']
+const AI_DEADLINE_MS = 120000, AI_CALL_MAX_MS = 60000
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+function thinkingVariants(m: string): Array<Record<string, unknown> | null> {
+  return /2\.5/.test(m) ? [{ thinkingBudget: 0 }, null] : [{ thinkingLevel: 'low' }, { thinkingBudget: 0 }, null]
+}
 async function callGemini(key: string, model: string, text: string, images: Array<{ mime: string, data: string }>) {
-  const started = Date.now(), budgetMs = 110000
+  const started = Date.now()
+  const left = () => AI_DEADLINE_MS - (Date.now() - started)
   let lastError = 'AI did not answer.', busy = false
   for (const m of [...new Set([model, ...MODEL_FALLBACKS])].filter(Boolean)) {
+    const variants = thinkingVariants(m)
+    let v = 0
     for (let attempt = 0; attempt < 2; attempt++) {
-      if (Date.now() - started > budgetMs) break
+      if (left() < 8000) break
       let res: Response, out: any
       try {
+        const generationConfig: Record<string, unknown> = { temperature: 0.2, maxOutputTokens: 8192 }
+        if (variants[v]) generationConfig.thinkingConfig = variants[v]
         res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          signal: AbortSignal.timeout(Math.min(AI_CALL_MAX_MS, left() - 3000)),
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: AI_SYSTEM }] },
             contents: [{ role: 'user', parts: [{ text }, ...images.map((i) => ({ inline_data: { mime_type: i.mime, data: i.data } }))] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+            generationConfig,
           }),
         })
         out = await res.json().catch(() => ({}))
-      } catch { lastError = 'Could not reach Google AI.'; await pause(1500); continue }
+      } catch (e) {
+        if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) { busy = true; lastError = `Model ${m} was too slow.`; break }
+        lastError = 'Could not reach Google AI.'; await pause(1500); continue
+      }
+      if (!res.ok && res.status === 400 && /thinking/i.test(String(out.error?.message || '')) && v < variants.length - 1) { v++; attempt--; continue }
       if (res.ok) {
-        const answer = (out.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('').trim()
+        const answer = (out.candidates?.[0]?.content?.parts || []).filter((p: any) => !p.thought).map((p: any) => p.text || '').join('').trim()
         if (answer) return { text: answer.slice(0, 6000), model: m }
         lastError = out.candidates?.[0]?.finishReason === 'SAFETY' ? 'The AI declined this question.' : 'The AI returned an empty answer.'
         break
