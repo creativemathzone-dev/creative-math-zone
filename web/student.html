@@ -10,8 +10,10 @@
 <script src="./pwa.js" defer></script>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
+<script src="accounts.js"></script>
 <script src="passkeys.js"></script>
 <script src="show-password.js" defer></script>
+<script src="bottom-nav.js"></script>
 <script src="doubts.js"></script>
 <script src="push.js"></script>
 <script src="worksheets.js"></script>
@@ -400,11 +402,12 @@ document.addEventListener('DOMContentLoaded', function () {
       <h1>Sign in</h1>
       <p id="lg-sub">Students, teachers and staff: use the ID and password given by the centre.</p>
       <div id="lg-msg"></div>
+      <div id="lg-saved"></div>
       <label class="f"><span>ID / Username</span><input name="username" autocomplete="username" required autocapitalize="none" spellcheck="false" placeholder="e.g. CMZ-2026-001"></label>
       <label class="f"><span>Password</span>
         <div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" class="btn small" data-show="password">Show</button></div>
       </label>
-      <label style="display:flex;gap:.5rem;align-items:center;margin:-.2rem 0 .8rem;font-size:.92rem"><input type="checkbox" id="lg-keep" style="width:auto;min-height:0;margin:0"> Keep me signed in on this device <span class="muted" style="font-size:.8rem">(not for admin)</span></label>
+      <label style="display:flex;gap:.5rem;align-items:center;margin:-.2rem 0 .8rem;font-size:.92rem"><input type="checkbox" id="lg-keep" style="width:auto;min-height:0;margin:0"> Remember me on this phone <span class="muted" style="font-size:.8rem">(quick sign-in · not for admin)</span></label>
       <button class="btn primary" style="width:100%" id="lg-btn">Sign in</button>
       <button class="btn" style="width:100%;margin-top:.65rem" id="passkey-login" type="button">Sign in with fingerprint / passkey</button>
       <div id="lg-reg-wrap" class="hidden"><button class="btn" style="width:100%;margin-top:.65rem;background:#fff7dd;border:2px solid #f3b11c;color:#142746;font-weight:700" id="go-register" type="button">📝 New student? Register here</button></div>
@@ -440,7 +443,7 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="brand"><img id="nav-logo" alt="" style="display:none;width:42px;height:42px;object-fit:contain;margin-bottom:.4rem;border-radius:6px"><span id="nav-centre">Creative Math Zone</span><small>Student</small></div>
     <div><span class="sid" id="nav-sid">—</span></div>
     <div id="nav-items"></div>
-    <div class="who"><b id="who-name"></b><span id="who-class" class="muted"></span><div class="text-size" aria-label="Text size controls"><span id="text-size-label" aria-live="polite">Text size</span><button type="button" id="text-sm" aria-label="Make text smaller">A−</button><button type="button" id="text-lg" aria-label="Make text larger">A+</button></div><button class="btn small" id="logout">Sign out</button></div>
+    <div class="who"><b id="who-name"></b><span id="who-class" class="muted"></span><div class="text-size" aria-label="Text size controls"><span id="text-size-label" aria-live="polite">Text size</span><button type="button" id="text-sm" aria-label="Make text smaller">A−</button><button type="button" id="text-lg" aria-label="Make text larger">A+</button></div><button class="btn small" id="switch-acc" type="button">Switch account</button><button class="btn small" id="logout">Sign out</button></div>
   </nav>
   <main id="main" tabindex="-1"></main>
 </div>
@@ -537,8 +540,9 @@ document.addEventListener('click', ev => {
 
 /* ---- one login for everyone: the account decides which portal opens ---- */
 const PORTALS = { TEACHER: ['teacher.html', 'cmz_tt', 'cmz_trt'], ADMIN: ['admin.html', 'cmz_t', 'cmz_tr'] };
-function clearKeep() { try { localStorage.removeItem('cmz_keep'); } catch (e) {} }
-function saveKeep(type, refresh) { try { if (type === 'ADMIN' || !refresh) localStorage.removeItem('cmz_keep'); else localStorage.setItem('cmz_keep', JSON.stringify({ type, refresh })); } catch (e) {} }
+// Remembered accounts on this phone (students/teachers only; accounts.js never stores admins).
+const ACC = window.CMZAccounts;
+function rememberAccount(user, token, refresh) { if (ACC && refresh && user.userType !== 'ADMIN') ACC.save({ authId: ACC.subOf(token), type: user.userType, name: user.displayName, username: user.username, refresh }); }
 // Admin accounts with a PIN must enter it once per sign-in. Resolves true when unlocked.
 function askAdminPin() {
   return new Promise(resolve => {
@@ -562,7 +566,7 @@ function askAdminPin() {
   });
 }
 async function routeSignedIn(user, token, refresh, keep) {
-  if (keep) saveKeep(user.userType, refresh); else clearKeep();
+  if (keep === true) rememberAccount(user, token, refresh); else if (keep === false && ACC) ACC.remove(ACC.subOf(token));
   if (user.userType === 'STUDENT') { afterAuth(user, token); return; }
   const target = PORTALS[user.userType];
   if (!target) throw { error: 'This account type cannot sign in here.' };
@@ -579,11 +583,39 @@ async function routeSignedIn(user, token, refresh, keep) {
 const meToUser = me => ({ userId: me.userId, username: me.username, userType: me.userType, role: me.role, linkedId: me.linkedId,
   displayName: (me.profile && me.profile.Name) || me.username, mustChangePassword: me.mustChangePassword, permissions: me.permissions,
   profile: me.profile, pinRequired: !!me.pinRequired });
+// Opens a remembered account. Returns false (and forgets it) if it no longer works.
+async function openSavedAccount(acc) {
+  if (!window.CMZPasskey || !acc || !acc.refresh) return false;
+  try {
+    const renewed = await window.CMZPasskey.refresh(acc.refresh);
+    if (renewed.error || !renewed.session) throw renewed;
+    S.token = renewed.session.access_token; S.refreshToken = renewed.session.refresh_token;
+    const me = await api('auth.me');
+    if (me.mustChangePassword || me.pinRequired || me.userType === 'ADMIN') throw { error: 'Sign in again.' };
+    if (acc.authId === 'legacy') ACC.remove('legacy');
+    await routeSignedIn(meToUser(me), S.token, S.refreshToken, true);
+    return true;
+  } catch (e) { if (ACC) ACC.remove(acc.authId); S.token = null; S.refreshToken = null; return false; }
+}
+// One-tap sign-in buttons for accounts remembered on this phone.
+function renderSavedAccounts() {
+  const box = $('#lg-saved'), list = ACC ? ACC.all().filter(a => a.authId !== 'legacy') : [];
+  if (!box) return;
+  box.innerHTML = list.length ? '<p class="muted" style="margin:0 0 .4rem;font-size:.88rem">Saved on this phone — tap to open:</p>' + list.map(a =>
+    '<div style="display:flex;gap:.4rem;margin-bottom:.45rem"><button type="button" class="btn" style="flex:1;justify-content:flex-start;text-align:left" data-saved="' + esc(a.authId) + '">👤 ' + esc(ACC.label(a)) + '</button>' +
+    '<button type="button" class="btn small" aria-label="Remove from this phone" title="Remove from this phone" data-saved-del="' + esc(a.authId) + '">✕</button></div>').join('') + '<hr style="border:0;border-top:1px solid var(--line);margin:.8rem 0">' : '';
+  $$('[data-saved]', box).forEach(b => b.addEventListener('click', async () => {
+    const acc = ACC.all().find(a => a.authId === b.dataset.saved); b.disabled = true; b.textContent = 'Opening…';
+    ACC.setActive(acc.authId);
+    if (!await openSavedAccount(acc)) { renderSavedAccounts(); $('#lg-msg').innerHTML = '<div class="alert warn">That saved sign-in has expired. Please sign in with the password.</div>'; $('#login-form').elements.username.value = acc.username || ''; }
+  }));
+  $$('[data-saved-del]', box).forEach(b => b.addEventListener('click', () => { ACC.remove(b.dataset.savedDel); renderSavedAccounts(); }));
+}
 
 /* ---- sign in/out ---- */
 function signedOut(msg) {
   if(classChangeWatcher){clearInterval(classChangeWatcher);classChangeWatcher=null;}
-  clearKeep();
+  if (ACC) ACC.forgetActive();
   S.token=null; S.refreshToken=null; S.user=null; try { sessionStorage.removeItem('cmz_st');sessionStorage.removeItem('cmz_sr'); } catch(e){}
   if(window.CMZPasskey)window.CMZPasskey.signOut();
   closeDlg(); show('login');
@@ -600,6 +632,7 @@ function startApp() {
   $('#who-class').textContent = (S.user.profile && S.user.profile.CurrentClass ? 'Class '+S.user.profile.CurrentClass : '');
   $('#nav-sid').textContent = S.user.linkedId;
   $('#tb-who').textContent = 'Student · ' + S.user.displayName;
+  if (window.CMZAccounts) { const sub = window.CMZAccounts.subOf(S.token); if (window.CMZAccounts.has(sub)) window.CMZAccounts.update(sub, { name: S.user.displayName, username: S.user.username }); }
   document.title = ((S.cfg && S.cfg.centreName) || 'Creative Math Zone') + ' · Student';
   buildNav(); show('app'); go('dashboard'); startClassChangeWatcher();
   if (window.CMZPush) window.CMZPush.refresh(api);
@@ -649,6 +682,9 @@ $('#pw-form').addEventListener('submit', async ev => {
 });
 async function doLogout() { try { await api('auth.logout'); } catch(e){} signedOut('You have signed out.'); }
 $('#logout').addEventListener('click', doLogout);
+// E1: switch between accounts remembered on this phone (siblings, parent who is also a teacher).
+$('#switch-acc').addEventListener('click', () => { if (!window.CMZAccounts || !S.user) return;
+  window.CMZAccounts.openSwitcher({ esc, openDlg }, { authId: window.CMZAccounts.subOf(S.token), type: 'STUDENT', name: S.user.displayName, username: S.user.username, refresh: S.refreshToken }); });
 $('#pw-out').addEventListener('click', doLogout);
 
 /* ---- nav ---- */
@@ -671,9 +707,11 @@ function startClassChangeWatcher(){
   };
   refresh();classChangeWatcher=setInterval(refresh,30000);
 }
-function buildNav(){ $('#nav-items').innerHTML = NAV.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join(''); }
+function buildNav(){ $('#nav-items').innerHTML = NAV.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join('');
+  if (window.CMZBottomNav) CMZBottomNav.mount($('#app'), [['dashboard','🏠','Home'],['homework','📝','Homework'],['doubts','❓','Doubts'],['fees','💳','Fees']], v => go(v)); }
 function go(view){ S.view=view; $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
+  if (window.CMZBottomNav) CMZBottomNav.setActive(view);
   const main=$('#main'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
   Promise.resolve().then(() => (VIEWS[view] || VIEWS.dashboard)(main)).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(e => viewFail(main, view, e)); window.scrollTo(0,0);
 }
@@ -1343,8 +1381,12 @@ $('#go-forgot').addEventListener('click', () => {
     $('#lg-foot').textContent = 'Academic year ' + (c.academicYear||'');
     if (c.registrationEnabled) $('#lg-reg-wrap').classList.remove('hidden');
   } catch (e) {}
-  // Arrived from Sign out (or an expired sign-in) in any portal: forget "keep me signed in".
-  if (new URLSearchParams(location.search).has('out')) clearKeep();
+  // Arrived from Sign out (or an expired sign-in) in any portal: forget that account on this phone.
+  const qs = new URLSearchParams(location.search);
+  if (qs.has('out') && ACC) ACC.forgetActive();
+  // QR login card: the ID is filled in, the student types only the password.
+  const cardId = String(qs.get('id') || '').replace(/[^A-Za-z0-9@._-]/g, '').slice(0, 60);
+  if (cardId) $('#login-form').elements.username.value = cardId;
   let loginMsg = ''; try { loginMsg = sessionStorage.getItem('cmz_login_msg') || ''; sessionStorage.removeItem('cmz_login_msg'); } catch (e) {}
   let saved = null; try { saved = sessionStorage.getItem('cmz_st'); S.refreshToken=sessionStorage.getItem('cmz_sr'); } catch(e){}
   if (saved) {
@@ -1352,27 +1394,19 @@ $('#go-forgot').addEventListener('click', () => {
     if(window.CMZPasskey&&S.refreshToken){const restored=await window.CMZPasskey.setSession(saved,S.refreshToken);if(restored.session){S.token=restored.session.access_token;S.refreshToken=restored.session.refresh_token;}}
     try {
       const me = await api('auth.me');
-      if (me.userType !== 'STUDENT') { await routeSignedIn(meToUser(me), S.token, S.refreshToken, false); return; }
+      if (me.userType !== 'STUDENT') { await routeSignedIn(meToUser(me), S.token, S.refreshToken, null); return; }
       S.user = meToUser(me);
       if (me.mustChangePassword) show('forcepw'); else startApp();
       return;
     } catch (e) { S.token=null; try { sessionStorage.removeItem('cmz_st');sessionStorage.removeItem('cmz_sr'); } catch(x){} }
   }
-  // "Keep me signed in": renew the saved sign-in and open the right portal.
-  let keep = null; try { keep = JSON.parse(localStorage.getItem('cmz_keep') || 'null'); } catch (e) {}
-  if (keep && keep.refresh && window.CMZPasskey) {
-    try {
-      const renewed = await window.CMZPasskey.refresh(keep.refresh);
-      if (renewed.error || !renewed.session) throw renewed;
-      S.token = renewed.session.access_token; S.refreshToken = renewed.session.refresh_token;
-      const me = await api('auth.me');
-      if (me.mustChangePassword || me.pinRequired) throw { error: 'Sign in again.' };
-      await routeSignedIn(meToUser(me), S.token, S.refreshToken, true);
-      return;
-    } catch (e) { clearKeep(); S.token = null; S.refreshToken = null; }
-  }
+  // Remembered account: renew its sign-in and open the right portal (not when adding another).
+  const current = ACC && !qs.has('add') && !cardId ? ACC.active() : null;
+  if (current && await openSavedAccount(current)) return;
   show('login');
+  renderSavedAccounts();
   if (loginMsg) $('#lg-msg').innerHTML = '<div class="alert warn">' + esc(loginMsg) + '</div>';
+  if (cardId) $('#login-form').elements.password.focus();
 })();
 </script>
 </body>

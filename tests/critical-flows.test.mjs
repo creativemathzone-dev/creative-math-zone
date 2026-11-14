@@ -237,7 +237,14 @@ test('one login: account decides the portal; admin PIN enforced on every server 
   const student = await readFile(new URL('../web/student.html', import.meta.url), 'utf8');
   assert.match(student, /api\('auth\.login', \{ username:u, password:p, portal:'ANY' \}\)/);
   assert.match(student, /const PORTALS = \{ TEACHER: \['teacher\.html', 'cmz_tt', 'cmz_trt'\], ADMIN: \['admin\.html', 'cmz_t', 'cmz_tr'\] \}/);
-  assert.match(student, /if \(type === 'ADMIN' \|\| !refresh\) localStorage\.removeItem\('cmz_keep'\)/); // never keep admins signed in
+  // never remember admin accounts on a device (checked in the page and in accounts.js)
+  assert.match(student, /if \(ACC && refresh && user\.userType !== 'ADMIN'\) ACC\.save\(/);
+  const accounts = await readFile(new URL('../web/accounts.js', import.meta.url), 'utf8');
+  assert.match(accounts, /if \(!acc \|\| !acc\.authId \|\| !acc\.refresh \|\| acc\.type === 'ADMIN'\) return;/);
+  assert.match(student, /if \(me\.mustChangePassword \|\| me\.pinRequired \|\| me\.userType === 'ADMIN'\) throw/);
+  // QR login cards carry only the login link with the ID
+  const admin = await readFile(new URL('../web/admin.html', import.meta.url), 'utf8');
+  assert.match(admin, /qr\.addData\(base \+ '\?id=' \+ encodeURIComponent\(s\.StudentID\)\)/);
   for (const page of ['teacher', 'admin']) {
     const html = await readFile(new URL(`../web/${page}.html`, import.meta.url), 'utf8');
     assert.match(html, /function toLogin\(msg, out\)/);
@@ -263,6 +270,15 @@ test('one login: account decides the portal; admin PIN enforced on every server 
   assert.match(forgot, /if \(!known\.includes\(mobile\)\) return done/);
   const sql = await readFile(new URL('../supabase/migrations/20261114080000_one_login_admin_pin_password_help.sql', import.meta.url), 'utf8');
   assert.match(sql, /crypt\(p_pin, gen_salt\('bf', 8\)\)/); // PIN stored only as a hash
+});
+
+test('portals: list helpers are never called on a single-element selector ($ vs $$)', async () => {
+  // $() returns one element; calling .forEach/.map on it breaks the whole page.
+  for (const page of ['admin', 'teacher', 'student']) {
+    const html = await readFile(new URL(`../web/${page}.html`, import.meta.url), 'utf8');
+    const bad = html.match(/(^|[^$])\$\('[^']*'(, *[a-zA-Z]+)?\)\.(forEach|map|filter|find|some|every)\(/gm);
+    assert.equal(bad, null, `${page}.html: ${bad}`);
+  }
 });
 
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {

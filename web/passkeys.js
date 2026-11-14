@@ -17,14 +17,12 @@
   }
 
   const report = error => ({ error: error && (error.message || error.error_description) || 'Passkey operation failed.' });
-  // "Keep me signed in" (students and teachers only): the sign-in renews itself, so keep the
+  // Remembered accounts (students and teachers only): the sign-in renews itself, so keep the
   // saved renewal token up to date or it would stop working.
   client.auth.onAuthStateChange((_event, session) => {
     try {
-      const raw = localStorage.getItem('cmz_keep');
-      if (!raw || !session || !session.refresh_token) return;
-      const keep = JSON.parse(raw);
-      if (keep.refresh !== session.refresh_token) localStorage.setItem('cmz_keep', JSON.stringify({ type: keep.type, refresh: session.refresh_token }));
+      const A = window.CMZAccounts, id = session && session.user && session.user.id;
+      if (A && id && session.refresh_token && A.has(id)) A.update(id, { refresh: session.refresh_token });
     } catch (e) { /* storage blocked: the person just signs in again */ }
   });
   window.CMZPasskey = {

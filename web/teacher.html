@@ -10,8 +10,10 @@
 <script src="./pwa.js" defer></script>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
+<script src="accounts.js"></script>
 <script src="passkeys.js"></script>
 <script src="show-password.js" defer></script>
+<script src="bottom-nav.js"></script>
 <script src="doubts.js"></script>
 <script src="worksheets.js"></script>
 <script src="ai-search.js"></script>
@@ -398,7 +400,7 @@ document.addEventListener('DOMContentLoaded', function () {
   <nav class="side" id="side" aria-label="Main">
         <div class="brand"><div class="logo-badge" id="nav-logo-badge"><img id="nav-logo" alt=""></div><span id="nav-centre">Creative Math Zone</span><small>Teacher</small></div>
     <div id="nav-items"></div>
-        <div class="who"><b id="who-name"></b><span id="who-role" class="muted"></span><div class="text-size" aria-label="Text size controls"><span id="text-size-label" aria-live="polite">Text size</span><button type="button" id="text-sm" aria-label="Make text smaller">A−</button><button type="button" id="text-lg" aria-label="Make text larger">A+</button></div><button class="btn small" id="logout">Sign out</button></div>
+        <div class="who"><b id="who-name"></b><span id="who-role" class="muted"></span><div class="text-size" aria-label="Text size controls"><span id="text-size-label" aria-live="polite">Text size</span><button type="button" id="text-sm" aria-label="Make text smaller">A−</button><button type="button" id="text-lg" aria-label="Make text larger">A+</button></div><button class="btn small" id="switch-acc" type="button">Switch account</button><button class="btn small" id="logout">Sign out</button></div>
   </nav>
   <main id="main" tabindex="-1"></main>
 </div>
@@ -492,6 +494,7 @@ function startApp() {
   $('#who-name').textContent = S.user.displayName;
   $('#who-role').textContent = 'Teacher';
   $('#tb-who').textContent = 'Teacher · ' + S.user.displayName;
+  if (window.CMZAccounts) { const sub = window.CMZAccounts.subOf(S.token); if (window.CMZAccounts.has(sub)) window.CMZAccounts.update(sub, { name: S.user.displayName, username: S.user.username }); }
   buildNav(); if (window.CMZSearch) CMZSearch.mountNavBox($('#nav-items'), q => go('search', q));
   show('app'); go('dashboard');
 }
@@ -530,6 +533,9 @@ $('#pw-form').addEventListener('submit', async ev => {
 });
 async function doLogout() { try { await api('auth.logout'); } catch(e){} signedOut('You have signed out.'); }
 $('#logout').addEventListener('click', doLogout);
+// E1: switch between accounts remembered on this phone (siblings, parent who is also a teacher).
+$('#switch-acc').addEventListener('click', () => { if (!window.CMZAccounts || !S.user) return;
+  window.CMZAccounts.openSwitcher({ esc, openDlg }, { authId: window.CMZAccounts.subOf(S.token), type: 'TEACHER', name: S.user.displayName, username: S.user.username, refresh: S.refreshToken }); });
 $('#pw-out').addEventListener('click', doLogout);
 
 /* ---- nav ---- */
@@ -537,9 +543,11 @@ const NAV = [['dashboard','Dashboard'],['search','Search'],['timetable','Timetab
 function buildNav(){
   const list = NAV.filter(n => n[0] !== 'income' || can('TEACHER_INCOME_VIEW'));
   $('#nav-items').innerHTML = list.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join('');
+  if (window.CMZBottomNav) CMZBottomNav.mount($('#app'), [['dashboard','🏠','Home'],['timetable','📅','Classes'],['homework','📝','Homework'],['doubts','❓','Doubts']], v => go(v));
 }
 function go(view, arg){ if (view === 'studentProfile' && S.view !== 'studentProfile') { S.studentReturnView=S.view; S.studentReturnArg=S.arg; } if (S.liveCleanup && view !== 'live') { S.liveCleanup(); S.liveCleanup = null; } S.view=view; S.arg=arg; $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
+  if (window.CMZBottomNav) CMZBottomNav.setActive(view);
   const main=$('#main'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
   Promise.resolve().then(() => (VIEWS[view] || VIEWS.dashboard)(main, arg)).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(e => viewFail(main, view, arg, e)); window.scrollTo(0,0);
 }

@@ -10,8 +10,10 @@
 <script src="./pwa.js" defer></script>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.105.0/dist/umd/supabase.js"></script>
+<script src="accounts.js"></script>
 <script src="passkeys.js"></script>
 <script src="show-password.js" defer></script>
+<script src="bottom-nav.js"></script>
 <script src="doubts.js"></script>
 <script src="worksheets.js"></script>
 <script src="ai-search.js"></script>
@@ -698,9 +700,11 @@ const NAV = [
 ];
 function buildNav() {
   $('#nav-items').innerHTML = NAV.filter(n => (!n[2] || can(n[2])) && (n[0] !== 'promotions' || can('MASTER_VIEW')) && (n[0] !== 'worksheets' || (S.user && S.user.role === 'SUPER_ADMIN'))).map(n => '<button class="item" data-go="' + n[0] + '">' + esc(n[1]) + '</button>').join('');
+  if (window.CMZBottomNav) CMZBottomNav.mount($('#app'), [['dashboard', '🏠', 'Home'], ['search', '🔎', 'Search'], can('STUDENT_VIEW') && ['students', '👥', 'Students'], can('FINANCE_VIEW') && ['invoices', '💳', 'Fees']].filter(Boolean), v => go(v));
 }
 function go(view, arg){ S.view=view; S.arg=arg; SYNC.stale=false; liveState('Live'); $('#side').classList.remove('open');
   $$('#nav-items .item').forEach(b => b.setAttribute('aria-current', b.dataset.go===view ? 'page' : 'false'));
+  if (window.CMZBottomNav) CMZBottomNav.setActive(view);
   const main=$('#main'); main.classList.remove('quiet'); main.innerHTML='<div class="cmz-loader"><i></i></div>';
   Promise.resolve().then(() => (VIEWS[view] || VIEWS.dashboard)(main, arg)).then(() => { if (window.cmzAnimate) cmzAnimate(main); }).catch(e => viewFail(main, view, arg, e)); window.scrollTo(0,0);
 }
@@ -986,18 +990,49 @@ async function studentDialog() {
       }));
     });
 }
+/* ---------- E3: QR login cards. The QR holds only the login link with the student ID — never a password. ---------- */
+function loadQrLib() {
+  if (window.qrcode) return Promise.resolve();
+  return new Promise((resolve, reject) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+    s.onload = () => resolve(); s.onerror = () => reject({ error: 'Could not load the QR maker. Check the internet and try again.' }); document.head.appendChild(s); });
+}
+async function printLoginCards(students) {
+  await loadQrLib();
+  const base = new URL('login.html', location.href).href, centre = esc((S.cfg && S.cfg.centreName) || 'Creative Math Zone');
+  const logo = new URL('icons/creative-math-zone-logo.png', location.href).href;
+  const cards = students.map(s => {
+    const qr = qrcode(0, 'M'); qr.addData(base + '?id=' + encodeURIComponent(s.StudentID)); qr.make();
+    return '<div class="card"><div class="top"><img src="' + logo + '" alt=""><b>' + centre + '</b></div><div class="body"><div class="info"><div class="name">' + esc(s.Name) + '</div>' +
+      '<div class="id">' + esc(s.StudentID) + '</div><div class="muted">' + (s.CurrentClass ? 'Class ' + esc(s.CurrentClass) : '') + (s.CurrentBatch ? ' · ' + esc(nameOf('batches', 'BatchID', 'BatchName', s.CurrentBatch) || '') : '') + '</div>' +
+      '<ol><li>Scan with the phone camera</li><li>Type your password</li></ol></div><div class="qr">' + qr.createSvgTag(3, 2) + '</div></div>' +
+      '<div class="foot">Password is given separately · Keep this card safe</div></div>';
+  }).join('');
+  const win = window.open('', '_blank', 'width=900,height=700');
+  if (!win) { toast('Allow pop-ups for this site to print the cards.', true); return; }
+  win.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Login cards</title><style>' +
+    '@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;margin:0;color:#111}.grid{display:grid;grid-template-columns:1fr 1fr;gap:6mm}' +
+    '.card{border:1px dashed #888;border-radius:4mm;padding:4mm;height:58mm;box-sizing:border-box;display:flex;flex-direction:column;break-inside:avoid}' +
+    '.top{display:flex;align-items:center;gap:2mm;border-bottom:1.5px solid #16243b;padding-bottom:1.5mm}.top img{width:9mm;height:9mm;border-radius:50%}.top b{font-size:12pt}' +
+    '.body{display:flex;gap:3mm;flex:1;align-items:center}.info{flex:1;min-width:0}.name{font-weight:bold;font-size:12pt;margin-top:1mm}.id{font-family:monospace;font-size:13pt;font-weight:bold;margin:1mm 0}' +
+    '.muted{color:#555;font-size:9pt}ol{margin:1.5mm 0 0;padding-left:4.5mm;font-size:8.5pt}.qr svg{width:30mm;height:30mm;display:block}.foot{font-size:7.5pt;color:#555;text-align:center}' +
+    '</style></head><body><div class="grid">' + cards + '</div><script>window.addEventListener("load",function(){setTimeout(function(){window.print()},300)})<\/script></body></html>');
+  win.document.close();
+}
+
 VIEWS.students = async main => {
   await loadLookups();
   const st = VIEWS.students.state = VIEWS.students.state || { q: '', status: 'ACTIVE', batch: '', subject: '' };
   if (!('subject' in st)) st.subject = '';
-  main.innerHTML = '<div class="head"><div><h1>Students</h1><p id="s-count"></p></div>' + (can('STUDENT_EDIT') ? '<button class="btn primary" data-act="add-student">Add student</button>' : '') + '</div>' +
+  main.innerHTML = '<div class="head"><div><h1>Students</h1><p id="s-count"></p></div><div class="row" style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn" id="s-cards" type="button" title="Print QR login cards for the students in this list">🪪 Print login cards</button>' + (can('STUDENT_EDIT') ? '<button class="btn primary" data-act="add-student">Add student</button>' : '') + '</div></div>' +
     '<div class="toolbar"><input id="s-q" type="search" placeholder="Search by name or student ID" value="' + esc(st.q) + '">' +
     '<select id="s-status"><option value="">All statuses</option>' + ['ACTIVE', 'INACTIVE', 'COMPLETED', 'LEFT', 'SUSPENDED'].map(x => '<option value="' + x + '"' + (st.status === x ? ' selected' : '') + '>' + x.charAt(0) + x.slice(1).toLowerCase() + '</option>').join('') + '</select>' +
     '<select id="s-batch"><option value="">All batches</option>' + L('batches').map(b => '<option value="' + esc(b.BatchID) + '"' + (st.batch === b.BatchID ? ' selected' : '') + '>' + esc(b.BatchName) + '</option>').join('') + '</select>' +
     '<select id="s-subject" aria-label="Filter students by subject"><option value="">All subjects</option>' + activeOnly('subjects').map(s => '<option value="' + esc(s.SubjectID) + '"' + (st.subject === s.SubjectID ? ' selected' : '') + '>' + esc(s.SubjectName) + '</option>').join('') + '</select></div>' +
     '<div id="s-list"></div>';
+  let shown = [];
   const load = async () => {
     const r = await api('students.list', { search: st.q, status: st.status, batchId: st.batch, subjectId: st.subject, limit: 500 });
+    shown = r.students;
     $('#s-count').textContent = r.total + (r.total === 1 ? ' student' : ' students') + (r.total > r.students.length ? ' (showing ' + r.students.length + ')' : '');
     $('#s-list').innerHTML = r.students.length ?
       '<div class="tablewrap"><table class="stack"><thead><tr><th>Student ID</th><th>Name</th><th>Class</th><th>Batch</th><th>Mobile</th><th>Status</th></tr></thead><tbody>' +
@@ -1009,6 +1044,11 @@ VIEWS.students = async main => {
   $('#s-batch').addEventListener('change', e => { st.batch = e.target.value; load().catch(fail); });
   $('#s-subject').addEventListener('change', e => { st.subject = e.target.value; load().catch(fail); });
   $('#s-list').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) go('student', tr.dataset.id); });
+  $('#s-cards').addEventListener('click', ev => busy(ev.target, async () => {
+    if (!shown.length) { toast('No students in this list.', true); return; }
+    if (shown.length > 60 && !confirm('Print ' + shown.length + ' cards? Tip: filter by batch first.')) return;
+    await printLoginCards(shown);
+  }));
   await load();
 };
 
@@ -2880,7 +2920,7 @@ VIEWS.pwrequests = async main => {
       r.rows.map(x => '<tr><td data-l="Who"><b>' + esc(x.Name) + '</b></td><td data-l="Type">' + typeLabel(x.UserType) + '</td><td data-l="ID">' + esc(x.Username) + '</td><td data-l="Asked">' + esc(new Date(x.CreatedAt).toLocaleString('en-IN')) + '</td><td data-l="Message">' + esc(x.Note || '—') + '</td>' +
         '<td class="row"><button class="btn small primary" data-pwr-reset="' + esc(x.RequestID) + '">Reset password</button><button class="btn small" data-pwr-dismiss="' + esc(x.RequestID) + '">Dismiss</button></td></tr>').join('') +
       '</tbody></table></div>' : '<div class="card empty"><b>No requests</b>Nobody is waiting for a new password.</div>');
-  $('[data-pwr-reset]', main).forEach(b => b.addEventListener('click', () => { const x = r.rows.find(y => y.RequestID === b.dataset.pwrReset);
+  $$('[data-pwr-reset]', main).forEach(b => b.addEventListener('click', () => { const x = r.rows.find(y => y.RequestID === b.dataset.pwrReset);
     if (!confirm('Make a new temporary password for ' + x.Name + ' (' + x.Username + ')?')) return;
     busy(b, async () => {
       const out = x.UserType === 'STUDENT' ? await api('students.resetPassword', { studentId: x.LinkedID }) : x.UserType === 'TEACHER' ? await api('teachers.resetPassword', { teacherId: x.LinkedID }) : await api('users.resetPassword', { userId: x.UserID });
@@ -2888,7 +2928,7 @@ VIEWS.pwrequests = async main => {
       credentials('New temporary password', out.username, out.tempPassword, 'Give this to ' + x.Name + ' in person or on their registered number. They must choose a new password after signing in.');
       go('pwrequests');
     }); }));
-  $('[data-pwr-dismiss]', main).forEach(b => b.addEventListener('click', () => busy(b, async () => { await api('passwordRequests.resolve', { id: b.dataset.pwrDismiss, status: 'DISMISSED' }); toast('Dismissed.'); go('pwrequests'); })));
+  $$('[data-pwr-dismiss]', main).forEach(b => b.addEventListener('click', () => busy(b, async () => { await api('passwordRequests.resolve', { id: b.dataset.pwrDismiss, status: 'DISMISSED' }); toast('Dismissed.'); go('pwrequests'); })));
 };
 
 /* ---------- admin users ---------- */
@@ -2907,9 +2947,9 @@ VIEWS.users = async main => {
       const r = await api('users.createAdmin', { username: $('[name=username]', d).value.trim() }); closeDlg(); credentials('Accounts Admin login', r.username, r.tempPassword); go('users'); }))));
   $$('[data-rp]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.rp);
     if (confirm('Make a new temporary password for ' + u.Username + '? They will be signed out.')) busy(b, async () => { const r = await api('users.resetPassword', { userId: u.UserID }); credentials('New temporary password', r.username, r.tempPassword, (r.sessionsRevoked === false ? 'Password reset completed, but Supabase could not confirm that every old session was revoked. ' : '') + 'Registered passkeys were removed. Give this temporary password to the user; they must set a new password, then add a passkey on their replacement device.'); }); }));
-  $('[data-clearpin]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.clearpin);
+  $$('[data-clearpin]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.clearpin);
     if (confirm('Clear the admin PIN of ' + u.Username + '? Use this when they forgot it. They can set a new one in Settings.')) busy(b, async () => { await api('users.clearPin', { userId: u.UserID }); toast('PIN cleared.'); go('users'); }); }));
-  $('[data-st]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.st), to = u.Status === 'Active' ? 'Inactive' : 'Active';
+  $$('[data-st]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.st), to = u.Status === 'Active' ? 'Inactive' : 'Active';
     if (confirm((to === 'Inactive' ? 'Disable ' : 'Enable ') + u.Username + '?' + (to === 'Inactive' ? ' They will be signed out immediately.' : ''))) busy(b, async () => { await api('users.setStatus', { userId: u.UserID, status: to }); toast(u.Username + (to === 'Inactive' ? ' disabled.' : ' enabled.')); go('users'); }); }));
   $$('[data-pm]', main).forEach(b => b.addEventListener('click', () => { const u = admins.find(x => x.UserID === b.dataset.pm), have = userExtraPermissions(u.ExtraPermissions);
     const base = ['STUDENT_VIEW', 'TEACHER_VIEW', 'MASTER_VIEW', 'SETTINGS_VIEW', 'FINANCE_VIEW', 'FINANCE_EDIT', 'TEACHER_INCOME_MANAGE', 'REPORT_VIEW'];
