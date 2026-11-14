@@ -337,6 +337,17 @@ test('CMZ Android app: signed in CI from secrets, key never in the repo, publish
   assert.match(native, /if \(!C \|\| !C\.isNativePlatform \|\| !C\.isNativePlatform\(\)\) return;/); // browsers unaffected
 });
 
+test('teacher attendance taps show instantly, save in order, and the server does less work per tap', async () => {
+  const teacher = await readFile(new URL('../web/teacher.html', import.meta.url), 'utf8');
+  assert.match(teacher, /if \(lastState\) render\(lastState\); \/\/ show it now/);
+  assert.match(teacher, /const job = prev\.catch\(\(\) => \{\}\)\.then\(\(\) => api\('teacher\.manualAttendance'/); // one after another per student
+  assert.match(teacher, /return \{ \.\.\.x, Status: p\.status, Method: 'TEACHER_MANUAL' \};/); // server copy is never changed
+  const block = actionBlock("if (action === 'teacher.manualAttendance' || action === 'attendance.correct')", "if (action === 'teacher.markAll' || action === 'teacher.closeClass')");
+  assert.match(block, /const \[rosterResult, oldResult\] = await Promise\.all\(/);
+  assert.doesNotMatch(block, /newId\(admin, 'attendance'/);
+  assert.match(block, /if \(!roster\?\.length\) throw new ApiFault\('BAD_REQUEST', 'This student is not on the class roster\.'\)/); // still checked
+});
+
 test('portals: list helpers are never called on a single-element selector ($ vs $$)', async () => {
   // $() returns one element; calling .forEach/.map on it breaks the whole page.
   for (const page of ['admin', 'teacher', 'student']) {

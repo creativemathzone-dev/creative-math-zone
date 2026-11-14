@@ -656,7 +656,27 @@ VIEWS.live = async (main, sessionId) => {
   S.liveCleanup = cleanup;
   main.innerHTML = '<div id="live-body"><p class="muted">Loading…</p></div>';
 
-  const render = st => {
+  // Marks tapped by the teacher show at once (green/yellow/red) while they save in the background.
+  // They stay shown even if a refresh arrives before the server has saved them.
+  const pending = new Map(); // studentId -> { status, at }
+  const saving = new Map();  // studentId -> the save in progress
+  let lastState = null;
+  const render = server => {
+    // `server` is exactly what the server sent (never changed here); taps not yet saved are
+    // shown on a copy, and a tap is forgotten only when the server itself reports that mark.
+    lastState = server;
+    let overridden = false;
+    const students = server.students.map(x => {
+      const p = pending.get(x.StudentID);
+      if (!p) return x;
+      if (x.Status === p.status || Date.now() - p.at > 30000) { pending.delete(x.StudentID); return x; }
+      overridden = true;
+      return { ...x, Status: p.status, Method: 'TEACHER_MANUAL' };
+    });
+    const n = k => students.filter(x => x.Status === k).length;
+    const st = { ...server, students, counts: overridden
+      ? { ...server.counts, present: n('PRESENT'), late: n('LATE'), absent: n('ABSENT'), unmarked: students.filter(x => !x.Status).length }
+      : server.counts };
     const s = st.session, c = st.counts;
     lastTotal = c.total;
     const parsedSeconds = Number(s.CodeSecondsLeft);
@@ -722,10 +742,24 @@ VIEWS.live = async (main, sessionId) => {
       });
     });
     $$('[data-sid]', main).forEach(row => {
-      $$('[data-mark]', row).forEach(b => b.addEventListener('click', () => busy(b, async () => {
-        await api('teacher.manualAttendance', { sessionId: s.SessionID, studentId: row.dataset.sid, status: b.dataset.mark });
-        await tick();
-      })));
+      $$('[data-mark]', row).forEach(b => b.addEventListener('click', () => {
+        const sid = row.dataset.sid, status = b.dataset.mark;
+        pending.set(sid, { status, at: Date.now() });
+        if (lastState) render(lastState); // show it now
+        // Saves for the same student go one after another, so the last tap always wins.
+        const prev = saving.get(sid) || Promise.resolve();
+        const job = prev.catch(() => {}).then(() => api('teacher.manualAttendance', { sessionId: s.SessionID, studentId: sid, status }));
+        saving.set(sid, job);
+        job.finally(() => { if (saving.get(sid) === job) saving.delete(sid); }).catch(() => {});
+        job
+          .catch(e => {
+            if (pending.get(sid) && pending.get(sid).status !== status) return; // a newer tap replaced this one
+            pending.delete(sid);
+            if (e && SESSION_CODES.indexOf(e.code) >= 0) { fail(e); return; }
+            toast(((e && e.error) ? e.error + ' ' : '') + 'The mark was not saved — please tap it again.', true);
+            tick();
+          });
+      }));
     });
   };
 

@@ -4144,26 +4144,36 @@ Deno.serve(async (request) => {
         const reason = String(payload.reason || '').trim().slice(0, 200)
         if (action === 'attendance.correct' && !reason) throw new ApiFault('BAD_REQUEST', 'Please give a reason for the correction.')
         if (action === 'teacher.manualAttendance' && s.status !== 'OPEN') throw new ApiFault('BAD_REQUEST', 'This class is closed.')
+        // Speed: the roster check and the old-mark lookup run together; the new row gets a random
+        // ID (like "Mark all") instead of a separate counter call; the two log rows are written together.
+        const classSubjectIds = [s.subject_id, s.co_subject_id].filter(Boolean)
+        const [rosterResult, oldResult] = await Promise.all([
+          action === 'teacher.manualAttendance'
+            ? admin.from('student_subjects').select('id,subject_id').eq('student_id', studentId)
+              .in('subject_id', classSubjectIds).eq('batch_id', s.batch_id).eq('teacher_id', s.teacher_id).ilike('status', 'active')
+            : Promise.resolve({ data: null, error: null }),
+          admin.from('attendance').select('*').eq('session_id', sid).eq('student_id', studentId).maybeSingle(),
+        ])
         if (action === 'teacher.manualAttendance') {
-          const classSubjectIds = [s.subject_id, s.co_subject_id].filter(Boolean)
-          const { data: roster, error: rosterError } = await admin.from('student_subjects').select('id,subject_id').eq('student_id', studentId)
-            .in('subject_id', classSubjectIds).eq('batch_id', s.batch_id).eq('teacher_id', s.teacher_id).ilike('status', 'active')
-          if (rosterError) throw rosterError
+          const roster = rosterResult.data
+          if (rosterResult.error) throw rosterResult.error
           if (!roster?.length) throw new ApiFault('BAD_REQUEST', 'This student is not on the class roster.')
           attendanceSubjectId = roster.find((r) => r.subject_id === s.subject_id)?.subject_id || roster[0].subject_id
         }
-        const { data: old, error: oldError } = await admin.from('attendance').select('*').eq('session_id', sid).eq('student_id', studentId).maybeSingle()
+        const { data: old, error: oldError } = oldResult
         if (oldError) throw oldError
         if (action === 'attendance.correct' && old?.subject_id) attendanceSubjectId = old.subject_id
         if (old?.status === status) return response({ ok: true, data: { ok: true, unchanged: true } })
-        const attendanceId = old?.id || await newId(admin, 'attendance', 'ATT-', 5)
+        const attendanceId = old?.id || `ATT-${crypto.randomUUID()}`
         const { error: saveError } = await admin.from('attendance').upsert({ id: attendanceId, session_id: sid, student_id: studentId, subject_id: attendanceSubjectId,
           batch_id: s.batch_id, session_date: s.session_date, status, marked_by: user.id, marked_at: new Date().toISOString(),
           method: action === 'attendance.correct' ? 'ADMIN_CORRECTION' : 'TEACHER_MANUAL', academic_year: s.academic_year }, { onConflict: 'session_id,student_id' })
         if (saveError) throw saveError
-        if (old || action === 'attendance.correct') await admin.from('attendance_logs').insert({ id: `AL-${crypto.randomUUID()}`, attendance_id: attendanceId,
-          session_id: sid, student_id: studentId, old_status: old?.status || '', new_status: status, changed_by: user.id, reason })
-        await logAction(admin, user, action === 'attendance.correct' ? 'CORRECT_ATTENDANCE' : 'MARK_ATTENDANCE', 'ATTENDANCE', attendanceId, { from: old?.status || '', to: status, reason })
+        await Promise.all([
+          (old || action === 'attendance.correct') ? admin.from('attendance_logs').insert({ id: `AL-${crypto.randomUUID()}`, attendance_id: attendanceId,
+            session_id: sid, student_id: studentId, old_status: old?.status || '', new_status: status, changed_by: user.id, reason }) : Promise.resolve(),
+          logAction(admin, user, action === 'attendance.correct' ? 'CORRECT_ATTENDANCE' : 'MARK_ATTENDANCE', 'ATTENDANCE', attendanceId, { from: old?.status || '', to: status, reason }),
+        ])
         return response({ ok: true, data: { ok: true, changed: !!old, created: !old } })
       }
       if (action === 'teacher.markAll' || action === 'teacher.closeClass') {
