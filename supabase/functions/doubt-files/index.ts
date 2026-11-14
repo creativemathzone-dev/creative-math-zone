@@ -218,10 +218,17 @@ async function aiDraft(admin: any, user: any, doubtId: string) {
   } else if (user.role !== 'SUPER_ADMIN') return json({ error: 'Only teachers or the Super Admin can use AI drafts.' }, 403)
   const key = await geminiKey(admin)
   if (!key) return json({ error: 'The AI assistant is not set up yet. Super Admin: add the free Gemini key in Settings → AI assistant.' }, 400)
+  // Own daily limit (AI_LIMIT_DOUBTS) inside the overall AI_DAILY_LIMIT; old single counter if the SQL is not run yet.
   const limit = Number.parseInt(await settingValue(admin, 'AI_DAILY_LIMIT', '40'), 10) || 0
-  const { data: allowed, error: capError } = await admin.rpc('ai_take', { p_limit: limit })
-  if (capError) throw capError
-  if (!allowed) return json({ error: `Today's AI limit (${limit} drafts) is reached. It resets at midnight.` }, 429)
+  const own = Number.parseInt(await settingValue(admin, 'AI_LIMIT_DOUBTS', String(limit)), 10) || 0
+  let perFeature = true
+  const took = await admin.rpc('ai_take_feature', { p_feature: 'DOUBTS', p_feature_limit: own, p_total_limit: limit })
+  if (took.error) {
+    perFeature = false
+    const { data: allowed, error: capError } = await admin.rpc('ai_take', { p_limit: limit })
+    if (capError) throw capError
+    if (!allowed) return json({ error: `Today's AI limit (${limit} drafts) is reached. It resets at midnight.` }, 429)
+  } else if (!took.data) return json({ error: `Today's AI limit for doubt drafts (${own}) or for all AI (${limit}) is reached. It resets at midnight.` }, 429)
   // Only the question goes to the AI: no student name, ID, phone or class roster.
   const { data: subject } = await admin.from('subjects').select('name').eq('id', doubt.subject_id).maybeSingle()
   const text = [`Subject: ${subject?.name || doubt.subject_id}`, `Class: ${doubt.class_name}`, doubt.chapter ? `Chapter/topic: ${doubt.chapter}` : '',
@@ -239,9 +246,12 @@ async function aiDraft(admin: any, user: any, doubtId: string) {
     return json({ draft: { Body: out.text, Model: out.model, CreatedAt: row.created_at, Photos: images.length } })
   } catch (e) {
     // A failed AI call should not use up one of today's allowed drafts.
-    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())
-    const { data: used } = await admin.from('ai_usage').select('calls').eq('day', day).maybeSingle()
-    if (used && used.calls > 0) await admin.from('ai_usage').update({ calls: used.calls - 1 }).eq('day', day).eq('calls', used.calls)
+    if (perFeature) await admin.rpc('ai_refund_feature', { p_feature: 'DOUBTS' })
+    else {
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())
+      const { data: used } = await admin.from('ai_usage').select('calls').eq('day', day).maybeSingle()
+      if (used && used.calls > 0) await admin.from('ai_usage').update({ calls: used.calls - 1 }).eq('day', day).eq('calls', used.calls)
+    }
     const message = e instanceof Error ? e.message : 'AI draft failed.'
     return json({ error: message }, 502)
   }

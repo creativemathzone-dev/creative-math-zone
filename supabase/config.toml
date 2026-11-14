@@ -26,6 +26,10 @@ verify_jwt = false
 # The function validates the Super Admin token for manual backups and a private cron secret for weekly runs.
 verify_jwt = false
 
+[functions.ai-search]
+# Validates user tokens itself; read-only searches with the user's own permissions.
+verify_jwt = false
+
 [functions.doubt-files]
 # The function validates user tokens for photo upload/view and a private cron secret for the worker.
 verify_jwt = false

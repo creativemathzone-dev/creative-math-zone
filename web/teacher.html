@@ -13,6 +13,7 @@
 <script src="passkeys.js"></script>
 <script src="doubts.js"></script>
 <script src="worksheets.js"></script>
+<script src="ai-search.js"></script>
 <title>Creative Math Zone · Teacher</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -487,7 +488,8 @@ function afterAuth(user, token) {
 function startApp() {
   $('#who-name').textContent = S.user.displayName;
   $('#who-role').textContent = 'Teacher';
-  buildNav(); show('app'); go('dashboard');
+  buildNav(); if (window.CMZSearch) CMZSearch.mountNavBox($('#nav-items'), q => go('search', q));
+  show('app'); go('dashboard');
 }
 $('#login-form').addEventListener('submit', async ev => {
   ev.preventDefault();
@@ -527,7 +529,7 @@ $('#logout').addEventListener('click', doLogout);
 $('#pw-out').addEventListener('click', doLogout);
 
 /* ---- nav ---- */
-const NAV = [['dashboard','Dashboard'],['timetable','Timetable'],['students','My students'],['sessions','Past classes'],['homework','Homework'],['worksheets','Worksheets'],['doubts','Doubts'],['notices','Notices'],['income','Income'],['profile','Profile']];
+const NAV = [['dashboard','Dashboard'],['search','Search'],['timetable','Timetable'],['students','My students'],['sessions','Past classes'],['homework','Homework'],['worksheets','Worksheets'],['doubts','Doubts'],['notices','Notices'],['income','Income'],['profile','Profile']];
 function buildNav(){
   const list = NAV.filter(n => n[0] !== 'income' || can('TEACHER_INCOME_VIEW'));
   $('#nav-items').innerHTML = list.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join('');
@@ -551,6 +553,10 @@ const VIEWS = {};
 
 VIEWS.doubts = main => window.CMZDoubts.view(main, { api, esc, toast, busy, openDlg, closeDlg, fmtTime, role:'TEACHER', token:()=>S.token });
 VIEWS.worksheets = main => window.CMZWorksheets.view(main, { esc, toast, busy, openDlg, closeDlg, role:'TEACHER', token:()=>S.token, centreName:()=>(S.cfg && S.cfg.centreName) || 'Creative Math Zone' });
+VIEWS.search = (main, q) => window.CMZSearch.view(main, { esc, toast, busy, role:'TEACHER', token:()=>S.token, open: v => go(v),
+  canOpen: v => !!VIEWS[v] && NAV.some(n => n[0] === v) }, q);
+// Press "/" anywhere (outside a text box) to open Search.
+document.addEventListener('keydown', ev => { const d = document.getElementById('dlg'); if (ev.key === '/' && S.user && !ev.ctrlKey && !ev.metaKey && !/^(INPUT|TEXTAREA|SELECT)$/.test((ev.target.tagName || '')) && !ev.target.isContentEditable && !(d && d.open)) { ev.preventDefault(); go('search'); } });
 
 VIEWS.studentProfile = async (main, id) => {
   if (!id) throw { code:'VALIDATION', error:'Student ID is missing.' };

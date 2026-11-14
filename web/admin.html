@@ -13,6 +13,7 @@
 <script src="passkeys.js"></script>
 <script src="doubts.js"></script>
 <script src="worksheets.js"></script>
+<script src="ai-search.js"></script>
 <title>Creative Math Zone · Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -602,7 +603,8 @@ function signedOut(msg) {
 function startApp() {
   $('#who-name').textContent = S.user.displayName;
   $('#who-role').textContent = S.user.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Accounts Admin';
-  buildNav(); show('app'); go(new URLSearchParams(location.search).has('drive_code')?'settings':'dashboard'); refreshRegBadge(); startLive();
+  buildNav(); if (window.CMZSearch) CMZSearch.mountNavBox($('#nav-items'), q => go('search', q));
+  show('app'); go(new URLSearchParams(location.search).has('drive_code')?'settings':'dashboard'); refreshRegBadge(); startLive();
 }
 function afterAuth(user, token) {
   S.token = token; S.user = user; S.perms = user.permissions || [];
@@ -666,6 +668,7 @@ $('#pw-out').addEventListener('click', doLogout);
 /* ---------- navigation ---------- */
 const NAV = [
   ['dashboard', 'Dashboard', null],
+  ['search', 'Search', null],
   ['students', 'Students', 'STUDENT_VIEW'],
   ['promotions', 'Promotions', 'STUDENT_EDIT'],
   ['registrations', 'Registrations', 'STUDENT_VIEW'],
@@ -712,6 +715,10 @@ const VIEWS = {};
 
 VIEWS.doubts = main => window.CMZDoubts.view(main, { api, esc, toast, busy, openDlg, closeDlg, fmtTime, role:'ADMIN', token:()=>S.token });
 VIEWS.worksheets = main => window.CMZWorksheets.view(main, { esc, toast, busy, openDlg, closeDlg, role:'ADMIN', token:()=>S.token, centreName:()=>(S.cfg && S.cfg.centreName) || 'Creative Math Zone' });
+VIEWS.search = (main, q) => window.CMZSearch.view(main, { esc, toast, busy, role:'ADMIN', token:()=>S.token, open: v => go(v),
+  canOpen: v => { const n = NAV.find(x => x[0] === v); return !!(n && VIEWS[v] && (!n[2] || can(n[2])) && (v !== 'worksheets' || (S.user && S.user.role === 'SUPER_ADMIN'))); } }, q);
+// Press "/" anywhere (outside a text box) to open Search.
+document.addEventListener('keydown', ev => { if (ev.key === '/' && S.user && !ev.ctrlKey && !ev.metaKey && !/^(INPUT|TEXTAREA|SELECT)$/.test((ev.target.tagName || '')) && !ev.target.isContentEditable && !$('#dlg').open) { ev.preventDefault(); go('search'); } });
 
 /* ---------- reminders: free one-tap WhatsApp list ---------- */
 VIEWS.reminders = async main => {
@@ -2742,7 +2749,7 @@ VIEWS.settings = async main => {
       '<details style="margin-top:.6rem"><summary><b>How to get the free key</b></summary><ol style="margin:.5rem 0 0 1.1rem;padding:0"><li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and sign in with the centre Google account.</li><li>Click <b>Create API key</b> and copy it.</li><li><b>Do not add billing or a card</b> — without billing Google cannot charge anything; the AI simply pauses when the free daily quota is used.</li><li>Paste it below and click Save.</li></ol></details>' +
       '<form id="ai-key-form" style="margin-top:.7rem"><label class="f"><span>Gemini API key</span><input name="key" type="password" autocomplete="off" placeholder="Paste the key here"></label>' +
       '<div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn primary" id="ai-key-save" type="button">Save key</button><button class="btn" id="ai-key-remove" type="button">Remove key</button></div></form>' +
-      '<p class="muted" style="margin-bottom:0;font-size:.86rem">Switch off with <b>AI_DOUBT_DRAFTS_ENABLED</b> and change the daily cap with <b>AI_DAILY_LIMIT</b> in the list above.</p></div></section>' : '') +
+      '<p class="muted" style="margin-bottom:0;font-size:.86rem">Switch off with <b>AI_DOUBT_DRAFTS_ENABLED</b> / <b>AI_SEARCH_ENABLED</b>. Each feature has its own daily limit (<b>AI_LIMIT_SEARCH</b>, <b>AI_LIMIT_WORKSHEETS</b>, <b>AI_LIMIT_DOUBTS</b>) inside the overall <b>AI_DAILY_LIMIT</b>, all in the list above.</p></div></section>' : '') +
     (superAdmin ? '<section class="section"><h2>Database backups</h2><div class="card"><p>Every Sunday at 2 AM the whole database is saved as one compressed file in the connected Google Drive (folder “Creative Math Zone Backups”). The newest 8 backups are kept. Turn it off with <b>AUTO_BACKUP_ENABLED</b> above. Invoices are also generated automatically on the 1st of each month at 6 AM (<b>AUTO_INVOICE_ENABLED</b>).</p>' +
       '<div id="backup-list"><span class="muted">Loading backups…</span></div><button class="btn primary" id="backup-now" type="button">Back up now</button></div></section>' : '') +
     (superAdmin ? '<section class="section"><h2>Danger zone</h2><div class="card"><p><b>Permanent student delete</b> is <span class="pill ' + (delOn ? 'bad' : 'ok') + '">' + (delOn ? 'ON' : 'OFF') + '</span></p>' +
@@ -2754,7 +2761,8 @@ VIEWS.settings = async main => {
       const s = await api('ai.status');
       $('#ai-status').innerHTML = s.configured
         ? '<p style="margin:0"><span class="pill ok">Key saved</span> ' + (s.enabled ? '<span class="pill ok">ON</span>' : '<span class="pill bad">OFF</span>') +
-          ' &nbsp;Used today: <b>' + s.usedToday + '</b> of ' + s.limit + ' drafts · model ' + esc(s.model) + (s.fromServerSecret ? ' · key from Supabase secret' : '') + '</p>'
+          ' &nbsp;Used today: <b>' + s.usedToday + '</b> of ' + s.limit + ' (all AI) · model ' + esc(s.model) + (s.fromServerSecret ? ' · key from Supabase secret' : '') + '</p>' +
+          ((s.features || []).length ? '<p style="margin:.4rem 0 0">' + s.features.map(f => esc(f.label) + ': <b>' + f.used + '</b> / ' + f.limit).join(' &nbsp;·&nbsp; ') + '</p>' : '')
         : '<p style="margin:0"><span class="pill warn">Not set up</span> Add the free key below to turn on AI drafts.</p>';
       $('#ai-key-remove').hidden = !s.configured || s.fromServerSecret;
     };

@@ -184,8 +184,21 @@ async function callGemini(key: string, model: string, system: string, text: stri
   if (busy || slow) throw new Error('Google’s free AI is very busy right now. Please try again in a few minutes (or try fewer marks).')
   throw new Error(last)
 }
+// Each AI feature has its own daily limit (AI_LIMIT_WORKSHEETS) inside the overall AI_DAILY_LIMIT.
+// Falls back to the single overall counter if the per-feature SQL has not been run yet.
+async function takeAi(admin: any): Promise<string> {
+  const total = Number.parseInt(await setting(admin, 'AI_DAILY_LIMIT', '40'), 10) || 0
+  const own = Number.parseInt(await setting(admin, 'AI_LIMIT_WORKSHEETS', String(total)), 10) || 0
+  const { data, error } = await admin.rpc('ai_take_feature', { p_feature: 'WORKSHEETS', p_feature_limit: own, p_total_limit: total })
+  if (!error) return data ? '' : `Today's AI limit for worksheets (${own}) or for all AI (${total}) is reached. It resets at midnight.`
+  const { data: allowed, error: capError } = await admin.rpc('ai_take', { p_limit: total })
+  if (capError) throw capError
+  return allowed ? '' : `Today's AI limit (${total}) is reached. It resets at midnight.`
+}
 // A failed AI call should not use up one of today's allowed drafts.
 async function refundAi(admin: any) {
+  const { error } = await admin.rpc('ai_refund_feature', { p_feature: 'WORKSHEETS' })
+  if (!error) return
   const day = istToday()
   const { data } = await admin.from('ai_usage').select('calls').eq('day', day).maybeSingle()
   if (data && data.calls > 0) await admin.from('ai_usage').update({ calls: data.calls - 1 }).eq('day', day).eq('calls', data.calls)
@@ -366,10 +379,8 @@ Deno.serve(async (req) => {
       if (batchId && isTeacher && !scope!.batches.has(batchId)) return fail('Choose one of your batches.')
       const key = await geminiKey(admin)
       if (!key) return fail('The AI assistant is not set up yet. Super Admin: add the free Gemini key in Settings → AI assistant.')
-      const limit = Number.parseInt(await setting(admin, 'AI_DAILY_LIMIT', '40'), 10) || 0
-      const { data: allowed, error: capError } = await admin.rpc('ai_take', { p_limit: limit })
-      if (capError) throw capError
-      if (!allowed) return fail(`Today's AI limit (${limit}) is reached. It resets at midnight.`, 429)
+      const capped = await takeAi(admin)
+      if (capped) return fail(capped, 429)
       const { data: subject } = await admin.from('subjects').select('name').eq('id', subjectId).maybeSingle()
       const duration = defaultDuration(totalMarks)
       // Only class, board, subject and topic are sent — no student data.

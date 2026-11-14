@@ -3092,14 +3092,19 @@ Deno.serve(async (request) => {
         await logAction(admin, user, 'AI_KEY_SET', 'SETTING', 'GEMINI_API_KEY', {})
         return response({ ok: true, data: { configured: true } })
       }
-      const [{ data: stored }, { data: usage }, { data: settingRows }] = await Promise.all([
+      const [{ data: stored }, { data: usage }, { data: settingRows }, featureUsage] = await Promise.all([
         admin.from('app_secrets').select('key,created_at').eq('key', 'GEMINI_API_KEY').maybeSingle(),
         admin.from('ai_usage').select('calls').eq('day', todayDate()).maybeSingle(),
-        admin.from('settings').select('setting_key,value').in('setting_key', ['AI_DOUBT_DRAFTS_ENABLED', 'AI_DAILY_LIMIT', 'AI_MODEL']),
+        admin.from('settings').select('setting_key,value').in('setting_key', ['AI_DOUBT_DRAFTS_ENABLED', 'AI_DAILY_LIMIT', 'AI_MODEL', 'AI_SEARCH_ENABLED', 'AI_LIMIT_SEARCH', 'AI_LIMIT_WORKSHEETS', 'AI_LIMIT_DOUBTS']),
+        admin.from('ai_feature_usage').select('feature,calls').eq('day', todayDate()),
       ])
       const s = Object.fromEntries((settingRows || []).map((r) => [r.setting_key, r.value]))
+      const used = new Map(((featureUsage.error ? [] : featureUsage.data) || []).map((r: any) => [r.feature, r.calls]))
+      const features = featureUsage.error ? [] : [['SEARCH', 'Search bar'], ['WORKSHEETS', 'Worksheets'], ['DOUBTS', 'Doubt drafts']]
+        .filter(([k]) => s[`AI_LIMIT_${k}`] != null).map(([k, label]) => ({ key: k, label, used: used.get(k) || 0, limit: Number(s[`AI_LIMIT_${k}`]) || 0 }))
       return response({ ok: true, data: { configured: !!(Deno.env.get('GEMINI_API_KEY') || stored), fromServerSecret: !!Deno.env.get('GEMINI_API_KEY'),
         enabled: String(s.AI_DOUBT_DRAFTS_ENABLED || 'TRUE').toUpperCase() === 'TRUE', limit: Number(s.AI_DAILY_LIMIT || 40),
+        searchEnabled: String(s.AI_SEARCH_ENABLED || 'TRUE').toUpperCase() === 'TRUE', features,
         usedToday: usage?.calls || 0, model: s.AI_MODEL || 'gemini-flash-latest' } })
     }
 
@@ -4491,8 +4496,8 @@ Deno.serve(async (request) => {
       for (const [key, raw] of Object.entries(changes)) {
         if (!existing.has(key) || key === 'STUDENT_DELETE_ENABLED') throw new ApiFault('BAD_REQUEST', `Unknown setting: ${key}`)
         const value = requireText(raw, key, 300, key !== 'SUBJECT_BLOCKED_PAIRS')
-        if (key === 'AI_DAILY_LIMIT' && !/^\d{1,4}$/.test(value)) throw new ApiFault('BAD_REQUEST', 'AI_DAILY_LIMIT must be a number (for example 40).')
-        if (['REGISTRATION_ENABLED', 'AUTO_INVOICE_ENABLED', 'AUTO_BACKUP_ENABLED', 'FEE_REMINDERS_ENABLED', 'ABSENT_ALERTS_ENABLED', 'AI_DOUBT_DRAFTS_ENABLED'].includes(key) && !['TRUE', 'FALSE'].includes(value.toUpperCase())) throw new ApiFault('BAD_REQUEST', `${key} must be TRUE or FALSE.`)
+        if ((key === 'AI_DAILY_LIMIT' || key.startsWith('AI_LIMIT_')) && !/^\d{1,4}$/.test(value)) throw new ApiFault('BAD_REQUEST', `${key} must be a number (for example 20).`)
+        if (['REGISTRATION_ENABLED', 'AUTO_INVOICE_ENABLED', 'AUTO_BACKUP_ENABLED', 'FEE_REMINDERS_ENABLED', 'ABSENT_ALERTS_ENABLED', 'AI_DOUBT_DRAFTS_ENABLED', 'AI_SEARCH_ENABLED'].includes(key) && !['TRUE', 'FALSE'].includes(value.toUpperCase())) throw new ApiFault('BAD_REQUEST', `${key} must be TRUE or FALSE.`)
         if (value !== existing.get(key)) {
           const { error } = await admin.from('settings').update({ value, updated_at: new Date().toISOString(), updated_by: user.id }).eq('setting_key', key)
           if (error) throw error

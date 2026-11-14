@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cmz-pwa-v16';
+const CACHE_NAME = 'cmz-pwa-v17';
 const SHELL_FILES = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const SHELL_FILES = [
   './doubts.js',
   './push.js',
   './worksheets.js',
+  './ai-search.js',
   './pwa.js',
   './installed-app.js',
   './manifest.webmanifest',

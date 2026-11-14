@@ -184,6 +184,31 @@ test('worksheets: no Supabase Storage, text moves to Drive after 7 days, keys hi
   assert.match(wf, /supabase functions deploy worksheets/);
 });
 
+test('AI search: names hidden before the AI, read-only, own permissions, own daily limit', async () => {
+  const fn = await readFile(new URL('../supabase/functions/ai-search/index.ts', import.meta.url), 'utf8');
+  // read-only: no writes to records (only the AI cache table is written)
+  for (const m of fn.matchAll(/\.from\('(\w+)'\)\.(insert|update|upsert|delete)\(/g)) assert.equal(m[1], 'ai_search_cache');
+  assert.doesNotMatch(fn, /\.storage\./);
+  // the AI gets only the masked question text
+  assert.match(fn, /plan = cleanPlan\(await askGemini\(key, systemPrompt\(c\), m\.text\)\)/);
+  assert.match(fn, /const m = maskQuestion\(q, dict\)/);
+  const prompt = fn.slice(fn.indexOf('function systemPrompt('), fn.indexOf('function cleanPlan('));
+  assert.doesNotMatch(prompt, /dict\.|studentRows|info\.get|parent_mobile/);
+  // permissions: teachers limited to their own students/classes; finance needs FINANCE_VIEW
+  assert.match(fn, /dues: \{\s*\n\s*label: 'Fee dues', who: \(c\) => has\(c, 'FINANCE_VIEW'\)/);
+  assert.match(fn, /if \(!spec\.who\(c\)\) return json/);
+  assert.match(fn, /if \(c\.isTeacher\) marks = await onlyMySessions\(c, marks\)/);
+  // separate daily limit, refunded on failure
+  assert.match(fn, /ai_take_feature', \{ p_feature: 'SEARCH'/);
+  assert.match(fn, /catch \(e\) \{ await admin\.rpc\('ai_refund_feature', \{ p_feature: 'SEARCH' \}\); throw e \}/);
+  const sql = await readFile(new URL('../supabase/migrations/20261114060000_ai_search_and_feature_limits.sql', import.meta.url), 'utf8');
+  assert.match(sql, /v_total >= greatest\(p_total_limit, 0\) or v_feature >= greatest\(p_feature_limit, 0\)/);
+  const wf = await readFile(new URL('../.github/workflows/deploy-supabase-api.yml', import.meta.url), 'utf8');
+  assert.match(wf, /supabase functions deploy ai-search/);
+  const cfg = await readFile(new URL('../supabase/config.toml', import.meta.url), 'utf8');
+  assert.match(cfg, /\[functions\.ai-search\]\s*\n#[^\n]*\nverify_jwt = false/);
+});
+
 test('teacher monthly income generation uses student fees, collections, contribution, and preserves prior payouts', () => {
   assert.match(api, /'teacherIncome\.generate':\s*'TEACHER_INCOME_MANAGE'/);
   const block = actionBlock("if (action === 'teacherIncome.generate')", "if (action === 'teacherIncome.list')");
