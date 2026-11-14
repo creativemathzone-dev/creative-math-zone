@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cmz-pwa-v22';
+const CACHE_NAME = 'cmz-pwa-v23';
 const SHELL_FILES = [
   './',
   './index.html',

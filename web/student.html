@@ -693,8 +693,10 @@ let classChangeWatcher=null;
 function startClassChangeWatcher(){
   if(classChangeWatcher)clearInterval(classChangeWatcher);
   let known=null;
+  // Saves the free server quota: checks only while the app is on screen (every 2 minutes),
+  // and once straight away when the student comes back to the app.
   const refresh=async()=>{
-    if(!S.token)return;
+    if(!S.token||document.hidden)return;
     try{
       const rows=await api('student.classChanges'),next=new Map(rows.map(x=>[x.RescheduleID,x.UpdatedAt]));
       if(known){
@@ -705,7 +707,9 @@ function startClassChangeWatcher(){
       known=next;
     }catch(e){if(e&&SESSION_CODES.indexOf(e.code)>=0)fail(e);}
   };
-  refresh();classChangeWatcher=setInterval(refresh,30000);
+  refresh();classChangeWatcher=setInterval(refresh,120000);
+  S.classRefresh=refresh;
+  if(!S.classRefreshHooked){S.classRefreshHooked=true;document.addEventListener('visibilitychange',()=>{if(!document.hidden&&classChangeWatcher&&S.classRefresh)S.classRefresh();});}
 }
 function buildNav(){ $('#nav-items').innerHTML = NAV.map(n => '<button class="item" data-go="'+n[0]+'">'+esc(n[1])+'</button>').join('');
   if (window.CMZBottomNav) CMZBottomNav.mount($('#app'), [['dashboard','🏠','Home'],['homework','📝','Homework'],['doubts','❓','Doubts'],['fees','💳','Fees']], v => go(v)); }

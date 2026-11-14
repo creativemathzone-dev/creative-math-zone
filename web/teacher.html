@@ -728,14 +728,19 @@ VIEWS.live = async (main, sessionId) => {
     });
   };
 
+  // Pauses while the phone is locked or another app is open; refreshes as soon as the teacher is back.
   const tick = async () => {
-    if (stopped) return;
+    if (stopped || document.hidden) return;
     try { const st = await api('teacher.classStatus', { sessionId: sessionId }); if (!stopped) render(st); }
     catch (e) { if (!stopped) fail(e); }
   };
 
   await tick();
   poll = setInterval(tick, lastTotal > 40 ? 8000 : 4000); // big classes refresh a little slower
+  const onVisible = () => { if (!document.hidden) tick(); };
+  document.addEventListener('visibilitychange', onVisible);
+  const prevCleanup = S.liveCleanup;
+  S.liveCleanup = () => { document.removeEventListener('visibilitychange', onVisible); if (prevCleanup) prevCleanup(); };
   // stop polling when navigating away
   window.addEventListener('beforeunload', cleanup, { once: true });
 };

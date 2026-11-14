@@ -2982,7 +2982,7 @@ VIEWS.logs = async main => {
    If something changed (a payment, a registration, a student marking attendance...) the current page is
    redrawn quietly. It never redraws while a dialog is open, while you are typing, or just after you clicked. */
 const SYNC = { v: null, l: null, timer: null, busy: false, pending: false, stale: false, lastInput: 0 };
-const SYNC_MS = 30000;
+const SYNC_MS = 60000; // only while the admin portal is on screen (paused when hidden)
 const NO_LIVE = ['settings', 'student']; // pages with edit forms: tell the user instead of redrawing
 
 ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => { SYNC.lastInput = Date.now(); }, true));
