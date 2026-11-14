@@ -40,6 +40,13 @@ jobs:
           dest=android/app/src/main/java/in/creativemathzone/cmz
           mkdir -p "$dest"
           cp native/PrintPlugin.java native/MainActivity.java "$dest/"
+          # Navy behind the phone's status bar and navigation bar (white icons), so the page
+          # never sits under the clock/battery icons (see adjustMarginsForEdgeToEdge in the config).
+          res=android/app/src/main/res/values
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="cmz_navy">#102447</color>\n</resources>\n' > "$res/cmz_colors.xml"
+          sed -i '/<style name="AppTheme.NoActionBar"/a\        <item name="android:windowBackground">@color/cmz_navy</item>\n        <item name="android:statusBarColor">@color/cmz_navy</item>\n        <item name="android:navigationBarColor">@color/cmz_navy</item>\n        <item name="android:windowLightStatusBar">false</item>' "$res/styles.xml"
+          grep -c "cmz_navy" "$res/styles.xml"
+          cat "$res/styles.xml"
 
       - name: App icon and splash screen from the logo
         run: |
