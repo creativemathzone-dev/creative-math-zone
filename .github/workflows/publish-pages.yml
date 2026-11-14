@@ -44,6 +44,8 @@ jobs:
           cp web/*.html web/*.js _site/web/
           cp web/*.webmanifest _site/web/
           cp -R web/icons _site/web/icons
+          cp -R web/vendor _site/web/vendor
+          test -f _site/web/vendor/supabase-js-2.105.0.js
           test -f downloads/CreativeMathZone.apk
           test -f downloads/CreativeMathZoneStudent.apk
           test -f downloads/CreativeMathZoneTeacher.apk
